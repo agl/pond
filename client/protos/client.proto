@@ -1,0 +1,56 @@
+package protos;
+
+// These protobufs are used for serialising the client's state to disk.
+
+message Contact {
+	required fixed64 id = 1;
+	required string name = 2;
+	required bytes group_key = 3;
+	optional bytes key_exchange_bytes = 4;
+	optional bytes their_group = 5;
+	optional bytes my_group_key = 6;
+	optional uint32 generation = 7;
+	optional string their_server = 8;
+	optional bytes their_pub = 9;
+	optional bytes their_identity_public = 10;
+	optional bytes last_private = 11;
+	optional bytes current_private = 12;
+	optional bytes their_last_public = 13;
+	optional bytes their_current_public = 14;
+
+	optional bool is_pending = 15 [ default = false ];
+}
+
+message Inbox {
+	required fixed64 id = 1;
+	required fixed64 from = 2;
+	required int64 received_time = 3;
+	required bool acked = 4;
+	required bytes message = 5;
+	required bool read = 6;
+}
+
+message Outbox {
+	required fixed64 id = 1;
+	required fixed64 to = 2;
+	required string server = 3;
+	required int64 created = 4;
+	optional int64 sent = 5;
+	required bytes message = 6;
+	optional bytes request = 7;
+	optional int64 acked = 8;
+};
+
+message State {
+	required bytes identity = 1;
+	required bytes public = 2;
+	required bytes private = 3;
+	required string server = 4;
+	required bytes group = 5;
+	required bytes group_private = 6;
+	required uint32 generation = 7;
+
+	repeated Contact contacts = 8;
+	repeated Inbox inbox = 9;
+	repeated Outbox outbox = 10;
+}

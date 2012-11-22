@@ -1,0 +1,9 @@
+package protos;
+
+// Config contains the server's configutation options.
+message Config {
+	required uint32 port = 1;
+	// address is an optional IP address. If given, the server will only
+	// listen on this address.
+	optional string address = 2;
+}

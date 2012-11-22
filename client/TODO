@@ -1,0 +1,7 @@
+Short-term TODOs:
+
+Allow for immediate deletion.
+Expose server queue length in fetches
+Delete messages while UI is open.
+ ? Add delay to server responses.
+Compress messages
