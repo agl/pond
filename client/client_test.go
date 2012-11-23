@@ -126,6 +126,27 @@ func (ui *TestUI) Run() {
 	panic("should never be called")
 }
 
+func (ui *TestUI) processWidget(widget interface{}) {
+	switch v := widget.(type) {
+	case VBox:
+		for _, child := range v.children {
+			ui.processWidget(child)
+		}
+	case HBox:
+		for _, child := range v.children {
+			ui.processWidget(child)
+		}
+	case EventBox:
+		ui.processWidget(v.child)
+	case Scrolled:
+		ui.processWidget(v.child)
+	case TextView:
+		ui.text[v.name] = v.text
+	case Label:
+		ui.text[v.name] = v.text
+	}
+}
+
 func (ui *TestUI) WaitForSignal() error {
 	var uierr error
 	<-ui.signal
@@ -144,6 +165,8 @@ ReadActions:
 				ui.text[action.name] = action.text
 			case SetTextView:
 				ui.text[action.name] = action.text
+			case SetChild:
+				ui.processWidget(action.child)
 			}
 		default:
 			break ReadActions
@@ -167,8 +190,24 @@ func NewTestClient(t *testing.T) (*TestClient, error) {
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
 		return nil, err
 	}
-	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true)
+	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
 	return tc, nil
+}
+
+func (tc *TestClient) Shutdown() {
+	tc.ui.t.Log("Shutting down client")
+	close(tc.ui.events)
+
+	WaitForClient:
+	for {
+		select {
+		case _, ok := <-tc.ui.actions:
+			if !ok {
+				break WaitForClient
+			}
+		case <-tc.ui.signal:
+		}
+	}
 }
 
 func (tc *TestClient) Close() {
@@ -183,6 +222,12 @@ func (tc *TestClient) AdvanceTo(state int) {
 			tc.ui.t.Fatal(err)
 		}
 	}
+}
+
+func (tc *TestClient) Reload() {
+	tc.Shutdown()
+	tc.ui = NewTestUI(tc.ui.t)
+	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
 }
 
 func TestAccountCreation(t *testing.T) {
@@ -396,7 +441,7 @@ func sendMessage(client *TestClient, to string, message string) {
 	<-ackChan
 }
 
-func fetchMessage(client *TestClient) (from, message string) {
+func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
 
@@ -413,9 +458,8 @@ WaitForAck:
 	if len(client.inbox) == 0 {
 		panic("no messages")
 	}
-	m := client.inbox[len(client.inbox)-1]
-	from = client.contacts[m.from].name
-	message = string(m.message.Body)
+	msg = client.inbox[len(client.inbox)-1]
+	from = client.contacts[msg.from].name
 	return
 }
 
@@ -449,7 +493,7 @@ func TestMessageExchange(t *testing.T) {
 		if from != "client1" {
 			t.Fatalf("message from %s, expected client1", from)
 		}
-		if msg != testMsg {
+		if string(msg.message.Body) != testMsg {
 			t.Fatalf("Incorrect message contents: %s", msg)
 		}
 
@@ -458,8 +502,85 @@ func TestMessageExchange(t *testing.T) {
 		if from != "client2" {
 			t.Fatalf("message from %s, expected client2", from)
 		}
-		if msg != testMsg {
+		if string(msg.message.Body) != testMsg {
 			t.Fatalf("Incorrect message contents: %s", msg)
 		}
+	}
+}
+
+func TestHalfPairedMessageExchange(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	proceedToKeyExchange(t, client1, server, "client2")
+	proceedToKeyExchange(t, client2, server, "client1")
+
+	client1KX := client1.ui.text["kxout"]
+	client1.ui.events <- Click{
+		name:      "process",
+		textViews: map[string]string{"kxin": client2.ui.text["kxout"]},
+	}
+	client1.AdvanceTo(uiStateShowContact)
+
+	// Now client1 is paired with client2, but client2 is still pending on
+	// client1.
+
+	// Send a message from client1 to client2.
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, msg := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+	if len(msg.sealed) == 0 {
+		t.Fatalf("no sealed message from client2")
+	}
+	if len(client2.inboxUI.entries) == 0 {
+		t.Fatalf("no pending UI entry in client2")
+	}
+
+	// Check that viewing the message in client2 doesn't crash anything.
+	client2.ui.events <- Click{
+		name:	client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	// Select the pending contact in client2 to complete the key exchange.
+	client2.ui.events <- Click{
+		name:      client2.contactsUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateNewContact)
+	client2.ui.events <- Click{
+		name:      "process",
+		textViews: map[string]string{"kxin": client1KX},
+	}
+	client2.AdvanceTo(uiStateShowContact)
+	client2.ui.events <- Click{
+		name:      client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	if s := client2.ui.text["body"]; s != testMsg {
+		t.Fatalf("resolved message is incorrect: %s", s)
 	}
 }

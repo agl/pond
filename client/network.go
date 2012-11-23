@@ -141,7 +141,36 @@ func (c *client) processFetch(m NewMessage) {
 		c.log.Errorf("Message too small to process from %s", from.name)
 		return
 	}
-	sealed := f.Message
+
+	inboxMsg := &InboxMessage{
+		id:           c.randId(),
+		receivedTime: time.Now(),
+		from:         from.id,
+		sealed:       f.Message,
+	}
+
+	if !from.isPending {
+	 	if !c.unsealMessage(inboxMsg, from) {
+			return
+		}
+		if len(inboxMsg.message.Body) > 0 {
+			subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.Add(inboxMsg.id, from.name, subline, indicatorBlue)
+		}
+	} else {
+		c.inboxUI.Add(inboxMsg.id, from.name, "pending", indicatorRed)
+	}
+
+	c.inbox = append(c.inbox, inboxMsg)
+	c.save()
+}
+
+func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
+	if from.isPending {
+		panic("was asked to unseal message from pending contact")
+	}
+
+	sealed := inboxMsg.sealed
 	var nonce [24]byte
 	copy(nonce[:], sealed)
 	sealed = sealed[24:]
@@ -149,38 +178,41 @@ func (c *client) processFetch(m NewMessage) {
 
 	if !ok {
 		c.log.Errorf("Failed to decrypt message from %s", from.name)
-		return
+		return false
 	}
 
 	if len(plaintext) < 4 {
 		c.log.Errorf("Plaintext too small to process from %s", from.name)
-		return
+		return false
 	}
 
 	mLen := int(binary.LittleEndian.Uint32(plaintext[:4]))
 	plaintext = plaintext[4:]
 	if mLen < 0 || mLen > len(plaintext) {
 		c.log.Errorf("Plaintext length incorrect from %s: %d", from.name, mLen)
-		return
+		return false
 	}
 	plaintext = plaintext[:mLen]
 
 	msg := new(pond.Message)
 	if err := proto.Unmarshal(plaintext, msg); err != nil {
 		c.log.Errorf("Failed to parse mesage from %s: %s", from, err)
-		return
+		return false
 	}
 
 	if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
 		c.log.Errorf("Message from %s with bad DH length %d", from, l)
-		return
+		return false
 	}
 
 	// Check for duplicate message.
 	for _, candidate := range c.inbox {
-		if candidate.from == from.id && *candidate.message.Id == *msg.Id {
+		if candidate.from == from.id &&
+			candidate.id != inboxMsg.id &&
+			candidate.message != nil &&
+			*candidate.message.Id == *msg.Id {
 			c.log.Printf("Dropping duplicate message from %s", from.name)
-			return
+			return false
 		}
 	}
 
@@ -189,15 +221,6 @@ func (c *client) processFetch(m NewMessage) {
 		copy(from.theirLastDHPublic[:], from.theirCurrentDHPublic[:])
 		copy(from.theirCurrentDHPublic[:], msg.MyNextDh)
 	}
-
-	inboxMsg := &InboxMessage{
-		id:           c.randId(),
-		receivedTime: time.Now(),
-		from:         from.id,
-		message:      msg,
-	}
-
-	c.inbox = append(c.inbox, inboxMsg)
 
 	if msg.InReplyTo != nil {
 		id := *msg.InReplyTo
@@ -210,11 +233,11 @@ func (c *client) processFetch(m NewMessage) {
 		}
 	}
 
-	if len(msg.Body) > 0 {
-		subline := time.Unix(*msg.Time, 0).Format(shortTimeFormat)
-		c.inboxUI.Add(inboxMsg.id, from.name, subline, indicatorBlue)
-	}
-	c.save()
+	inboxMsg.message = msg
+	inboxMsg.sealed = nil
+	inboxMsg.read = false
+
+	return true
 }
 
 func (c *client) processMessageSent(id uint64) {

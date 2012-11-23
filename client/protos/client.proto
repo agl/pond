@@ -26,8 +26,9 @@ message Inbox {
 	required fixed64 from = 2;
 	required int64 received_time = 3;
 	required bool acked = 4;
-	required bytes message = 5;
+	optional bytes message = 5;
 	required bool read = 6;
+	optional bytes sealed = 7;
 }
 
 message Outbox {

@@ -147,8 +147,9 @@ type Inbox struct {
 	From             *uint64 `protobuf:"fixed64,2,req,name=from" json:"from,omitempty"`
 	ReceivedTime     *int64  `protobuf:"varint,3,req,name=received_time" json:"received_time,omitempty"`
 	Acked            *bool   `protobuf:"varint,4,req,name=acked" json:"acked,omitempty"`
-	Message          []byte  `protobuf:"bytes,5,req,name=message" json:"message,omitempty"`
+	Message          []byte  `protobuf:"bytes,5,opt,name=message" json:"message,omitempty"`
 	Read             *bool   `protobuf:"varint,6,req,name=read" json:"read,omitempty"`
+	Sealed           []byte  `protobuf:"bytes,7,opt,name=sealed" json:"sealed,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -196,6 +197,13 @@ func (this *Inbox) GetRead() bool {
 		return *this.Read
 	}
 	return false
+}
+
+func (this *Inbox) GetSealed() []byte {
+	if this != nil {
+		return this.Sealed
+	}
+	return nil
 }
 
 type Outbox struct {

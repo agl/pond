@@ -65,6 +65,7 @@ const (
 	uiStateOutbox
 	uiStateShowIdentity
 	uiStatePassphrase
+	uiStateInbox
 )
 
 const shortTimeFormat = "Jan _2 15:04"
@@ -142,7 +143,12 @@ type InboxMessage struct {
 	read         bool
 	receivedTime time.Time
 	from         uint64
+	// sealed contained the encrypted message if the contact who sent this
+	// message is still pending.
+	sealed       []byte
 	acked        bool
+	// message may be nil if the contact who sent this is pending. In this
+	// case, sealed with contain the encrypted message.
 	message      *pond.Message
 }
 
@@ -460,14 +466,21 @@ func (c *client) mainUI() {
 	}
 
 	for _, msg := range c.inbox {
-		if len(msg.message.Body) > 0 {
-			i := indicatorNone
+		var subline string
+		i := indicatorNone
+
+		if msg.message == nil {
+			subline = "pending"
+		} else {
+			if len(msg.message.Body) == 0 {
+				continue
+			}
 			if !msg.read {
 				i = indicatorBlue
 			}
-			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.Add(msg.id, c.contacts[msg.from].name, subline, i)
+			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
+		c.inboxUI.Add(msg.id, c.contacts[msg.from].name, subline, i)
 	}
 
 	c.outboxUI = &listUI{
@@ -651,6 +664,19 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		},
 	}
 	cs.ui.Signal()
+}
+
+func (cs *listUI) Remove(id uint64) {
+	for _, entry := range cs.entries {
+		if entry.id == id {
+			cs.ui.Actions() <- Destroy{name: entry.sepName}
+			cs.ui.Actions() <- Destroy{name: entry.boxName}
+			cs.ui.Signal()
+			return
+		}
+	}
+
+	panic("unknown id passed to Remove")
 }
 
 func (cs *listUI) Deselect() {
@@ -997,20 +1023,29 @@ func (c *client) showInbox(id uint64) interface{} {
 	if msg == nil {
 		panic("failed to find message in inbox")
 	}
-	if !msg.read {
+	if msg.message != nil && !msg.read {
 		msg.read = true
 		c.inboxUI.SetIndicator(id, indicatorNone)
 		c.save()
 	}
 
 	contact := c.contacts[msg.from]
-	msgText := "(cannot display message as encoding is not supported)"
-	if msg.message.BodyEncoding != nil {
-		switch *msg.message.BodyEncoding {
-		case pond.Message_RAW:
-			msgText = string(msg.message.Body)
+	isPending := msg.message == nil
+	var msgText, sentTimeText string
+	if isPending {
+		msgText = "(cannot display message as key exchange is still pending)"
+		sentTimeText = "(unknown)"
+	} else {
+		sentTimeText = time.Unix(*msg.message.Time, 0).Format(time.RFC1123)
+		msgText = "(cannot display message as encoding is not supported)"
+		if msg.message.BodyEncoding != nil {
+			switch *msg.message.BodyEncoding {
+			case pond.Message_RAW:
+				msgText = string(msg.message.Body)
+			}
 		}
 	}
+	eraseTimeText := msg.receivedTime.Add(messageLifetime).Format(time.RFC1123)
 
 	ui := VBox{
 		children: []Widget{
@@ -1060,7 +1095,7 @@ func (c *client) showInbox(id uint64) interface{} {
 										yAlign:     0.5,
 									},
 									Label{
-										text: time.Unix(*msg.message.Time, 0).Format(time.RFC1123),
+										text: sentTimeText,
 									},
 								},
 							},
@@ -1073,7 +1108,7 @@ func (c *client) showInbox(id uint64) interface{} {
 										yAlign:     0.5,
 									},
 									Label{
-										text: time.Unix(*msg.message.Time, 0).Add(messageLifetime).Format(time.RFC1123),
+										text: eraseTimeText,
 									},
 								},
 							},
@@ -1094,6 +1129,7 @@ func (c *client) showInbox(id uint64) interface{} {
 								widgetBase: widgetBase{
 									name:    "reply",
 									padding: 2,
+									insensitive: isPending,
 								},
 								text: "Reply",
 							},
@@ -1101,7 +1137,7 @@ func (c *client) showInbox(id uint64) interface{} {
 								widgetBase: widgetBase{
 									name:        "ack",
 									padding:     2,
-									insensitive: msg.acked,
+									insensitive: isPending || msg.acked,
 								},
 								text: "Ack",
 							},
@@ -1128,6 +1164,7 @@ func (c *client) showInbox(id uint64) interface{} {
 		},
 	}
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
+	c.ui.Actions() <- UIState{uiStateInbox}
 	c.ui.Signal()
 
 	for {
@@ -1588,8 +1625,22 @@ func (c *client) newContactUI(contact *Contact) interface{} {
 		}
 	}
 
-	c.contactsUI.SetSubline(contact.id, "")
 	contact.isPending = false
+
+	// Unseal all pending messages from this new contact.
+	for _, msg := range c.inbox {
+		if msg.message == nil && msg.from == contact.id {
+			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
+				c.inboxUI.Remove(msg.id)
+				continue
+			}
+			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.SetSubline(msg.id, subline)
+			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
+		}
+	}
+
+	c.contactsUI.SetSubline(contact.id, "")
 	contact.kxsBytes = nil
 	c.save()
 	return c.showContact(contact.id)

@@ -106,10 +106,13 @@ func (c *client) unmarshal(state *protos.State) error {
 			receivedTime: time.Unix(*m.ReceivedTime, 0),
 			acked:        *m.Acked,
 			read:         *m.Read,
+			sealed:       m.Sealed,
 		}
-		msg.message = new(pond.Message)
-		if err := proto.Unmarshal(m.Message, msg.message); err != nil {
-			return errors.New("client: corrupt message in inbox: " + err.Error())
+		if len(m.Message) > 0 {
+			msg.message = new(pond.Message)
+			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
+				return errors.New("client: corrupt message in inbox: " + err.Error())
+			}
 		}
 
 		c.inbox = append(c.inbox, msg)
@@ -187,9 +190,12 @@ func (c *client) marshal() []byte {
 			ReceivedTime: proto.Int64(msg.receivedTime.Unix()),
 			Acked:        proto.Bool(msg.acked),
 			Read:         proto.Bool(msg.read),
+			Sealed:       msg.sealed,
 		}
-		if m.Message, err = proto.Marshal(msg.message); err != nil {
-			panic(err)
+		if msg.message != nil {
+			if m.Message, err = proto.Marshal(msg.message); err != nil {
+				panic(err)
+			}
 		}
 		inbox = append(inbox, m)
 	}
