@@ -233,6 +233,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		}
 	}
 
+	from.kxsBytes = nil
 	inboxMsg.message = msg
 	inboxMsg.sealed = nil
 	inboxMsg.read = false

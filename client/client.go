@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -775,6 +776,12 @@ func (c *client) showContact(id uint64) interface{} {
 		{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
 	}
 
+	if len(contact.kxsBytes) > 0 {
+		var out bytes.Buffer
+		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
+		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
+	}
+
 	c.showNameValues("CONTACT", entries)
 	c.ui.Actions() <- UIState{uiStateShowContact}
 	c.ui.Signal()
@@ -825,15 +832,24 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 	}
 
 	for _, ent := range entries {
+		var font string
+		yAlign := float32(0.5)
+		if strings.HasPrefix(ent.value, "-----") {
+			// PEM block
+			font = fontMainMono
+			yAlign = 0
+		}
+
 		ui.children = append(ui.children, HBox{
 			widgetBase: widgetBase{padding: 3},
 			children: []Widget{
 				Label{
 					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
 					text:       ent.name,
-					yAlign:     0.5,
+					yAlign:     yAlign,
 				},
 				Label{
+					widgetBase: widgetBase{font: font},
 					text:       ent.value,
 					selectable: true,
 				},
@@ -1639,7 +1655,6 @@ func (c *client) newContactUI(contact *Contact) interface{} {
 	}
 
 	c.contactsUI.SetSubline(contact.id, "")
-	contact.kxsBytes = nil
 	c.save()
 	return c.showContact(contact.id)
 }
