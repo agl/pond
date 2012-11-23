@@ -1199,6 +1199,8 @@ func (c *client) showInbox(id uint64) interface{} {
 			c.ui.Signal()
 			msg.acked = true
 			c.sendAck(msg)
+			c.ui.Actions() <- UIState{uiStateInbox}
+			c.ui.Signal()
 		case "reply":
 			return c.composeUI(msg)
 		}
