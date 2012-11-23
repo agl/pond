@@ -4,17 +4,27 @@ import (
 	"crypto/rand"
 	"os"
 	"runtime"
+	"flag"
 )
 
+var stateFile *string = flag.String("state-file", "state", "File in which to save persistent state")
+
 func main() {
-	if os.Getenv("POND") != "experimental" {
+	testing := false
+
+	switch os.Getenv("POND") {
+	case "dev":
+		testing = true
+	case "experimental":
+		break
+	default:
 		println("Pond is experimental software and not intended for general use!")
 		os.Exit(1)
 	}
-
 	runtime.GOMAXPROCS(4)
+	flag.Parse()
 
 	ui := NewGTKUI()
-	NewClient("state", ui, rand.Reader, false)
+	NewClient(*stateFile, ui, rand.Reader, testing, true /* autoFetch */)
 	ui.Run()
 }

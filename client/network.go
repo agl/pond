@@ -277,8 +277,8 @@ func parseServer(server string, testing bool) (serverIdentity *[32]byte, host st
 			err = errors.New("host is not a .onion address")
 			return
 		}
+		host += ":16333"
 	}
-	host += ":16333"
 
 	serverIdentity = new([32]byte)
 	copy(serverIdentity[:], serverIdSlice)
@@ -418,8 +418,11 @@ func (c *client) transact() {
 			}
 
 			var timerChan <-chan time.Time
-			if !c.testing {
+			if c.autoFetch {
 				delay := r.ExpFloat64() * transactionRateSeconds
+				if c.testing {
+					delay = 5
+				}
 				c.log.Printf("Next network transaction in %d seconds", int(delay))
 				timerChan = time.After(time.Duration(delay*1000) * time.Millisecond)
 			}

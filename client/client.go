@@ -76,6 +76,9 @@ type client struct {
 	// testing is true in unittests and disables some assertions that are
 	// needed in the real world, but which make testing difficult.
 	testing bool
+	// autoFetch controls whether the network goroutine performs periodic
+	// transactions or waits for outside prompting.
+	autoFetch bool
 
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
@@ -1865,6 +1868,11 @@ func (c *client) createPassphraseUI() {
 }
 
 func (c *client) createAccountUI() {
+	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
+	if c.testing {
+		defaultServer = "pondserver://PXD4DDBLJD3YCC3EC3DGIYVYZYF5GVZC3T6JFHPUWU2WQ7W3CN5Q@127.0.0.1:16333"
+	}
+
 	ui := VBox{
 		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
 		children: []Widget{
@@ -1890,7 +1898,7 @@ func (c *client) createAccountUI() {
 					Entry{
 						widgetBase: widgetBase{name: "server"},
 						width:      60,
-						text:       "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion",
+						text:       defaultServer,
 					},
 				},
 			},
@@ -1983,9 +1991,10 @@ func (c *client) Shutdown() {
 	}
 }
 
-func NewClient(stateFilename string, ui UI, rand io.Reader, testing bool) *client {
+func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
 	c := &client{
 		testing:         testing,
+		autoFetch:       autoFetch,
 		stateFilename:   stateFilename,
 		log:             NewLog(),
 		ui:              ui,
