@@ -5,3 +5,5 @@ Expose server queue length in fetches
 Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
+Need to do something about being overeager to process key exchanges and missing sending one.
+Delete outbox messages on schedule

@@ -145,11 +145,11 @@ type InboxMessage struct {
 	from         uint64
 	// sealed contained the encrypted message if the contact who sent this
 	// message is still pending.
-	sealed       []byte
-	acked        bool
+	sealed []byte
+	acked  bool
 	// message may be nil if the contact who sent this is pending. In this
 	// case, sealed with contain the encrypted message.
-	message      *pond.Message
+	message *pond.Message
 }
 
 // NewMessage is sent from the network goroutine to the client goroutine and
@@ -998,12 +998,12 @@ func (c *client) sendAck(msg *InboxMessage) {
 
 	id := c.randId()
 	err := c.send(to, &pond.Message{
-		Id:        proto.Uint64(id),
-		Time:      proto.Int64(time.Now().Unix()),
-		Body:      make([]byte, 0),
+		Id:           proto.Uint64(id),
+		Time:         proto.Int64(time.Now().Unix()),
+		Body:         make([]byte, 0),
 		BodyEncoding: pond.Message_RAW.Enum(),
-		MyNextDh:  nextDHPub[:],
-		InReplyTo: msg.message.Id,
+		MyNextDh:     nextDHPub[:],
+		InReplyTo:    msg.message.Id,
 	})
 	if err != nil {
 		c.log.Errorf("Error sending message: %s", err)
@@ -1125,8 +1125,8 @@ func (c *client) showInbox(id uint64) interface{} {
 						children: []Widget{
 							Button{
 								widgetBase: widgetBase{
-									name:    "reply",
-									padding: 2,
+									name:        "reply",
+									padding:     2,
 									insensitive: isPending,
 								},
 								text: "Reply",

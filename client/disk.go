@@ -164,7 +164,7 @@ func (c *client) marshal() []byte {
 			GroupKey:         contact.groupKey.Marshal(),
 			IsPending:        proto.Bool(contact.isPending),
 			KeyExchangeBytes: contact.kxsBytes,
-			LastPrivate: contact.lastDHPrivate[:],
+			LastPrivate:      contact.lastDHPrivate[:],
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()

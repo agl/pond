@@ -198,7 +198,7 @@ func (tc *TestClient) Shutdown() {
 	tc.ui.t.Log("Shutting down client")
 	close(tc.ui.events)
 
-	WaitForClient:
+WaitForClient:
 	for {
 		select {
 		case _, ok := <-tc.ui.actions:
@@ -571,7 +571,7 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 
 	// Check that viewing the message in client2 doesn't crash anything.
 	client2.ui.events <- Click{
-		name:	client2.inboxUI.entries[0].boxName,
+		name: client2.inboxUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateInbox)
 
@@ -580,7 +580,7 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 
 	// Select the pending contact in client2 to complete the key exchange.
 	client2.ui.events <- Click{
-		name:      client2.contactsUI.entries[0].boxName,
+		name: client2.contactsUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateNewContact)
 	client2.ui.events <- Click{
@@ -589,7 +589,7 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	}
 	client2.AdvanceTo(uiStateShowContact)
 	client2.ui.events <- Click{
-		name:      client2.inboxUI.entries[0].boxName,
+		name: client2.inboxUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateInbox)
 

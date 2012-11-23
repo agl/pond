@@ -150,7 +150,7 @@ func (c *client) processFetch(m NewMessage) {
 	}
 
 	if !from.isPending {
-	 	if !c.unsealMessage(inboxMsg, from) {
+		if !c.unsealMessage(inboxMsg, from) {
 			return
 		}
 		if len(inboxMsg.message.Body) > 0 {
@@ -423,7 +423,7 @@ func (c *client) doCreateAccount() error {
 // transactionRateSeconds is the mean of the exponential distribution that
 // we'll sample in order to distribute the time between our network
 // connections.
-const transactionRateSeconds = 300  // five minutes
+const transactionRateSeconds = 300 // five minutes
 
 func (c *client) transact() {
 	var seedBytes [8]byte

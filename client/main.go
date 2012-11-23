@@ -2,9 +2,9 @@ package main
 
 import (
 	"crypto/rand"
+	"flag"
 	"os"
 	"runtime"
-	"flag"
 )
 
 var stateFile *string = flag.String("state-file", "state", "File in which to save persistent state")
