@@ -365,6 +365,19 @@ func TestKeyExchange(t *testing.T) {
 	proceedToKeyExchange(t, client1, server, "client2")
 	proceedToKeyExchange(t, client2, server, "client1")
 
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+	client1.ui.events <- Click{
+		name: client1.contactsUI.entries[0].boxName,
+	}
+	client1.AdvanceTo(uiStateNewContact)
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+	client2.ui.events <- Click{
+		name: client2.contactsUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateNewContact)
+
 	client1.ui.events <- Click{
 		name:      "process",
 		textViews: map[string]string{"kxin": "rubbish"},

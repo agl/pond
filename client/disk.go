@@ -65,6 +65,7 @@ func (c *client) unmarshal(state *protos.State) error {
 		if contact.groupKey, ok = new(bbssig.MemberKey).Unmarshal(c.groupPriv.Group, cont.GroupKey); !ok {
 			return errors.New("client: failed to unmarshal group member key")
 		}
+		copy(contact.lastDHPrivate[:], cont.LastPrivate)
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
 			continue
@@ -93,7 +94,6 @@ func (c *client) unmarshal(state *protos.State) error {
 		}
 		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
 
-		copy(contact.lastDHPrivate[:], cont.LastPrivate)
 		copy(contact.currentDHPrivate[:], cont.CurrentPrivate)
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
@@ -164,6 +164,7 @@ func (c *client) marshal() []byte {
 			GroupKey:         contact.groupKey.Marshal(),
 			IsPending:        proto.Bool(contact.isPending),
 			KeyExchangeBytes: contact.kxsBytes,
+			LastPrivate: contact.lastDHPrivate[:],
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
@@ -171,7 +172,6 @@ func (c *client) marshal() []byte {
 			cont.TheirServer = proto.String(contact.theirServer)
 			cont.TheirPub = contact.theirPub[:]
 			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
-			cont.LastPrivate = contact.lastDHPrivate[:]
 			cont.CurrentPrivate = contact.currentDHPrivate[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
