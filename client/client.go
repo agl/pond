@@ -1000,6 +1000,8 @@ func (c *client) sendAck(msg *InboxMessage) {
 	err := c.send(to, &pond.Message{
 		Id:        proto.Uint64(id),
 		Time:      proto.Int64(time.Now().Unix()),
+		Body:      make([]byte, 0),
+		BodyEncoding: pond.Message_RAW.Enum(),
 		MyNextDh:  nextDHPub[:],
 		InReplyTo: msg.message.Id,
 	})
