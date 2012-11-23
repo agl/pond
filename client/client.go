@@ -634,26 +634,22 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		})
 	}
 
-	if indicator != indicatorNone {
-		sublineChildren = append(sublineChildren, Image{
-			widgetBase: widgetBase{
-				padding: 4,
-				expand:  true,
-				fill:    true,
-				name:    c.imageName,
-			},
-			image:  indicator,
-			xAlign: 1,
-			yAlign: 0.5,
-		})
-	}
+	sublineChildren = append(sublineChildren, Image{
+		widgetBase: widgetBase{
+			padding: 4,
+			expand:  true,
+			fill:    true,
+			name:    c.imageName,
+		},
+		image:  indicator,
+		xAlign: 1,
+		yAlign: 0.5,
+	})
 
-	if len(sublineChildren) > 0 {
-		children = append(children, HBox{
-			widgetBase: widgetBase{padding: 1},
-			children:   sublineChildren,
-		})
-	}
+	children = append(children, HBox{
+		widgetBase: widgetBase{padding: 1},
+		children:   sublineChildren,
+	})
 
 	cs.ui.Actions() <- AddToBox{
 		box: cs.vboxName,
