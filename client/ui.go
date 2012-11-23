@@ -121,6 +121,7 @@ type TextView struct {
 	widgetBase
 	editable bool
 	text     string
+	wrap     bool
 }
 
 type Combo struct {

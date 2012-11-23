@@ -250,6 +250,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			buffer.SetText(v.text)
 			view.SetBuffer(buffer)
 		}
+		if v.wrap {
+			view.SetWrapMode(gtk.GTK_WRAP_WORD_CHAR)
+		}
 		if name := v.name; len(name) > 0 {
 			ui.textViews[name] = view
 			view.Connect("destroy", func() {

@@ -920,6 +920,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			TextView{
 				widgetBase: widgetBase{expand: true, fill: true, name: "body"},
 				editable:   true,
+				wrap:       true,
 			},
 		},
 	}
@@ -1174,6 +1175,7 @@ func (c *client) showInbox(id uint64) interface{} {
 				widgetBase: widgetBase{expand: true, fill: true, name: "body"},
 				editable:   false,
 				text:       msgText,
+				wrap:       true,
 			},
 		},
 	}
