@@ -1544,6 +1544,7 @@ func (c *client) showOutbox(id uint64) interface{} {
 				widgetBase: widgetBase{expand: true, fill: true, name: "body"},
 				editable:   false,
 				text:       string(msg.message.Body),
+				wrap:       true,
 			},
 		},
 	}
