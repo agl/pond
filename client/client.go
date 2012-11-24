@@ -2013,6 +2013,7 @@ func (c *client) keyPromptUI(state []byte) error {
 					Entry{
 						widgetBase: widgetBase{name: "pw"},
 						width:      60,
+						password:   true,
 					},
 				},
 			},
@@ -2111,6 +2112,7 @@ func (c *client) createPassphraseUI() {
 					Entry{
 						widgetBase: widgetBase{name: "pw"},
 						width:      60,
+						password:   true,
 					},
 				},
 			},

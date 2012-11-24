@@ -92,8 +92,9 @@ type Label struct {
 
 type Entry struct {
 	widgetBase
-	text  string
-	width int
+	text     string
+	width    int
+	password bool
 }
 
 type Button struct {

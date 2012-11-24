@@ -220,6 +220,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 				ui.clicked(v.name)
 			})
 		}
+		if v.password {
+			entry.SetVisibility(false)
+		}
 		configureWidget(&entry.GtkWidget, v.widgetBase)
 		return entry
 	case Button:
