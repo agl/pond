@@ -446,7 +446,6 @@ func (c *client) mainUI() {
 	}
 
 	c.ui.Actions() <- Reset{ui}
-	c.ui.Actions() <- UIState{uiStateMain}
 	c.ui.Signal()
 
 	c.contactsUI = &listUI{
@@ -507,6 +506,9 @@ func (c *client) mainUI() {
 	)
 	c.clientUI.Add(clientUIIdentity, "Identity", "", indicatorNone)
 	c.clientUI.Add(clientUIActivity, "Activity Log", "", indicatorNone)
+
+	c.ui.Actions() <- UIState{uiStateMain}
+	c.ui.Signal()
 
 	var nextEvent interface{}
 	for {
