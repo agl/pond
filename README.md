@@ -62,7 +62,7 @@ Message encryption
 
 Message encryption follows the lead of OTR. Parties exchange a stream of Diffie-Hellman public values as they exchange messages. We omit OTR's key identifier because that counter reveals information about the number of messages that a pair of users have exchanged. Rather we simply use trial decryption to find the DH values that a particular message is using.
 
-In addition to omitting the key identifier, we also omit OTR's anti-reply counter for the same reason. This allows servers to replay messages to users, although each message has a unique ID and a timestamp. Users have a time-limited anti-replay window within which duplicate messages are suppressed and, outside of that, using the timestamp on the message is viable and abnormally old messages should be highlighted.
+In addition to omitting the key identifier, we also omit OTR's anti-replay counter for the same reason. This allows servers to replay messages to users, although each message has a unique ID and a timestamp. Users have a time-limited anti-replay window within which duplicate messages are suppressed and, outside of that, using the timestamp on the message is viable and abnormally old messages should be highlighted.
 
 As a matter of custom, users delete messages after a number of days (currently a week). Of course, there is nothing to enforce this in the same way that there's nothing to enforce the custom that OTR IM conversations aren't logged.
 
