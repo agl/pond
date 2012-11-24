@@ -499,6 +499,13 @@ func TestMessageExchange(t *testing.T) {
 
 	proceedToPaired(t, client1, client2, server)
 
+	var initialCurrentDH [32]byte
+	for _, contact := range client1.contacts {
+		if contact.name == "client2" {
+			copy(initialCurrentDH[:], contact.currentDHPrivate[:])
+		}
+	}
+
 	for i := 0; i < 3; i++ {
 		testMsg := fmt.Sprintf("test message %d", i)
 		sendMessage(client1, "client2", testMsg)
@@ -517,6 +524,15 @@ func TestMessageExchange(t *testing.T) {
 		}
 		if string(msg.message.Body) != testMsg {
 			t.Fatalf("Incorrect message contents: %s", msg)
+		}
+	}
+
+	// Ensure that the DH secrets are advancing.
+	for _, contact := range client1.contacts {
+		if contact.name == "client2" {
+			if bytes.Equal(initialCurrentDH[:], contact.currentDHPrivate[:]) {
+				t.Fatalf("DH secrets aren't advancing!")
+			}
 		}
 	}
 }

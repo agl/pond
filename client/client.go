@@ -1968,10 +1968,10 @@ func (c *client) randId() uint64 {
 func (c *client) newKeyExchange(contact *Contact) []byte {
 	var err error
 	c.randBytes(contact.lastDHPrivate[:])
+	c.randBytes(contact.currentDHPrivate[:])
 
 	var pub [32]byte
 	curve25519.ScalarBaseMult(&pub, &contact.lastDHPrivate)
-
 	if contact.groupKey, err = c.groupPriv.NewMember(c.rand); err != nil {
 		panic(err)
 	}
