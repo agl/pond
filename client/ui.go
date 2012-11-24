@@ -119,9 +119,9 @@ type Scrolled struct {
 
 type TextView struct {
 	widgetBase
-	editable bool
-	text     string
-	wrap     bool
+	editable       bool
+	text           string
+	wrap           bool
 	updateOnChange bool
 }
 
@@ -154,9 +154,9 @@ type Update struct {
 }
 
 type OpenResult struct {
-	ok bool
+	ok   bool
 	path string
-	arg interface{}
+	arg  interface{}
 }
 
 type Append struct {
@@ -222,13 +222,13 @@ type Destroy struct {
 }
 
 type FileOpen struct {
-	save bool
+	save  bool
 	title string
-	arg interface{}
+	arg   interface{}
 }
 
 type SetForeground struct {
-	name string
+	name       string
 	foreground uint32
 }
 

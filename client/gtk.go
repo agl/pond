@@ -398,9 +398,9 @@ func (ui *GTKUI) handle(action interface{}) {
 		switch gtk.GtkResponseType(dialog.Run()) {
 		case gtk.GTK_RESPONSE_ACCEPT:
 			ui.events <- OpenResult{
-				ok: true,
+				ok:   true,
 				path: dialog.GetFilename(),
-				arg: action.arg,
+				arg:  action.arg,
 			}
 		default:
 			ui.events <- OpenResult{arg: action.arg}

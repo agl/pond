@@ -872,7 +872,7 @@ func usageString(body string, isReply bool, attachments map[uint64]*pond.Message
 
 	msg := &pond.Message{
 		Id:           proto.Uint64(0),
-		Time:         proto.Int64(1<<62),
+		Time:         proto.Int64(1 << 62),
 		Body:         []byte(body),
 		BodyEncoding: pond.Message_RAW.Enum(),
 		InReplyTo:    replyToId,
@@ -984,7 +984,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					},
 					Label{
 						widgetBase: widgetBase{name: "usage"},
-						text: initialUsageMessage,
+						text:       initialUsageMessage,
 					},
 				},
 			},
@@ -998,22 +998,22 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					},
 					Button{
 						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
-						text: "+",
+						text:       "+",
 					},
 				},
 			},
 			HBox{
 				widgetBase: widgetBase{padding: 0},
 				children: []Widget{
-					VBox {
+					VBox{
 						widgetBase: widgetBase{name: "filesvbox", padding: 25},
 					},
 				},
 			},
 			TextView{
-				widgetBase: widgetBase{expand: true, fill: true, name: "body"},
-				editable:   true,
-				wrap:       true,
+				widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+				editable:       true,
+				wrap:           true,
 				updateOnChange: true,
 			},
 		},
@@ -1046,14 +1046,14 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			if err != nil {
 				label = Label{
 					widgetBase: widgetBase{foreground: colorRed, padding: 2},
-					yAlign: 0.5,
-					text: base + ": " + err.Error(),
+					yAlign:     0.5,
+					text:       base + ": " + err.Error(),
 				}
 			} else {
 				label = Label{
 					widgetBase: widgetBase{padding: 2},
-					yAlign: 0.5,
-					text: fmt.Sprintf("%s (%d bytes)", base, len(contents)),
+					yAlign:     0.5,
+					text:       fmt.Sprintf("%s (%d bytes)", base, len(contents)),
 				}
 				attachments[id] = &pond.Message_Attachment{
 					Filename: proto.String(filepath.Base(open.path)),
@@ -1072,7 +1072,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 							label,
 							Button{
 								widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-								text: "Remove",
+								text:       "Remove",
 							},
 						},
 					},
@@ -1369,7 +1369,7 @@ func (c *client) showInbox(id uint64) interface{} {
 					Label{text: filename, yAlign: 0.5},
 					Button{
 						widgetBase: widgetBase{name: fmt.Sprintf("attachment-%d", i), padding: 3},
-						text: "Save",
+						text:       "Save",
 					},
 				},
 			})
@@ -1377,7 +1377,7 @@ func (c *client) showInbox(id uint64) interface{} {
 		attachmentsUI := []Widget{
 			HBox{
 				widgetBase: widgetBase{padding: 3},
-				children: []Widget {
+				children: []Widget{
 					Label{
 						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
 						text:       "ATTACHMENTS",
@@ -1387,10 +1387,10 @@ func (c *client) showInbox(id uint64) interface{} {
 			},
 			HBox{
 				widgetBase: widgetBase{padding: 3},
-				children: []Widget {
+				children: []Widget{
 					VBox{
 						widgetBase: widgetBase{padding: 25},
-						children: attachmentWidgets,
+						children:   attachmentWidgets,
 					},
 				},
 			},
@@ -1418,9 +1418,9 @@ func (c *client) showInbox(id uint64) interface{} {
 		if strings.HasPrefix(click.name, "attachment-") {
 			i, _ := strconv.Atoi(click.name[11:])
 			c.ui.Actions() <- FileOpen{
-				save: true,
+				save:  true,
 				title: "Save Attachment",
-				arg: i}
+				arg:   i}
 			c.ui.Signal()
 			continue
 		}

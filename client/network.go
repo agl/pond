@@ -32,7 +32,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		return err
 	}
 
-	if len(messageBytes)> pond.MaxSerializedMessage {
+	if len(messageBytes) > pond.MaxSerializedMessage {
 		return errors.New("message too large")
 	}
 
