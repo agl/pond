@@ -69,7 +69,7 @@ As a matter of custom, users delete messages after a number of days (currently a
 Spam
 ----
 
-Since the bandwidth of this system is so low, a user can trivially be incapacitated by a small number of messages. Because we this, we make the system closed: only authorised users can cause a message to be queued for delivery. This very clearly sets Pond apart from email. There are no public addresses to which a Pond message can be sent. Likewise, it's no longer true that the network is fully connected; if you send a message to two people, they may not be able to reply to each other.
+Since the bandwidth of this system is so low, a user can trivially be incapacitated by a small number of messages. Because of this, we make the system closed: only authorised users can cause a message to be queued for delivery. This very clearly sets Pond apart from email. There are no public addresses to which a Pond message can be sent. Likewise, it's no longer true that the network is fully connected; if you send a message to two people, they may not be able to reply to each other.
 
 This policy has to be enforced at the servers as they're the parties who accept and enqueue messages. However, we don't want the servers to learn who is sending each message, so we cannot have them authenticate against a list of allowed senders for each user. We could give all allowed senders some shared secret, but then we cannot revoke someone's access without rekeying the entire user's contact list.
 
