@@ -901,17 +901,18 @@ func attachmentsMapToList(attachments map[uint64]*pond.Message_Attachment) []*po
 	return ret
 }
 
-func (c *client) updateUsage(text string, isReply bool, attachments map[uint64]*pond.Message_Attachment) {
+func (c *client) updateUsage(text string, isReply, validContactSelected bool, attachments map[uint64]*pond.Message_Attachment) bool {
 	usageMessage, over := usageString(text, isReply, attachments)
 	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
 	color := uint32(colorBlack)
 	if over {
 		color = colorRed
 		c.ui.Actions() <- Sensitive{name: "send", sensitive: false}
-	} else {
+	} else if validContactSelected {
 		c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
 	}
 	c.ui.Actions() <- SetForeground{name: "usage", foreground: color}
+	return over
 }
 
 func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
@@ -929,6 +930,8 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 
 	initialUsageMessage, _ := usageString("", inReplyTo != nil, nil)
 	var lastText string
+	validContactSelected := len(preSelected) > 0
+	overSize := false
 
 	ui := VBox{
 		children: []Widget{
@@ -969,7 +972,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 						widgetBase: widgetBase{expand: true},
 					},
 					Button{
-						widgetBase: widgetBase{packEnd: true, padding: 10, name: "send"},
+						widgetBase: widgetBase{packEnd: true, padding: 10, name: "send", insensitive: !validContactSelected},
 						text:       "Send",
 					},
 				},
@@ -1032,7 +1035,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 
 		if update, ok := event.(Update); ok {
 			lastText = update.text
-			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
 			c.ui.Signal()
 			continue
 		}
@@ -1078,7 +1081,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					},
 				},
 			}
-			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
 			c.ui.Signal()
 		}
 
@@ -1091,6 +1094,17 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 				title: "Attach File",
 			}
 			c.ui.Signal()
+			continue
+		}
+		if click.name == "to" {
+			if len(click.combos["to"]) > 0 {
+				validContactSelected = true
+			}
+			if validContactSelected && !overSize {
+				c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
+				c.ui.Signal()
+			}
+			continue
 		}
 		if strings.HasPrefix(click.name, "remove-") {
 			// One of the attachment remove buttons.
@@ -1100,8 +1114,9 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			}
 			c.ui.Actions() <- Destroy{name: "attachment-hbox-" + click.name[7:]}
 			delete(attachments, id)
-			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
 			c.ui.Signal()
+			continue
 		}
 		if click.name != "send" {
 			continue

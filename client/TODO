@@ -6,5 +6,3 @@ Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
 Delete outbox messages on schedule
-Hide the passphrase when typed.
-Make the Send button insensitive until a contact has been selected.

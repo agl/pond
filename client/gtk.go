@@ -295,6 +295,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			combo.Connect("destroy", func() {
 				delete(ui.combos, name)
 			})
+			combo.Connect("changed", func() {
+				ui.clicked(v.name)
+			})
 		}
 		configureWidget(&combo.GtkWidget, v.widgetBase)
 		return combo
