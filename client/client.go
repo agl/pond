@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -860,6 +861,59 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
 }
 
+// usageString returns a description of the amount of space taken up by a body
+// with the given contents and a bool indicating overflow.
+func usageString(body string, isReply bool, attachments map[uint64]*pond.Message_Attachment) (string, bool) {
+	var replyToId *uint64
+	if isReply {
+		replyToId = proto.Uint64(1)
+	}
+	var dhPub [32]byte
+
+	msg := &pond.Message{
+		Id:           proto.Uint64(0),
+		Time:         proto.Int64(1<<62),
+		Body:         []byte(body),
+		BodyEncoding: pond.Message_RAW.Enum(),
+		InReplyTo:    replyToId,
+		MyNextDh:     dhPub[:],
+		Files:        attachmentsMapToList(attachments),
+	}
+
+	serialized, err := proto.Marshal(msg)
+	if err != nil {
+		panic("error while serialising candidate Message: " + err.Error())
+	}
+
+	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
+	return s, len(serialized) > pond.MaxSerializedMessage
+}
+
+func attachmentsMapToList(attachments map[uint64]*pond.Message_Attachment) []*pond.Message_Attachment {
+	if attachments == nil {
+		return nil
+	}
+
+	var ret []*pond.Message_Attachment
+	for _, attachment := range attachments {
+		ret = append(ret, attachment)
+	}
+	return ret
+}
+
+func (c *client) updateUsage(text string, isReply bool, attachments map[uint64]*pond.Message_Attachment) {
+	usageMessage, over := usageString(text, isReply, attachments)
+	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
+	color := uint32(colorBlack)
+	if over {
+		color = colorRed
+		c.ui.Actions() <- Sensitive{name: "send", sensitive: false}
+	} else {
+		c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
+	}
+	c.ui.Actions() <- SetForeground{name: "usage", foreground: color}
+}
+
 func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 	var contactNames []string
 	for _, contact := range c.contacts {
@@ -872,6 +926,9 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			preSelected = from.name
 		}
 	}
+
+	initialUsageMessage, _ := usageString("", inReplyTo != nil, nil)
+	var lastText string
 
 	ui := VBox{
 		children: []Widget{
@@ -893,7 +950,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			},
 			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 			HBox{
-				widgetBase: widgetBase{padding: 10},
+				widgetBase: widgetBase{padding: 2},
 				children: []Widget{
 					Label{
 						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
@@ -917,10 +974,47 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					},
 				},
 			},
+			HBox{
+				widgetBase: widgetBase{padding: 2},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "SIZE",
+						yAlign:     0.5,
+					},
+					Label{
+						widgetBase: widgetBase{name: "usage"},
+						text: initialUsageMessage,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 0},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "ATTACHMENTS",
+						yAlign:     0.5,
+					},
+					Button{
+						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
+						text: "+",
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 0},
+				children: []Widget{
+					VBox {
+						widgetBase: widgetBase{name: "filesvbox", padding: 25},
+					},
+				},
+			},
 			TextView{
 				widgetBase: widgetBase{expand: true, fill: true, name: "body"},
 				editable:   true,
 				wrap:       true,
+				updateOnChange: true,
 			},
 		},
 	}
@@ -928,15 +1022,86 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 	c.ui.Actions() <- UIState{uiStateCompose}
 	c.ui.Signal()
 
+	attachments := make(map[uint64]*pond.Message_Attachment)
+
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
 			return event
 		}
 
+		if update, ok := event.(Update); ok {
+			lastText = update.text
+			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			c.ui.Signal()
+			continue
+		}
+
+		if open, ok := event.(OpenResult); ok && open.ok {
+			base := filepath.Base(open.path)
+			contents, err := ioutil.ReadFile(open.path)
+			id := c.randId()
+
+			var label Widget
+			if err != nil {
+				label = Label{
+					widgetBase: widgetBase{foreground: colorRed, padding: 2},
+					yAlign: 0.5,
+					text: base + ": " + err.Error(),
+				}
+			} else {
+				label = Label{
+					widgetBase: widgetBase{padding: 2},
+					yAlign: 0.5,
+					text: fmt.Sprintf("%s (%d bytes)", base, len(contents)),
+				}
+				attachments[id] = &pond.Message_Attachment{
+					Filename: proto.String(filepath.Base(open.path)),
+					Contents: contents,
+				}
+			}
+
+			c.ui.Actions() <- Append{
+				name: "filesvbox",
+				children: []Widget{
+					HBox{
+						widgetBase: widgetBase{
+							name: fmt.Sprintf("attachment-hbox-%x", id),
+						},
+						children: []Widget{
+							label,
+							Button{
+								widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+								text: "Remove",
+							},
+						},
+					},
+				},
+			}
+			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			c.ui.Signal()
+		}
+
 		click, ok := event.(Click)
 		if !ok {
 			continue
+		}
+		if click.name == "attach" {
+			c.ui.Actions() <- FileOpen{
+				title: "Attach File",
+			}
+			c.ui.Signal()
+		}
+		if strings.HasPrefix(click.name, "remove-") {
+			// One of the attachment remove buttons.
+			id, err := strconv.ParseUint(click.name[7:], 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- Destroy{name: "attachment-hbox-" + click.name[7:]}
+			delete(attachments, id)
+			c.updateUsage(lastText, inReplyTo != nil, attachments)
+			c.ui.Signal()
 		}
 		if click.name != "send" {
 			continue
@@ -963,17 +1128,25 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			replyToId = inReplyTo.message.Id
 		}
 
+		body := click.textViews["body"]
+		// Zero length bodies are ACKs.
+		if len(body) == 0 {
+			body = " "
+		}
+
 		id := c.randId()
 		err := c.send(to, &pond.Message{
 			Id:           proto.Uint64(id),
 			Time:         proto.Int64(time.Now().Unix()),
-			Body:         []byte(click.textViews["body"]),
+			Body:         []byte(body),
 			BodyEncoding: pond.Message_RAW.Enum(),
 			InReplyTo:    replyToId,
 			MyNextDh:     nextDHPub[:],
+			Files:        attachmentsMapToList(attachments),
 		})
 		if err != nil {
 			// TODO: handle this case better.
+			println(err.Error())
 			c.log.Errorf("Error sending message: %s", err)
 			continue
 		}
@@ -1087,6 +1260,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			HBox{
 				children: []Widget{
 					VBox{
+						widgetBase: widgetBase{name: "lhs"},
 						children: []Widget{
 							HBox{
 								widgetBase: widgetBase{padding: 3},
@@ -1180,6 +1354,50 @@ func (c *client) showInbox(id uint64) interface{} {
 		},
 	}
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
+
+	if msg.message != nil && len(msg.message.Files) != 0 {
+		var attachmentWidgets []Widget
+		for i, attachment := range msg.message.Files {
+			filename := *attachment.Filename
+			if runes := []rune(filename); len(runes) > 30 {
+				runes = runes[:30]
+				runes = append(runes, 0x2026 /* ellipsis */)
+				filename = string(runes)
+			}
+			attachmentWidgets = append(attachmentWidgets, HBox{
+				children: []Widget{
+					Label{text: filename, yAlign: 0.5},
+					Button{
+						widgetBase: widgetBase{name: fmt.Sprintf("attachment-%d", i), padding: 3},
+						text: "Save",
+					},
+				},
+			})
+		}
+		attachmentsUI := []Widget{
+			HBox{
+				widgetBase: widgetBase{padding: 3},
+				children: []Widget {
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "ATTACHMENTS",
+						yAlign:     0.5,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 3},
+				children: []Widget {
+					VBox{
+						widgetBase: widgetBase{padding: 25},
+						children: attachmentWidgets,
+					},
+				},
+			},
+		}
+		c.ui.Actions() <- Append{name: "lhs", children: attachmentsUI}
+	}
+
 	c.ui.Actions() <- UIState{uiStateInbox}
 	c.ui.Signal()
 
@@ -1189,8 +1407,21 @@ func (c *client) showInbox(id uint64) interface{} {
 			return event
 		}
 
+		if open, ok := event.(OpenResult); ok && open.ok {
+			ioutil.WriteFile(open.path, msg.message.Files[open.arg.(int)].Contents, 0600)
+		}
+
 		click, ok := event.(Click)
 		if !ok {
+			continue
+		}
+		if strings.HasPrefix(click.name, "attachment-") {
+			i, _ := strconv.Atoi(click.name[11:])
+			c.ui.Actions() <- FileOpen{
+				save: true,
+				title: "Save Attachment",
+				arg: i}
+			c.ui.Signal()
 			continue
 		}
 		switch click.name {

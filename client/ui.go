@@ -122,6 +122,7 @@ type TextView struct {
 	editable bool
 	text     string
 	wrap     bool
+	updateOnChange bool
 }
 
 type Combo struct {
@@ -145,6 +146,17 @@ type Click struct {
 	entries   map[string]string
 	textViews map[string]string
 	combos    map[string]string
+}
+
+type Update struct {
+	name string
+	text string
+}
+
+type OpenResult struct {
+	ok bool
+	path string
+	arg interface{}
 }
 
 type Append struct {
@@ -207,6 +219,17 @@ type SetFocus struct {
 
 type Destroy struct {
 	name string
+}
+
+type FileOpen struct {
+	save bool
+	title string
+	arg interface{}
+}
+
+type SetForeground struct {
+	name string
+	foreground uint32
 }
 
 type UIState struct {

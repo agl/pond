@@ -159,4 +159,10 @@ message Message {
 	// in_reply_to, if set, contains the |id| value of a previous message
 	// sent by the recipient.
 	optional uint64 in_reply_to = 6;
+
+	message Attachment {
+		required string filename = 1;
+		required bytes contents = 2;
+	}
+	repeated Attachment files = 7;
 }

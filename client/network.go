@@ -32,11 +32,11 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		return err
 	}
 
-	if len(messageBytes)+4+box.Overhead+pond.MessageOverhead+len(nonce) > pond.TransportSize {
+	if len(messageBytes)> pond.MaxSerializedMessage {
 		return errors.New("message too large")
 	}
 
-	plaintext := make([]byte, pond.TransportSize-box.Overhead-pond.MessageOverhead-len(nonce))
+	plaintext := make([]byte, pond.MaxSerializedMessage+4)
 	binary.LittleEndian.PutUint32(plaintext, uint32(len(messageBytes)))
 	copy(plaintext[4:], messageBytes)
 	c.randBytes(plaintext[4+len(messageBytes):])

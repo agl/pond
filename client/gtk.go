@@ -95,6 +95,15 @@ func (ui *GTKUI) onAction() {
 	}
 }
 
+func (ui *GTKUI) updated(name string) {
+	buf := ui.textViews[name].GetBuffer()
+	var start, end gtk.GtkTextIter
+	buf.GetStartIter(&start)
+	buf.GetEndIter(&end)
+	contents := buf.GetText(&start, &end, false)
+	ui.events <- Update{name, contents}
+}
+
 func (ui *GTKUI) clicked(name string) {
 	entries := make(map[string]string)
 	textViews := make(map[string]string)
@@ -253,6 +262,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		if v.wrap {
 			view.SetWrapMode(gtk.GTK_WRAP_WORD_CHAR)
 		}
+		if v.updateOnChange && len(v.name) > 0 {
+			view.GetBuffer().Connect("changed", func() {
+				ui.updated(v.name)
+			})
+		}
 		if name := v.name; len(name) > 0 {
 			ui.textViews[name] = view
 			view.Connect("destroy", func() {
@@ -373,6 +387,28 @@ func (ui *GTKUI) handle(action interface{}) {
 	case Destroy:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.Destroy()
+	case FileOpen:
+		fileAction := gtk.GTK_FILE_CHOOSER_ACTION_OPEN
+		but := gtk.GTK_STOCK_OPEN
+		if action.save {
+			fileAction = gtk.GTK_FILE_CHOOSER_ACTION_SAVE
+			but = gtk.GTK_STOCK_SAVE
+		}
+		dialog := gtk.FileChooserDialog(action.title, ui.window, fileAction, gtk.GTK_STOCK_CANCEL, int(gtk.GTK_RESPONSE_CANCEL), but, int(gtk.GTK_RESPONSE_ACCEPT))
+		switch gtk.GtkResponseType(dialog.Run()) {
+		case gtk.GTK_RESPONSE_ACCEPT:
+			ui.events <- OpenResult{
+				ok: true,
+				path: dialog.GetFilename(),
+				arg: action.arg,
+			}
+		default:
+			ui.events <- OpenResult{arg: action.arg}
+		}
+		dialog.Destroy()
+	case SetForeground:
+		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
+		widget.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(action.foreground))
 	case UIError:
 	case UIState:
 		// for testing.

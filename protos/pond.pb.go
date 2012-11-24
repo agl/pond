@@ -450,13 +450,14 @@ func (this *SignedKeyExchange) GetSignature() []byte {
 }
 
 type Message struct {
-	Id               *uint64           `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
-	Time             *int64            `protobuf:"varint,2,req,name=time" json:"time,omitempty"`
-	Body             []byte            `protobuf:"bytes,3,req,name=body" json:"body,omitempty"`
-	BodyEncoding     *Message_Encoding `protobuf:"varint,4,opt,name=body_encoding,enum=protos.Message_Encoding" json:"body_encoding,omitempty"`
-	MyNextDh         []byte            `protobuf:"bytes,5,req,name=my_next_dh" json:"my_next_dh,omitempty"`
-	InReplyTo        *uint64           `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
-	XXX_unrecognized []byte            `json:"-"`
+	Id               *uint64               `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
+	Time             *int64                `protobuf:"varint,2,req,name=time" json:"time,omitempty"`
+	Body             []byte                `protobuf:"bytes,3,req,name=body" json:"body,omitempty"`
+	BodyEncoding     *Message_Encoding     `protobuf:"varint,4,opt,name=body_encoding,enum=protos.Message_Encoding" json:"body_encoding,omitempty"`
+	MyNextDh         []byte                `protobuf:"bytes,5,req,name=my_next_dh" json:"my_next_dh,omitempty"`
+	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
+	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
+	XXX_unrecognized []byte                `json:"-"`
 }
 
 func (this *Message) Reset()         { *this = Message{} }
@@ -503,6 +504,30 @@ func (this *Message) GetInReplyTo() uint64 {
 		return *this.InReplyTo
 	}
 	return 0
+}
+
+type Message_Attachment struct {
+	Filename         *string `protobuf:"bytes,1,req,name=filename" json:"filename,omitempty"`
+	Contents         []byte  `protobuf:"bytes,2,req,name=contents" json:"contents,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Message_Attachment) Reset()         { *this = Message_Attachment{} }
+func (this *Message_Attachment) String() string { return proto.CompactTextString(this) }
+func (*Message_Attachment) ProtoMessage()       {}
+
+func (this *Message_Attachment) GetFilename() string {
+	if this != nil && this.Filename != nil {
+		return *this.Filename
+	}
+	return ""
+}
+
+func (this *Message_Attachment) GetContents() []byte {
+	if this != nil {
+		return this.Contents
+	}
+	return nil
 }
 
 func init() {
