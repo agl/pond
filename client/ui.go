@@ -125,6 +125,7 @@ type TextView struct {
 	text           string
 	wrap           bool
 	updateOnChange bool
+	spellCheck     bool
 }
 
 type Combo struct {

@@ -8,6 +8,7 @@ import (
 	"github.com/agl/go-gtk/gdk"
 	"github.com/agl/go-gtk/glib"
 	"github.com/agl/go-gtk/gtk"
+	"github.com/agl/go-gtk/gtkspell"
 )
 
 type GTKUI struct {
@@ -273,6 +274,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			view.GetBuffer().Connect("changed", func() {
 				ui.updated(v.name)
 			})
+		}
+		if v.spellCheck {
+			if _, err := gtkspell.New(view, ""); err != nil {
+				panic(err)
+			}
 		}
 		if name := v.name; len(name) > 0 {
 			ui.textViews[name] = view

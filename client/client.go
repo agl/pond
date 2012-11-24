@@ -1024,6 +1024,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					editable:       true,
 					wrap:           true,
 					updateOnChange: true,
+					spellCheck:     true,
 				},
 			},
 		},
