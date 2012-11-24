@@ -320,6 +320,7 @@ func (c *client) DeselectAll() {
 func (c *client) mainUI() {
 	ui := Paned{
 		left: Scrolled{
+			viewport: true,
 			child: EventBox{
 				widgetBase: widgetBase{background: colorGray},
 				child: VBox{
@@ -430,6 +431,7 @@ func (c *client) mainUI() {
 		},
 		right: Scrolled{
 			horizontal: true,
+			viewport:   true,
 			child: EventBox{
 				widgetBase: widgetBase{background: colorGray, name: "right"},
 				child: Label{
@@ -1015,11 +1017,14 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					},
 				},
 			},
-			TextView{
-				widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
-				editable:       true,
-				wrap:           true,
-				updateOnChange: true,
+			Scrolled{
+				widgetBase: widgetBase{expand: true, fill: true},
+				child: TextView{
+					widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+					editable:       true,
+					wrap:           true,
+					updateOnChange: true,
+				},
 			},
 		},
 	}

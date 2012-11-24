@@ -116,6 +116,7 @@ type Scrolled struct {
 	widgetBase
 	child      Widget
 	horizontal bool
+	viewport   bool
 }
 
 type TextView struct {

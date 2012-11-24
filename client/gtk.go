@@ -251,7 +251,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		}
 		scrolled.SetPolicy(horizonalPolicy, gtk.GTK_POLICY_AUTOMATIC)
 		child := ui.newWidget(v.child)
-		scrolled.AddWithViewPort(child)
+		if v.viewport {
+			scrolled.AddWithViewPort(child)
+		} else {
+			scrolled.Add(child)
+		}
 		return scrolled
 	case TextView:
 		view := gtk.TextView()
