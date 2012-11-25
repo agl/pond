@@ -98,7 +98,11 @@ func (c *client) unmarshal(state *protos.State) error {
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
 
-		contact.generation = *cont.Generation
+		// For now we'll have to do this conditionally until everyone
+		// has updated local state.
+		if cont.Generation != nil {
+			contact.generation = *cont.Generation
+		}
 	}
 
 	for _, m := range state.Inbox {
