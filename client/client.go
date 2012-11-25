@@ -1019,6 +1019,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			},
 			Scrolled{
 				widgetBase: widgetBase{expand: true, fill: true},
+				horizontal: true,
 				child: TextView{
 					widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
 					editable:       true,
