@@ -97,6 +97,8 @@ func (c *client) unmarshal(state *protos.State) error {
 
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
+
+		contact.generation = *cont.Generation
 	}
 
 	for _, m := range state.Inbox {
@@ -175,6 +177,7 @@ func (c *client) marshal() []byte {
 			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
+			cont.Generation = proto.Uint32(contact.generation)
 		}
 		contacts = append(contacts, cont)
 	}
