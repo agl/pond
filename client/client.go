@@ -298,7 +298,7 @@ func (c *client) loadUI() {
 
 	c.writerChan = make(chan []byte)
 	c.writerDone = make(chan bool)
-	c.fetchNowChan = make(chan chan bool)
+	c.fetchNowChan = make(chan chan bool, 1)
 
 	// Start disk and network workers.
 	go stateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)

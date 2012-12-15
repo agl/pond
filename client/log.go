@@ -74,6 +74,30 @@ func (c *client) logUI() interface{} {
 				},
 			},
 			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			HBox{
+				children: []Widget{
+					VBox{
+						widgetBase: widgetBase{
+							expand: true,
+							fill:   true,
+						},
+					},
+					VBox{
+						widgetBase: widgetBase{
+							padding: 10,
+						},
+						children: []Widget{
+							Button{
+								widgetBase: widgetBase{
+									name:    "transact",
+									padding: 2,
+								},
+								text: "Transact Now",
+							},
+						},
+					},
+				},
+			},
 			TextView{
 				widgetBase: widgetBase{expand: true, fill: true, name: "log"},
 				editable:   true,
@@ -97,6 +121,14 @@ func (c *client) logUI() interface{} {
 		event, wanted := c.nextEvent()
 		if wanted {
 			return event
+		}
+
+		if click, ok := event.(Click); ok && click.name == "transact" {
+			select {
+			case c.fetchNowChan <- nil:
+			default:
+			}
+			continue
 		}
 
 		c.log.Lock()
