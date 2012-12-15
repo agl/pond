@@ -430,10 +430,6 @@ func (c *client) doCreateAccount() error {
 const transactionRateSeconds = 300 // five minutes
 
 func (c *client) transact() {
-	var seedBytes [8]byte
-	c.randBytes(seedBytes[:])
-	seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
-	r := mrand.New(mrand.NewSource(seed))
 	startup := true
 
 	var ackChan chan bool
@@ -446,6 +442,10 @@ func (c *client) transact() {
 
 			var timerChan <-chan time.Time
 			if c.autoFetch {
+				var seedBytes [8]byte
+				c.randBytes(seedBytes[:])
+				seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
+				r := mrand.New(mrand.NewSource(seed))
 				delay := r.ExpFloat64() * transactionRateSeconds
 				if c.testing {
 					delay = 5
