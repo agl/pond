@@ -1,8 +1,17 @@
 Short-term TODOs:
 
 Allow for immediate deletion.
-Expose server queue length in fetches
 Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
-Delete outbox messages on schedule
+
+
+Medium:
+
+Attachments
+PANDA support
+
+
+Minor, non-urgent:
+
+Expose server queue length in fetches
