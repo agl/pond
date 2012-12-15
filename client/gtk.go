@@ -389,6 +389,9 @@ func (ui *GTKUI) handle(action interface{}) {
 	case SetText:
 		widget := gtk.GtkLabel{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetText(action.text)
+	case SetEntry:
+		widget := ui.getWidget(action.name).(gtk.TextInputLike)
+		widget.SetText(action.text)
 	case SetTextView:
 		widget := gtk.GtkTextView{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
 		buffer := gtk.TextBuffer(gtk.TextTagTable())

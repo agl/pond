@@ -206,6 +206,11 @@ type SetText struct {
 	text string
 }
 
+type SetEntry struct {
+	name string
+	text string
+}
+
 type SetTextView struct {
 	name string
 	text string

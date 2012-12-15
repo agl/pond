@@ -2103,6 +2103,7 @@ func (c *client) keyPromptUI(state []byte) error {
 		}
 
 		c.ui.Actions() <- SetText{name: "status", text: "Incorrect passphrase or corrupt state file"}
+		c.ui.Actions() <- SetEntry{name: "pw", text: ""}
 		c.ui.Actions() <- Sensitive{name: "next", sensitive: true}
 		c.ui.Signal()
 	}
