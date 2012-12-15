@@ -356,6 +356,9 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 	if err != nil {
 		return nil, err
 	}
+	// Sometimes Tor holds the connection open but we never receive
+	// anything so we add a 60 second deadline.
+	rawConn.SetDeadline(time.Now().Add(60 * time.Second))
 	conn := transport.NewClient(rawConn, identity, identityPublic, serverIdentity)
 	if err := conn.Handshake(); err != nil {
 		return nil, err
