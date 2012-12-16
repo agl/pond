@@ -386,6 +386,7 @@ func (c *client) mainUI() {
 								text:   "Contacts",
 							},
 						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 						HBox{
 							widgetBase: widgetBase{padding: 6},
 							children: []Widget{
@@ -422,6 +423,7 @@ func (c *client) mainUI() {
 								text:   "Client",
 							},
 						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 						VBox{
 							widgetBase: widgetBase{name: "clientVbox"},
 						},
@@ -604,11 +606,13 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 	cs.entries = append(cs.entries, c)
 	index := len(cs.entries) - 1
 
-	// Add the separator bar.
-	cs.ui.Actions() <- AddToBox{
-		box:   cs.vboxName,
-		pos:   index * 2,
-		child: EventBox{widgetBase: widgetBase{height: 1, background: 0xe5e6e6, name: c.sepName}},
+	if index > 0 {
+		// Add the separator bar.
+		cs.ui.Actions() <- AddToBox{
+			box:   cs.vboxName,
+			pos:   index * 2 - 1,
+			child: EventBox{widgetBase: widgetBase{height: 1, background: 0xe5e6e6, name: c.sepName}},
+		}
 	}
 
 	children := []Widget{
@@ -659,7 +663,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 
 	cs.ui.Actions() <- AddToBox{
 		box: cs.vboxName,
-		pos: index*2 + 1,
+		pos: index*2,
 		child: EventBox{
 			widgetBase: widgetBase{name: c.boxName, background: colorGray},
 			child:      VBox{children: children},
@@ -669,9 +673,11 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 }
 
 func (cs *listUI) Remove(id uint64) {
-	for _, entry := range cs.entries {
+	for i, entry := range cs.entries {
 		if entry.id == id {
-			cs.ui.Actions() <- Destroy{name: entry.sepName}
+			if i > 0 {
+				cs.ui.Actions() <- Destroy{name: entry.sepName}
+			}
 			cs.ui.Actions() <- Destroy{name: entry.boxName}
 			cs.ui.Signal()
 			return
