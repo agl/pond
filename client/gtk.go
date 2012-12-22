@@ -227,7 +227,16 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		configureWidget(&entry.GtkWidget, v.widgetBase)
 		return entry
 	case Button:
-		button := gtk.ButtonWithLabel(v.text)
+		var button *gtk.GtkButton
+		if len(v.text) > 0 {
+			button = gtk.ButtonWithLabel(v.text)
+		} else {
+			button = gtk.Button()
+		}
+		if v.image != indicatorNone {
+			image := gtk.ImageFromPixbuf(v.image.Image())
+			button.Add(image)
+		}
 		button.Clicked(func() {
 			ui.clicked(v.name)
 		})
@@ -316,6 +325,14 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		image.SetAlignment(v.xAlign, v.yAlign)
 		configureWidget(&image.GtkWidget, v.widgetBase)
 		return image
+	case Frame:
+		frame := gtk.Frame("")
+		configureWidget(&frame.GtkWidget, v.widgetBase)
+		if v.child != nil {
+			widget := ui.newWidget(v.child)
+			frame.Add(widget)
+		}
+		return frame
 	default:
 		panic("unknown widget: " + fmt.Sprintf("%#v", v))
 	}

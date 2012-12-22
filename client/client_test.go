@@ -140,6 +140,8 @@ func (ui *TestUI) processWidget(widget interface{}) {
 		ui.processWidget(v.child)
 	case Scrolled:
 		ui.processWidget(v.child)
+	case Frame:
+		ui.processWidget(v.child)
 	case TextView:
 		ui.text[v.name] = v.text
 	case Label:
@@ -757,7 +759,7 @@ func TestDraft(t *testing.T) {
 	}
 
 	if attachmentID == 0 {
-		t.Errorf("failed to find attachment after reload")
+		t.Fatalf("failed to find attachment after reload")
 	}
 
 	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}

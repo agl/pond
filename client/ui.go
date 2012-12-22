@@ -101,7 +101,8 @@ type Entry struct {
 
 type Button struct {
 	widgetBase
-	text string
+	text  string
+	image Indicator
 }
 
 type Spinner struct {
@@ -140,6 +141,11 @@ type Image struct {
 	widgetBase
 	image          Indicator
 	xAlign, yAlign float32
+}
+
+type Frame struct {
+	widgetBase
+	child Widget
 }
 
 type Reset struct {

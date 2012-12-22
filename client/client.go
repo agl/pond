@@ -1123,7 +1123,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 					},
 					Button{
 						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
-						text:       "+",
+						image:      indicatorAdd,
 					},
 				},
 			},
@@ -1154,22 +1154,28 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 	var initialAttachmentChildren []Widget
 	for id, attachment := range attachments {
-		initialAttachmentChildren = append(initialAttachmentChildren, HBox{
+		initialAttachmentChildren = append(initialAttachmentChildren, Frame{
 			widgetBase: widgetBase{
-				name: fmt.Sprintf("attachment-hbox-%x", id),
+				name:    fmt.Sprintf("attachment-frame-%x", id),
+				padding: 1,
 			},
-			children: []Widget{
-				Label{
-					widgetBase: widgetBase{
-						padding: 2,
-						name:    fmt.Sprintf("attachment-label-%x", id),
+			child: HBox{
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{
+							padding: 2,
+							name:    fmt.Sprintf("attachment-label-%x", id),
+						},
+						yAlign: 0.5,
+						text:   fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)),
 					},
-					yAlign: 0.5,
-					text:   fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)),
-				},
-				Button{
-					widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-					text:       "Remove",
+					VBox{
+						widgetBase: widgetBase{expand: true, fill: true},
+					},
+					Button{
+						widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+						image:      indicatorRemove,
+					},
 				},
 			},
 		})
@@ -1234,15 +1240,21 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			c.ui.Actions() <- Append{
 				name: "filesvbox",
 				children: []Widget{
-					HBox{
+					Frame{
 						widgetBase: widgetBase{
-							name: fmt.Sprintf("attachment-hbox-%x", id),
+							name:    fmt.Sprintf("attachment-frame-%x", id),
+							padding: 1,
 						},
-						children: []Widget{
-							label,
-							Button{
-								widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-								text:       "Remove",
+						child: HBox{
+							children: []Widget{
+								label,
+								VBox{
+									widgetBase: widgetBase{expand: true, fill: true},
+								},
+								Button{
+									widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+									image:      indicatorRemove,
+								},
 							},
 						},
 					},
@@ -1286,7 +1298,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			if err != nil {
 				panic(click.name)
 			}
-			c.ui.Actions() <- Destroy{name: "attachment-hbox-" + click.name[7:]}
+			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
 			draft.removeAttachment(attachments[id])
 			delete(attachments, id)
 			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
