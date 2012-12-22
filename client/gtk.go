@@ -32,7 +32,7 @@ func NewGTKUI() *GTKUI {
 
 	ui := &GTKUI{
 		window:  window,
-		actions: make(chan interface{}, 8),
+		actions: make(chan interface{}, uiActionsQueueLen),
 		events:  make(chan interface{}, 8),
 	}
 	window.Connect("destroy", func(ctx *glib.CallbackContext) {

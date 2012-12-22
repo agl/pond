@@ -167,6 +167,10 @@ ReadActions:
 				ui.text[action.name] = action.text
 			case SetChild:
 				ui.processWidget(action.child)
+			case Append:
+				for _, child := range action.children {
+					ui.processWidget(child)
+				}
 			}
 		default:
 			break ReadActions
@@ -669,5 +673,102 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 
 	if s := client2.ui.text["body"]; s != testMsg {
 		t.Fatalf("resolved message is incorrect: %s", s)
+	}
+}
+
+func TestDraft(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	proceedToMainUI(t, client, server)
+	client.ui.events <- Click{name: "compose"}
+	client.AdvanceTo(uiStateCompose)
+
+	if l := len(client.drafts); l != 1 {
+		t.Fatalf("Bad number of drafts: %d", l)
+	}
+	var draftID uint64
+	for id := range client.drafts {
+		draftID = id
+		break
+	}
+
+	const initialText = "wibble wobble"
+
+	client.ui.events <- Update{
+		name: "body",
+		text: initialText,
+	}
+	client.Reload()
+	client.AdvanceTo(uiStateMain)
+
+	if l := len(client.drafts); l != 1 {
+		t.Fatalf("Bad number of drafts after reload: %d", l)
+	}
+
+	if l := len(client.draftsUI.entries); l != 1 {
+		t.Fatalf("Bad number of draft UI entries after reload: %d", l)
+	}
+
+	if id := client.draftsUI.entries[0].id; id != draftID {
+		t.Fatalf("Incorrect draft ID after reload: %d vs %d", id, draftID)
+	}
+
+	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.AdvanceTo(uiStateCompose)
+	if text := client.ui.text["body"]; text != initialText {
+		t.Fatalf("Wrong message text after reload: '%s' vs '%s'", text, initialText)
+	}
+
+	attachmentFile := filepath.Join(client.stateDir, "attachment")
+	if err := ioutil.WriteFile(attachmentFile, []byte(initialText), 0644); err != nil {
+		t.Fatalf("Failed to write attachment file: %s", err)
+	}
+
+	client.ui.events <- Click{name: "attach"}
+	client.ui.events <- OpenResult{path: attachmentFile, ok: true}
+
+	client.Reload()
+	client.AdvanceTo(uiStateMain)
+	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.AdvanceTo(uiStateCompose)
+
+	const labelPrefix = "attachment-label-"
+	var attachmentID uint64
+	for name := range client.ui.text {
+		if strings.HasPrefix(name, labelPrefix) {
+			attachmentID, err = strconv.ParseUint(name[len(labelPrefix):], 16, 64)
+			if err != nil {
+				t.Fatalf("Failed to parse attachment label: %s", name)
+			}
+			break
+		}
+	}
+
+	if attachmentID == 0 {
+		t.Errorf("failed to find attachment after reload")
+	}
+
+	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
+	client.Reload()
+	client.AdvanceTo(uiStateMain)
+	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.AdvanceTo(uiStateCompose)
+
+	for name := range client.ui.text {
+		if strings.HasPrefix(name, labelPrefix) {
+			t.Fatalf("Found attachment after removing")
+		}
 	}
 }

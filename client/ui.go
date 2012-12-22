@@ -1,5 +1,7 @@
 package main
 
+const uiActionsQueueLen = 8
+
 type UI interface {
 	Actions() chan<- interface{}
 	Events() <-chan interface{}

@@ -156,6 +156,23 @@ func (c *client) unmarshal(state *protos.State) error {
 		}
 	}
 
+	for _, m := range state.Drafts {
+		draft := &Draft{
+			id:          *m.Id,
+			body:        *m.Body,
+			attachments: m.Attachments,
+			created:     time.Unix(*m.Created, 0),
+		}
+		if m.To != nil {
+			draft.to = *m.To
+		}
+		if m.InReplyTo != nil {
+			draft.inReplyTo = *m.InReplyTo
+		}
+
+		c.drafts[draft.id] = draft
+	}
+
 	return nil
 }
 
@@ -236,6 +253,24 @@ func (c *client) marshal() []byte {
 		outbox = append(outbox, m)
 	}
 
+	var drafts []*protos.Draft
+	for _, draft := range c.drafts {
+		m := &protos.Draft{
+			Id:          proto.Uint64(draft.id),
+			Body:        proto.String(draft.body),
+			Attachments: draft.attachments,
+			Created:     proto.Int64(draft.created.Unix()),
+		}
+		if draft.to != 0 {
+			m.To = proto.Uint64(draft.to)
+		}
+		if draft.inReplyTo != 0 {
+			m.InReplyTo = proto.Uint64(draft.inReplyTo)
+		}
+
+		drafts = append(drafts, m)
+	}
+
 	state := &protos.State{
 		Private:      c.priv[:],
 		Public:       c.pub[:],
@@ -247,6 +282,7 @@ func (c *client) marshal() []byte {
 		Contacts:     contacts,
 		Inbox:        inbox,
 		Outbox:       outbox,
+		Drafts:       drafts,
 	}
 	s, err := proto.Marshal(state)
 	if err != nil {

@@ -121,10 +121,12 @@ type client struct {
 
 	log *Log
 
-	inboxUI, outboxUI, contactsUI, clientUI *listUI
-	outbox                                  []*queuedMessage
-	contacts                                map[uint64]*Contact
-	inbox                                   []*InboxMessage
+	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
+
+	outbox   []*queuedMessage
+	drafts   map[uint64]*Draft
+	contacts map[uint64]*Contact
+	inbox    []*InboxMessage
 
 	// queue is a queue of messages for transmission that's shared with the
 	// network goroutine and protected by queueMutex.
@@ -192,6 +194,31 @@ type Contact struct {
 
 	theirLastDHPublic    [32]byte
 	theirCurrentDHPublic [32]byte
+}
+
+type Draft struct {
+	id          uint64
+	created     time.Time
+	to          uint64
+	body        string
+	inReplyTo   uint64
+	attachments []*pond.Message_Attachment
+	detachments []*pond.Message_Detachment
+}
+
+func (d *Draft) removeAttachment(a *pond.Message_Attachment) {
+	index := -1
+
+	for i, candidate := range d.attachments {
+		if *candidate.Filename == *a.Filename &&
+			bytes.Equal(candidate.Contents, a.Contents) {
+			index = i
+			break
+		}
+	}
+	if index != -1 {
+		d.attachments = append(d.attachments[:index], d.attachments[index+1:]...)
+	}
 }
 
 type queuedMessage struct {
@@ -315,6 +342,7 @@ func (c *client) DeselectAll() {
 	c.outboxUI.Deselect()
 	c.contactsUI.Deselect()
 	c.clientUI.Deselect()
+	c.draftsUI.Deselect()
 }
 
 func (c *client) mainUI() {
@@ -339,6 +367,7 @@ func (c *client) mainUI() {
 						},
 						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 						VBox{widgetBase: widgetBase{name: "inboxVbox"}},
+
 						EventBox{
 							widgetBase: widgetBase{background: colorHeaderBackground},
 							child: Label{
@@ -374,6 +403,22 @@ func (c *client) mainUI() {
 							},
 						},
 						VBox{widgetBase: widgetBase{name: "outboxVbox"}},
+
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Drafts",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						VBox{widgetBase: widgetBase{name: "draftsVbox"}},
+
 						EventBox{
 							widgetBase: widgetBase{background: colorHeaderBackground},
 							child: Label{
@@ -408,9 +453,8 @@ func (c *client) mainUI() {
 								HBox{widgetBase: widgetBase{expand: true}},
 							},
 						},
-						VBox{
-							widgetBase: widgetBase{name: "contactsVbox"},
-						},
+						VBox{widgetBase: widgetBase{name: "contactsVbox"}},
+
 						EventBox{
 							widgetBase: widgetBase{background: colorHeaderBackground},
 							child: Label{
@@ -500,6 +544,20 @@ func (c *client) mainUI() {
 		}
 	}
 
+	c.draftsUI = &listUI{
+		ui:       c.ui,
+		vboxName: "draftsVbox",
+	}
+
+	for _, draft := range c.drafts {
+		to := "Unknown"
+		if draft.to != 0 {
+			to = c.contacts[draft.to].name
+		}
+		subline := draft.created.Format(shortTimeFormat)
+		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
+	}
+
 	c.clientUI = &listUI{
 		ui:       c.ui,
 		vboxName: "clientVbox",
@@ -553,6 +611,10 @@ func (c *client) mainUI() {
 			}
 			continue
 		}
+		if id, ok := c.draftsUI.Event(event); ok {
+			c.draftsUI.Select(id)
+			nextEvent = c.composeUI(c.drafts[id], nil)
+		}
 
 		click, ok := event.(Click)
 		if !ok {
@@ -562,7 +624,7 @@ func (c *client) mainUI() {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
 		case "compose":
-			nextEvent = c.composeUI(nil)
+			nextEvent = c.composeUI(nil, nil)
 		}
 	}
 }
@@ -578,8 +640,8 @@ type listUI struct {
 }
 
 type listItem struct {
-	id                                                 uint64
-	name, sepName, boxName, imageName, sublineTextName string
+	id                                                           uint64
+	name, sepName, boxName, imageName, lineName, sublineTextName string
 }
 
 func (cs *listUI) Event(event interface{}) (uint64, bool) {
@@ -601,6 +663,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		sepName:         cs.newIdent(),
 		boxName:         cs.newIdent(),
 		imageName:       cs.newIdent(),
+		lineName:        cs.newIdent(),
 		sublineTextName: cs.newIdent(),
 	}
 	cs.entries = append(cs.entries, c)
@@ -610,7 +673,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		// Add the separator bar.
 		cs.ui.Actions() <- AddToBox{
 			box:   cs.vboxName,
-			pos:   index * 2 - 1,
+			pos:   index*2 - 1,
 			child: EventBox{widgetBase: widgetBase{height: 1, background: 0xe5e6e6, name: c.sepName}},
 		}
 	}
@@ -621,6 +684,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 			children: []Widget{
 				Label{
 					widgetBase: widgetBase{
+						name:    c.lineName,
 						padding: 5,
 						font:    fontListEntry,
 					},
@@ -663,7 +727,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 
 	cs.ui.Actions() <- AddToBox{
 		box: cs.vboxName,
-		pos: index*2,
+		pos: index * 2,
 		child: EventBox{
 			widgetBase: widgetBase{name: c.boxName, background: colorGray},
 			child:      VBox{children: children},
@@ -741,6 +805,16 @@ func (cs *listUI) SetIndicator(id uint64, indicator Indicator) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
 			cs.ui.Actions() <- SetImage{name: entry.imageName, image: indicator}
+			cs.ui.Signal()
+			break
+		}
+	}
+}
+
+func (cs *listUI) SetLine(id uint64, line string) {
+	for _, entry := range cs.entries {
+		if entry.id == id {
+			cs.ui.Actions() <- SetText{name: entry.lineName, text: line}
 			cs.ui.Signal()
 			break
 		}
@@ -925,7 +999,11 @@ func (c *client) updateUsage(text string, isReply, validContactSelected bool, at
 	return over
 }
 
-func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
+func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
+	if draft != nil && inReplyTo != nil {
+		panic("draft and inReplyTo both set")
+	}
+
 	var contactNames []string
 	for _, contact := range c.contacts {
 		contactNames = append(contactNames, contact.name)
@@ -938,10 +1016,44 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 		}
 	}
 
-	initialUsageMessage, _ := usageString("", inReplyTo != nil, nil)
-	var lastText string
+	attachments := make(map[uint64]*pond.Message_Attachment)
+
+	if draft != nil {
+		if to, ok := c.contacts[draft.to]; ok {
+			preSelected = to.name
+		}
+		for _, attachment := range draft.attachments {
+			id := c.randId()
+			attachments[id] = attachment
+		}
+	}
+
+	if draft == nil {
+		var replyToId, contactId uint64
+		from := preSelected
+
+		for inReplyTo != nil {
+			replyToId = inReplyTo.id
+			contactId = inReplyTo.from
+		}
+		if len(preSelected) == 0 {
+			from = "Unknown"
+		}
+
+		draft = &Draft{
+			id:        c.randId(),
+			inReplyTo: replyToId,
+			to:        contactId,
+			created:   time.Now(),
+		}
+
+		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
+		c.drafts[draft.id] = draft
+	}
+
+	lastText := draft.body
+	initialUsageMessage, overSize := usageString(lastText, inReplyTo != nil, attachments)
 	validContactSelected := len(preSelected) > 0
-	overSize := false
 
 	ui := VBox{
 		children: []Widget{
@@ -973,7 +1085,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					Combo{
 						widgetBase: widgetBase{
 							name:        "to",
-							insensitive: len(preSelected) > 0,
+							insensitive: len(preSelected) > 0 && inReplyTo != nil,
 						},
 						labels:      contactNames,
 						preSelected: preSelected,
@@ -1032,15 +1144,45 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 					wrap:           true,
 					updateOnChange: true,
 					spellCheck:     true,
+					text:           draft.body,
 				},
 			},
 		},
 	}
+
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
+
+	var initialAttachmentChildren []Widget
+	for id, attachment := range attachments {
+		initialAttachmentChildren = append(initialAttachmentChildren, HBox{
+			widgetBase: widgetBase{
+				name: fmt.Sprintf("attachment-hbox-%x", id),
+			},
+			children: []Widget{
+				Label{
+					widgetBase: widgetBase{
+						padding: 2,
+						name:    fmt.Sprintf("attachment-label-%x", id),
+					},
+					yAlign: 0.5,
+					text:   fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)),
+				},
+				Button{
+					widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+					text:       "Remove",
+				},
+			},
+		})
+	}
+	if len(initialAttachmentChildren) > 0 {
+		c.ui.Actions() <- Append{
+			name:     "filesvbox",
+			children: initialAttachmentChildren,
+		}
+	}
+
 	c.ui.Actions() <- UIState{uiStateCompose}
 	c.ui.Signal()
-
-	attachments := make(map[uint64]*pond.Message_Attachment)
 
 	for {
 		event, wanted := c.nextEvent()
@@ -1051,6 +1193,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 		if update, ok := event.(Update); ok {
 			lastText = update.text
 			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
+			draft.body = update.text
 			c.ui.Signal()
 			continue
 		}
@@ -1063,20 +1206,29 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			var label Widget
 			if err != nil {
 				label = Label{
-					widgetBase: widgetBase{foreground: colorRed, padding: 2},
-					yAlign:     0.5,
-					text:       base + ": " + err.Error(),
+					widgetBase: widgetBase{
+						foreground: colorRed,
+						padding:    2,
+					},
+					yAlign: 0.5,
+					text:   base + ": " + err.Error(),
 				}
 			} else {
 				label = Label{
-					widgetBase: widgetBase{padding: 2},
-					yAlign:     0.5,
-					text:       fmt.Sprintf("%s (%d bytes)", base, len(contents)),
+					widgetBase: widgetBase{
+						padding: 2,
+						name:    fmt.Sprintf("attachment-label-%x", id),
+					},
+					yAlign: 0.5,
+					text:   fmt.Sprintf("%s (%d bytes)", base, len(contents)),
 				}
-				attachments[id] = &pond.Message_Attachment{
+
+				a := &pond.Message_Attachment{
 					Filename: proto.String(filepath.Base(open.path)),
 					Contents: contents,
 				}
+				attachments[id] = a
+				draft.attachments = append(draft.attachments, a)
 			}
 
 			c.ui.Actions() <- Append{
@@ -1112,9 +1264,16 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 			continue
 		}
 		if click.name == "to" {
-			if len(click.combos["to"]) > 0 {
+			selected := click.combos["to"]
+			if len(selected) > 0 {
 				validContactSelected = true
 			}
+			for _, contact := range c.contacts {
+				if contact.name == selected {
+					draft.to = contact.id
+				}
+			}
+			c.draftsUI.SetLine(draft.id, selected)
 			if validContactSelected && !overSize {
 				c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
 				c.ui.Signal()
@@ -1128,6 +1287,7 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 				panic(click.name)
 			}
 			c.ui.Actions() <- Destroy{name: "attachment-hbox-" + click.name[7:]}
+			draft.removeAttachment(attachments[id])
 			delete(attachments, id)
 			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
 			c.ui.Signal()
@@ -1183,6 +1343,9 @@ func (c *client) composeUI(inReplyTo *InboxMessage) interface{} {
 		if inReplyTo != nil {
 			inReplyTo.acked = true
 		}
+
+		c.draftsUI.Remove(draft.id)
+		delete(c.drafts, draft.id)
 
 		c.save()
 
@@ -1463,7 +1626,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			c.ui.Actions() <- UIState{uiStateInbox}
 			c.ui.Signal()
 		case "reply":
-			return c.composeUI(msg)
+			return c.composeUI(nil, msg)
 		}
 	}
 
@@ -1954,6 +2117,9 @@ func (c *client) nextEvent() (event interface{}, wanted bool) {
 	if _, ok := c.clientUI.Event(event); ok {
 		wanted = true
 	}
+	if _, ok := c.draftsUI.Event(event); ok {
+		wanted = true
+	}
 	if click, ok := event.(Click); ok {
 		wanted = wanted || click.name == "newcontact" || click.name == "compose"
 	}
@@ -2333,6 +2499,7 @@ func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch b
 		ui:              ui,
 		rand:            rand,
 		contacts:        make(map[uint64]*Contact),
+		drafts:          make(map[uint64]*Draft),
 		newMessageChan:  make(chan NewMessage),
 		messageSentChan: make(chan uint64, 1),
 	}

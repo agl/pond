@@ -164,5 +164,13 @@ message Message {
 		required string filename = 1;
 		required bytes contents = 2;
 	}
+	message Detachment {
+		required string filename = 1;
+		required uint64 size = 2;
+		required uint64 padded_size = 3;
+		required uint32 chunk_size = 4;
+		required bytes key = 5;
+		optional string url = 6;
+	}
 	repeated Attachment files = 7;
 }

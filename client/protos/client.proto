@@ -1,5 +1,7 @@
 package protos;
 
+import "github.com/agl/pond/protos/pond.proto";
+
 // These protobufs are used for serialising the client's state to disk.
 
 message Contact {
@@ -42,6 +44,15 @@ message Outbox {
 	optional int64 acked = 8;
 };
 
+message Draft {
+	required fixed64 id = 1;
+	required int64 created = 2;
+	optional fixed64 to = 3;
+	required string body = 4;
+	optional fixed64 in_reply_to = 5;
+	repeated Message.Attachment attachments = 6;
+}
+
 message State {
 	required bytes identity = 1;
 	required bytes public = 2;
@@ -54,4 +65,5 @@ message State {
 	repeated Contact contacts = 8;
 	repeated Inbox inbox = 9;
 	repeated Outbox outbox = 10;
+	repeated Draft drafts = 11;
 }

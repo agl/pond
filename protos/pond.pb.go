@@ -530,6 +530,62 @@ func (this *Message_Attachment) GetContents() []byte {
 	return nil
 }
 
+type Message_Detachment struct {
+	Filename         *string `protobuf:"bytes,1,req,name=filename" json:"filename,omitempty"`
+	Size             *uint64 `protobuf:"varint,2,req,name=size" json:"size,omitempty"`
+	PaddedSize       *uint64 `protobuf:"varint,3,req,name=padded_size" json:"padded_size,omitempty"`
+	ChunkSize        *uint32 `protobuf:"varint,4,req,name=chunk_size" json:"chunk_size,omitempty"`
+	Key              []byte  `protobuf:"bytes,5,req,name=key" json:"key,omitempty"`
+	Url              *string `protobuf:"bytes,6,opt,name=url" json:"url,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Message_Detachment) Reset()         { *this = Message_Detachment{} }
+func (this *Message_Detachment) String() string { return proto.CompactTextString(this) }
+func (*Message_Detachment) ProtoMessage()       {}
+
+func (this *Message_Detachment) GetFilename() string {
+	if this != nil && this.Filename != nil {
+		return *this.Filename
+	}
+	return ""
+}
+
+func (this *Message_Detachment) GetSize() uint64 {
+	if this != nil && this.Size != nil {
+		return *this.Size
+	}
+	return 0
+}
+
+func (this *Message_Detachment) GetPaddedSize() uint64 {
+	if this != nil && this.PaddedSize != nil {
+		return *this.PaddedSize
+	}
+	return 0
+}
+
+func (this *Message_Detachment) GetChunkSize() uint32 {
+	if this != nil && this.ChunkSize != nil {
+		return *this.ChunkSize
+	}
+	return 0
+}
+
+func (this *Message_Detachment) GetKey() []byte {
+	if this != nil {
+		return this.Key
+	}
+	return nil
+}
+
+func (this *Message_Detachment) GetUrl() string {
+	if this != nil && this.Url != nil {
+		return *this.Url
+	}
+	return ""
+}
+
 func init() {
 	proto.RegisterEnum("protos.Reply_Status", Reply_Status_name, Reply_Status_value)
 	proto.RegisterEnum("protos.Message_Encoding", Message_Encoding_name, Message_Encoding_value)
