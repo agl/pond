@@ -1215,6 +1215,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 					widgetBase: widgetBase{
 						foreground: colorRed,
 						padding:    2,
+						name:       fmt.Sprintf("attachment-error-%x", id),
 					},
 					yAlign: 0.5,
 					text:   base + ": " + err.Error(),
@@ -1299,8 +1300,10 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				panic(click.name)
 			}
 			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
-			draft.removeAttachment(attachments[id])
-			delete(attachments, id)
+			if attachment, ok := attachments[id]; ok {
+				draft.removeAttachment(attachment)
+				delete(attachments, id)
+			}
 			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
 			c.ui.Signal()
 			continue

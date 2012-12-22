@@ -773,4 +773,37 @@ func TestDraft(t *testing.T) {
 			t.Fatalf("Found attachment after removing")
 		}
 	}
+
+	errorFile := filepath.Join(client.stateDir, "error")
+	if err := ioutil.WriteFile(errorFile, nil, 0); err != nil {
+		t.Fatalf("Failed to write error file: %s", err)
+	}
+
+	client.ui.events <- Click{name: "attach"}
+	client.ui.WaitForSignal()
+	client.ui.events <- OpenResult{path: attachmentFile, ok: true}
+	client.ui.WaitForSignal()
+	client.ui.events <- Click{name: "attach"}
+	client.ui.WaitForSignal()
+	client.ui.events <- OpenResult{path: errorFile, ok: true}
+	client.ui.WaitForSignal()
+
+	attachmentID = 0
+	const errorPrefix = "attachment-error-"
+	for name := range client.ui.text {
+		if strings.HasPrefix(name, errorPrefix) {
+			attachmentID, err = strconv.ParseUint(name[len(errorPrefix):], 16, 64)
+			if err != nil {
+				t.Fatalf("Failed to parse attachment label: %s", name)
+			}
+			break
+		}
+	}
+
+	if attachmentID == 0 {
+		t.Fatalf("failed to find error attachment")
+	}
+
+	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
+	client.ui.WaitForSignal()
 }
