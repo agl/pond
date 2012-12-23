@@ -51,6 +51,7 @@ message Draft {
 	required string body = 4;
 	optional fixed64 in_reply_to = 5;
 	repeated Message.Attachment attachments = 6;
+	repeated Message.Detachment detachments = 7;
 }
 
 message State {

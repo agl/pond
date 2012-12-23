@@ -333,6 +333,10 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			frame.Add(widget)
 		}
 		return frame
+	case Progress:
+		pro := gtk.ProgressBar()
+		configureWidget(&pro.GtkWidget, v.widgetBase)
+		return pro
 	default:
 		panic("unknown widget: " + fmt.Sprintf("%#v", v))
 	}
@@ -445,6 +449,10 @@ func (ui *GTKUI) handle(action interface{}) {
 	case SetForeground:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(action.foreground))
+	case SetProgress:
+		widget := gtk.GtkProgressBar{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
+		widget.SetFraction(action.fraction)
+
 	case UIError:
 	case UIState:
 		// for testing.

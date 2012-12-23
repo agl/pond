@@ -173,4 +173,5 @@ message Message {
 		optional string url = 6;
 	}
 	repeated Attachment files = 7;
+	repeated Detachment detached_files = 8;
 }

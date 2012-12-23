@@ -457,6 +457,7 @@ type Message struct {
 	MyNextDh         []byte                `protobuf:"bytes,5,req,name=my_next_dh" json:"my_next_dh,omitempty"`
 	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
+	DetachedFiles    []*Message_Detachment `protobuf:"bytes,8,rep,name=detached_files" json:"detached_files,omitempty"`
 	XXX_unrecognized []byte                `json:"-"`
 }
 

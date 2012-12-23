@@ -148,6 +148,10 @@ type Frame struct {
 	child Widget
 }
 
+type Progress struct {
+	widgetBase
+}
+
 type Reset struct {
 	root Widget
 }
@@ -246,6 +250,11 @@ type FileOpen struct {
 type SetForeground struct {
 	name       string
 	foreground uint32
+}
+
+type SetProgress struct {
+	name     string
+	fraction float64
 }
 
 type UIState struct {

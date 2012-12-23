@@ -93,17 +93,19 @@ func (server *TestServer) Close() {
 type TestUI struct {
 	actions        chan interface{}
 	events         chan interface{}
-	signal         chan bool
+	signal         chan chan bool
 	currentStateID int
 	t              *testing.T
 	text           map[string]string
+	fileOpen       bool
+	panicOnSignal  bool
 }
 
 func NewTestUI(t *testing.T) *TestUI {
 	return &TestUI{
 		actions:        make(chan interface{}, 16),
 		events:         make(chan interface{}, 16),
-		signal:         make(chan bool),
+		signal:         make(chan chan bool),
 		currentStateID: uiStateInvalid,
 		t:              t,
 		text:           make(map[string]string),
@@ -119,7 +121,9 @@ func (ui *TestUI) Events() <-chan interface{} {
 }
 
 func (ui *TestUI) Signal() {
-	ui.signal <- true
+	c := make(chan bool)
+	ui.signal <- c
+	<-c
 }
 
 func (ui *TestUI) Run() {
@@ -151,7 +155,11 @@ func (ui *TestUI) processWidget(widget interface{}) {
 
 func (ui *TestUI) WaitForSignal() error {
 	var uierr error
-	<-ui.signal
+	ack, ok := <-ui.signal
+	if !ok {
+		panic("signal channel closed")
+	}
+	ui.t.Logf("Signal")
 
 ReadActions:
 	for {
@@ -173,13 +181,25 @@ ReadActions:
 				for _, child := range action.children {
 					ui.processWidget(child)
 				}
+			case FileOpen:
+				ui.fileOpen = true
 			}
 		default:
 			break ReadActions
 		}
 	}
+	ack <- true
 
 	return uierr
+}
+
+func (ui *TestUI) WaitForFileOpen() {
+	ui.fileOpen = false
+	for ui.fileOpen == false {
+		if err := ui.WaitForSignal(); err != nil {
+			ui.t.Fatal(err)
+		}
+	}
 }
 
 type TestClient struct {
@@ -211,7 +231,8 @@ WaitForClient:
 			if !ok {
 				break WaitForClient
 			}
-		case <-tc.ui.signal:
+		case ack := <-tc.ui.signal:
+			ack <- true
 		}
 	}
 }
@@ -467,8 +488,8 @@ func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
 WaitForAck:
 	for {
 		select {
-		case <-client.ui.signal:
-			break
+		case ack := <-client.ui.signal:
+			ack <- true
 		case <-ackChan:
 			break WaitForAck
 		}
@@ -780,11 +801,10 @@ func TestDraft(t *testing.T) {
 	}
 
 	client.ui.events <- Click{name: "attach"}
-	client.ui.WaitForSignal()
+	client.ui.WaitForFileOpen()
 	client.ui.events <- OpenResult{path: attachmentFile, ok: true}
-	client.ui.WaitForSignal()
 	client.ui.events <- Click{name: "attach"}
-	client.ui.WaitForSignal()
+	client.ui.WaitForFileOpen()
 	client.ui.events <- OpenResult{path: errorFile, ok: true}
 	client.ui.WaitForSignal()
 

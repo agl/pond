@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -138,6 +139,7 @@ type client struct {
 	// messageSentChan receives the ids of messages that have been sent by
 	// the network goroutine.
 	messageSentChan chan uint64
+	backgroundChan  chan interface{}
 }
 
 // InboxMessage represents a message in the client's inbox. (Although acks also
@@ -196,6 +198,13 @@ type Contact struct {
 	theirCurrentDHPublic [32]byte
 }
 
+// pendingDetachment represents a detachment conversion/upload operation that's
+// in progress. These are not saved to disk.
+type pendingDetachment struct {
+	path   string
+	cancel func()
+}
+
 type Draft struct {
 	id          uint64
 	created     time.Time
@@ -204,21 +213,8 @@ type Draft struct {
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
 	detachments []*pond.Message_Detachment
-}
 
-func (d *Draft) removeAttachment(a *pond.Message_Attachment) {
-	index := -1
-
-	for i, candidate := range d.attachments {
-		if *candidate.Filename == *a.Filename &&
-			bytes.Equal(candidate.Contents, a.Contents) {
-			index = i
-			break
-		}
-	}
-	if index != -1 {
-		d.attachments = append(d.attachments[:index], d.attachments[index+1:]...)
-	}
+	pendingDetachments map[uint64]*pendingDetachment
 }
 
 type queuedMessage struct {
@@ -947,21 +943,22 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 
 // usageString returns a description of the amount of space taken up by a body
 // with the given contents and a bool indicating overflow.
-func usageString(body string, isReply bool, attachments map[uint64]*pond.Message_Attachment) (string, bool) {
+func usageString(draft *Draft) (string, bool) {
 	var replyToId *uint64
-	if isReply {
+	if draft.inReplyTo != 0 {
 		replyToId = proto.Uint64(1)
 	}
 	var dhPub [32]byte
 
 	msg := &pond.Message{
-		Id:           proto.Uint64(0),
-		Time:         proto.Int64(1 << 62),
-		Body:         []byte(body),
-		BodyEncoding: pond.Message_RAW.Enum(),
-		InReplyTo:    replyToId,
-		MyNextDh:     dhPub[:],
-		Files:        attachmentsMapToList(attachments),
+		Id:            proto.Uint64(0),
+		Time:          proto.Int64(1 << 62),
+		Body:          []byte(draft.body),
+		BodyEncoding:  pond.Message_RAW.Enum(),
+		InReplyTo:     replyToId,
+		MyNextDh:      dhPub[:],
+		Files:         draft.attachments,
+		DetachedFiles: draft.detachments,
 	}
 
 	serialized, err := proto.Marshal(msg)
@@ -973,20 +970,52 @@ func usageString(body string, isReply bool, attachments map[uint64]*pond.Message
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
-func attachmentsMapToList(attachments map[uint64]*pond.Message_Attachment) []*pond.Message_Attachment {
-	if attachments == nil {
-		return nil
+func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
+	var labelName string
+	var labelColor uint32
+	if isError {
+		labelName = fmt.Sprintf("attachment-error-%x", id)
+		labelColor = colorRed
+	} else {
+		labelName = fmt.Sprintf("attachment-label-%x", id)
 	}
-
-	var ret []*pond.Message_Attachment
-	for _, attachment := range attachments {
-		ret = append(ret, attachment)
+	return Frame{
+		widgetBase: widgetBase{
+			name:    fmt.Sprintf("attachment-frame-%x", id),
+			padding: 1,
+		},
+		child: VBox{
+			widgetBase: widgetBase{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+			},
+			children: append([]Widget{
+				HBox{
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{
+								padding:    2,
+								foreground: labelColor,
+								name:       labelName,
+							},
+							yAlign: 0.5,
+							text:   label,
+						},
+						VBox{
+							widgetBase: widgetBase{expand: true, fill: true},
+						},
+						Button{
+							widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+							image:      indicatorRemove,
+						},
+					},
+				},
+			}, extraWidgets...),
+		},
 	}
-	return ret
 }
 
-func (c *client) updateUsage(text string, isReply, validContactSelected bool, attachments map[uint64]*pond.Message_Attachment) bool {
-	usageMessage, over := usageString(text, isReply, attachments)
+func (c *client) updateUsage(validContactSelected bool, draft *Draft) bool {
+	usageMessage, over := usageString(draft)
 	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
 	color := uint32(colorBlack)
 	if over {
@@ -1016,15 +1045,18 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		}
 	}
 
-	attachments := make(map[uint64]*pond.Message_Attachment)
+	attachments := make(map[uint64]int)
+	detachments := make(map[uint64]int)
 
 	if draft != nil {
 		if to, ok := c.contacts[draft.to]; ok {
 			preSelected = to.name
 		}
-		for _, attachment := range draft.attachments {
-			id := c.randId()
-			attachments[id] = attachment
+		for i := range draft.attachments {
+			attachments[c.randId()] = i
+		}
+		for i := range draft.detachments {
+			detachments[c.randId()] = i
 		}
 	}
 
@@ -1051,8 +1083,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		c.drafts[draft.id] = draft
 	}
 
-	lastText := draft.body
-	initialUsageMessage, overSize := usageString(lastText, inReplyTo != nil, attachments)
+	initialUsageMessage, overSize := usageString(draft)
 	validContactSelected := len(preSelected) > 0
 
 	ui := VBox{
@@ -1153,32 +1184,13 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
 
 	var initialAttachmentChildren []Widget
-	for id, attachment := range attachments {
-		initialAttachmentChildren = append(initialAttachmentChildren, Frame{
-			widgetBase: widgetBase{
-				name:    fmt.Sprintf("attachment-frame-%x", id),
-				padding: 1,
-			},
-			child: HBox{
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{
-							padding: 2,
-							name:    fmt.Sprintf("attachment-label-%x", id),
-						},
-						yAlign: 0.5,
-						text:   fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)),
-					},
-					VBox{
-						widgetBase: widgetBase{expand: true, fill: true},
-					},
-					Button{
-						widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-						image:      indicatorRemove,
-					},
-				},
-			},
-		})
+	for id, index := range attachments {
+		attachment := draft.attachments[index]
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)), false, nil))
+	}
+	for id, index := range detachments {
+		detachment := draft.detachments[index]
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
 	}
 	if len(initialAttachmentChildren) > 0 {
 		c.ui.Actions() <- Append{
@@ -1190,6 +1202,10 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	c.ui.Actions() <- UIState{uiStateCompose}
 	c.ui.Signal()
 
+	if draft.pendingDetachments == nil {
+		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
+	}
+
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
@@ -1197,71 +1213,159 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		}
 
 		if update, ok := event.(Update); ok {
-			lastText = update.text
-			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
+			overSize = c.updateUsage(validContactSelected, draft)
 			draft.body = update.text
 			c.ui.Signal()
 			continue
 		}
 
-		if open, ok := event.(OpenResult); ok && open.ok {
+		if open, ok := event.(OpenResult); ok && open.ok && open.arg == nil {
+			// Opening a file for an attachment.
+			contents, size, err := func(path string) (contents []byte, size int64, err error) {
+				file, err := os.Open(path)
+				if err != nil {
+					return
+				}
+				defer file.Close()
+
+				fi, err := file.Stat()
+				if err != nil {
+					return
+				}
+				if fi.Size() < pond.MaxSerializedMessage-500 {
+					contents, err = ioutil.ReadAll(file)
+					size = -1
+				} else {
+					size = fi.Size()
+				}
+				return
+			}(open.path)
+
 			base := filepath.Base(open.path)
-			contents, err := ioutil.ReadFile(open.path)
 			id := c.randId()
 
-			var label Widget
+			var label string
+			var extraWidgets []Widget
 			if err != nil {
-				label = Label{
+				label = base + ": " + err.Error()
+			} else if size > 0 {
+				// Oversize attachment.
+				label = fmt.Sprintf("%s (%d bytes, external)", base, size)
+				extraWidgets = []Widget{VBox{
 					widgetBase: widgetBase{
-						foreground: colorRed,
-						padding:    2,
-						name:       fmt.Sprintf("attachment-error-%x", id),
+						name: fmt.Sprintf("attachment-addi-%x", id),
 					},
-					yAlign: 0.5,
-					text:   base + ": " + err.Error(),
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{
+								padding: 4,
+							},
+							text: "This file is too large to send via Pond directly. Instead, this Pond message can contain the encryption key for the file and the encrypted file can be transported via a non-Pond mechanism.",
+							wrap: 300,
+						},
+						HBox{
+							children: []Widget{
+								Button{
+									widgetBase: widgetBase{
+										name: fmt.Sprintf("attachment-convert-%x", id),
+									},
+									text: "Save Encrypted",
+								},
+							},
+						},
+					},
+				}}
+
+				draft.pendingDetachments[id] = &pendingDetachment{
+					path: open.path,
 				}
 			} else {
-				label = Label{
-					widgetBase: widgetBase{
-						padding: 2,
-						name:    fmt.Sprintf("attachment-label-%x", id),
-					},
-					yAlign: 0.5,
-					text:   fmt.Sprintf("%s (%d bytes)", base, len(contents)),
-				}
-
+				label = fmt.Sprintf("%s (%d bytes)", base, len(contents))
 				a := &pond.Message_Attachment{
 					Filename: proto.String(filepath.Base(open.path)),
 					Contents: contents,
 				}
-				attachments[id] = a
+				attachments[id] = len(draft.attachments)
 				draft.attachments = append(draft.attachments, a)
 			}
 
 			c.ui.Actions() <- Append{
 				name: "filesvbox",
 				children: []Widget{
-					Frame{
+					widgetForAttachment(id, label, err != nil, extraWidgets),
+				},
+			}
+			overSize = c.updateUsage(validContactSelected, draft)
+			c.ui.Signal()
+		}
+		if open, ok := event.(OpenResult); ok && open.ok && open.arg != nil {
+			// Saving a detachment.
+			id := open.arg.(uint64)
+			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.ui.Actions() <- Append{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+				children: []Widget{
+					Progress{
 						widgetBase: widgetBase{
-							name:    fmt.Sprintf("attachment-frame-%x", id),
-							padding: 1,
-						},
-						child: HBox{
-							children: []Widget{
-								label,
-								VBox{
-									widgetBase: widgetBase{expand: true, fill: true},
-								},
-								Button{
-									widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-									image:      indicatorRemove,
-								},
-							},
+							name: fmt.Sprintf("attachment-progress-%x", id),
 						},
 					},
 				},
 			}
-			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
+			draft.pendingDetachments[id].cancel = c.startConversion(id, open.path, draft.pendingDetachments[id].path)
+			c.ui.Signal()
+		}
+
+		if derr, ok := event.(DetachmentError); ok {
+			id := derr.id
+			if _, ok := draft.pendingDetachments[id]; !ok {
+				continue
+			}
+			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-progress-%x", id)}
+			c.ui.Actions() <- Append{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{
+							foreground: colorRed,
+						},
+						text: derr.err.Error(),
+					},
+				},
+			}
+			delete(draft.pendingDetachments, id)
+			c.ui.Signal()
+		}
+		if prog, ok := event.(DetachmentProgress); ok {
+			id := prog.id
+			if _, ok := draft.pendingDetachments[id]; !ok {
+				continue
+			}
+			if prog.total == 0 {
+				continue
+			}
+			f := float64(prog.done) / float64(prog.total)
+			if f > 1 {
+				f = 1
+			}
+			c.ui.Actions() <- SetProgress{
+				name:     fmt.Sprintf("attachment-progress-%x", id),
+				fraction: f,
+			}
+			c.ui.Signal()
+		}
+		if complete, ok := event.(DetachmentComplete); ok {
+			id := complete.id
+			if _, ok := draft.pendingDetachments[id]; !ok {
+				continue
+			}
+			c.ui.Actions() <- Destroy{
+				name: fmt.Sprintf("attachment-progress-%x", id),
+			}
+			detachments[id] = len(draft.detachments)
+			draft.detachments = append(draft.detachments, complete.detachment)
+			delete(draft.pendingDetachments, id)
+			overSize = c.updateUsage(validContactSelected, draft)
 			c.ui.Signal()
 		}
 
@@ -1300,14 +1404,40 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				panic(click.name)
 			}
 			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
-			if attachment, ok := attachments[id]; ok {
-				draft.removeAttachment(attachment)
+			if index, ok := attachments[id]; ok {
+				draft.attachments = append(draft.attachments[:index], draft.attachments[index+1:]...)
 				delete(attachments, id)
 			}
-			overSize = c.updateUsage(lastText, inReplyTo != nil, validContactSelected, attachments)
+			if detachment, ok := draft.pendingDetachments[id]; ok {
+				if detachment.cancel != nil {
+					detachment.cancel()
+				}
+				delete(draft.pendingDetachments, id)
+			}
+			if index, ok := detachments[id]; ok {
+				draft.detachments = append(draft.detachments[:index], draft.detachments[index+1:]...)
+				delete(detachments, id)
+			}
+			overSize = c.updateUsage(validContactSelected, draft)
 			c.ui.Signal()
 			continue
 		}
+		const convertPrefix = "attachment-convert-"
+		if strings.HasPrefix(click.name, convertPrefix) {
+			// One of the attachment "Save Encrypted" buttons.
+			idStr := click.name[len(convertPrefix):]
+			id, err := strconv.ParseUint(idStr, 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- FileOpen{
+				save:  true,
+				title: "Save encrypted file",
+				arg:   id,
+			}
+			c.ui.Signal()
+		}
+
 		if click.name != "send" {
 			continue
 		}
@@ -1341,13 +1471,14 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 		id := c.randId()
 		err := c.send(to, &pond.Message{
-			Id:           proto.Uint64(id),
-			Time:         proto.Int64(time.Now().Unix()),
-			Body:         []byte(body),
-			BodyEncoding: pond.Message_RAW.Enum(),
-			InReplyTo:    replyToId,
-			MyNextDh:     nextDHPub[:],
-			Files:        attachmentsMapToList(attachments),
+			Id:            proto.Uint64(id),
+			Time:          proto.Int64(time.Now().Unix()),
+			Body:          []byte(body),
+			BodyEncoding:  pond.Message_RAW.Enum(),
+			InReplyTo:     replyToId,
+			MyNextDh:      nextDHPub[:],
+			Files:         draft.attachments,
+			DetachedFiles: draft.detachments,
 		})
 		if err != nil {
 			// TODO: handle this case better.
@@ -2116,6 +2247,8 @@ func (c *client) nextEvent() (event interface{}, wanted bool) {
 	case id := <-c.messageSentChan:
 		c.processMessageSent(id)
 		return
+	case event = <-c.backgroundChan:
+		break
 	case <-c.log.updateChan:
 		return
 	}
@@ -2517,6 +2650,7 @@ func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch b
 		drafts:          make(map[uint64]*Draft),
 		newMessageChan:  make(chan NewMessage),
 		messageSentChan: make(chan uint64, 1),
+		backgroundChan:  make(chan interface{}, 8),
 	}
 	c.log.toStderr = true
 

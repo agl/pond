@@ -161,6 +161,7 @@ func (c *client) unmarshal(state *protos.State) error {
 			id:          *m.Id,
 			body:        *m.Body,
 			attachments: m.Attachments,
+			detachments: m.Detachments,
 			created:     time.Unix(*m.Created, 0),
 		}
 		if m.To != nil {
@@ -259,6 +260,7 @@ func (c *client) marshal() []byte {
 			Id:          proto.Uint64(draft.id),
 			Body:        proto.String(draft.body),
 			Attachments: draft.attachments,
+			Detachments: draft.detachments,
 			Created:     proto.Int64(draft.created.Unix()),
 		}
 		if draft.to != 0 {

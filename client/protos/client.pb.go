@@ -286,6 +286,7 @@ type Draft struct {
 	Body             *string                       `protobuf:"bytes,4,req,name=body" json:"body,omitempty"`
 	InReplyTo        *uint64                       `protobuf:"fixed64,5,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Attachments      []*protos1.Message_Attachment `protobuf:"bytes,6,rep,name=attachments" json:"attachments,omitempty"`
+	Detachments      []*protos1.Message_Detachment `protobuf:"bytes,7,rep,name=detachments" json:"detachments,omitempty"`
 	XXX_unrecognized []byte                        `json:"-"`
 }
 
