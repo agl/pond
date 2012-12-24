@@ -26,6 +26,11 @@ const (
 	Reply_INCORRECT_GENERATION       Reply_Status = 14
 	Reply_MAILBOX_FULL               Reply_Status = 15
 	Reply_NO_ACCOUNT                 Reply_Status = 16
+	Reply_OVER_QUOTA                 Reply_Status = 17
+	Reply_FILE_LARGER_THAN_SIZE      Reply_Status = 18
+	Reply_FILE_COMPLETE              Reply_Status = 19
+	Reply_NO_SUCH_FILE               Reply_Status = 20
+	Reply_RESUME_PAST_END_OF_FILE    Reply_Status = 21
 )
 
 var Reply_Status_name = map[int32]string{
@@ -40,6 +45,11 @@ var Reply_Status_name = map[int32]string{
 	14: "INCORRECT_GENERATION",
 	15: "MAILBOX_FULL",
 	16: "NO_ACCOUNT",
+	17: "OVER_QUOTA",
+	18: "FILE_LARGER_THAN_SIZE",
+	19: "FILE_COMPLETE",
+	20: "NO_SUCH_FILE",
+	21: "RESUME_PAST_END_OF_FILE",
 }
 var Reply_Status_value = map[string]int32{
 	"OK":                         0,
@@ -53,6 +63,11 @@ var Reply_Status_value = map[string]int32{
 	"INCORRECT_GENERATION":       14,
 	"MAILBOX_FULL":               15,
 	"NO_ACCOUNT":                 16,
+	"OVER_QUOTA":                 17,
+	"FILE_LARGER_THAN_SIZE":      18,
+	"FILE_COMPLETE":              19,
+	"NO_SUCH_FILE":               20,
+	"RESUME_PAST_END_OF_FILE":    21,
 }
 
 func (x Reply_Status) Enum() *Reply_Status {
@@ -115,6 +130,8 @@ type Request struct {
 	NewAccount       *NewAccount `protobuf:"bytes,1,opt,name=new_account" json:"new_account,omitempty"`
 	Deliver          *Delivery   `protobuf:"bytes,2,opt,name=deliver" json:"deliver,omitempty"`
 	Fetch            *Fetch      `protobuf:"bytes,3,opt,name=fetch" json:"fetch,omitempty"`
+	Upload           *Upload     `protobuf:"bytes,4,opt,name=upload" json:"upload,omitempty"`
+	Download         *Download   `protobuf:"bytes,5,opt,name=download" json:"download,omitempty"`
 	XXX_unrecognized []byte      `json:"-"`
 }
 
@@ -143,11 +160,27 @@ func (this *Request) GetFetch() *Fetch {
 	return nil
 }
 
+func (this *Request) GetUpload() *Upload {
+	if this != nil {
+		return this.Upload
+	}
+	return nil
+}
+
+func (this *Request) GetDownload() *Download {
+	if this != nil {
+		return this.Download
+	}
+	return nil
+}
+
 type Reply struct {
 	Status           *Reply_Status   `protobuf:"varint,1,opt,name=status,enum=protos.Reply_Status,def=0" json:"status,omitempty"`
 	AccountCreated   *AccountCreated `protobuf:"bytes,2,opt,name=account_created" json:"account_created,omitempty"`
 	Fetched          *Fetched        `protobuf:"bytes,3,opt,name=fetched" json:"fetched,omitempty"`
 	Announce         *ServerAnnounce `protobuf:"bytes,4,opt,name=announce" json:"announce,omitempty"`
+	Upload           *UploadReply    `protobuf:"bytes,5,opt,name=upload" json:"upload,omitempty"`
+	Download         *DownloadReply  `protobuf:"bytes,6,opt,name=download" json:"download,omitempty"`
 	XXX_unrecognized []byte          `json:"-"`
 }
 
@@ -181,6 +214,20 @@ func (this *Reply) GetFetched() *Fetched {
 func (this *Reply) GetAnnounce() *ServerAnnounce {
 	if this != nil {
 		return this.Announce
+	}
+	return nil
+}
+
+func (this *Reply) GetUpload() *UploadReply {
+	if this != nil {
+		return this.Upload
+	}
+	return nil
+}
+
+func (this *Reply) GetDownload() *DownloadReply {
+	if this != nil {
+		return this.Download
 	}
 	return nil
 }
@@ -359,6 +406,94 @@ func (this *ServerAnnounce) GetMsg() string {
 		return *this.Msg
 	}
 	return ""
+}
+
+type Upload struct {
+	Id               *uint64 `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
+	Size             *int64  `protobuf:"varint,2,req,name=size" json:"size,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Upload) Reset()         { *this = Upload{} }
+func (this *Upload) String() string { return proto.CompactTextString(this) }
+func (*Upload) ProtoMessage()       {}
+
+func (this *Upload) GetId() uint64 {
+	if this != nil && this.Id != nil {
+		return *this.Id
+	}
+	return 0
+}
+
+func (this *Upload) GetSize() int64 {
+	if this != nil && this.Size != nil {
+		return *this.Size
+	}
+	return 0
+}
+
+type UploadReply struct {
+	Resume           *int64 `protobuf:"varint,1,opt,name=resume" json:"resume,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *UploadReply) Reset()         { *this = UploadReply{} }
+func (this *UploadReply) String() string { return proto.CompactTextString(this) }
+func (*UploadReply) ProtoMessage()       {}
+
+func (this *UploadReply) GetResume() int64 {
+	if this != nil && this.Resume != nil {
+		return *this.Resume
+	}
+	return 0
+}
+
+type Download struct {
+	From             []byte  `protobuf:"bytes,1,req,name=from" json:"from,omitempty"`
+	Id               *uint64 `protobuf:"fixed64,2,req,name=id" json:"id,omitempty"`
+	Resume           *int64  `protobuf:"varint,3,opt,name=resume" json:"resume,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Download) Reset()         { *this = Download{} }
+func (this *Download) String() string { return proto.CompactTextString(this) }
+func (*Download) ProtoMessage()       {}
+
+func (this *Download) GetFrom() []byte {
+	if this != nil {
+		return this.From
+	}
+	return nil
+}
+
+func (this *Download) GetId() uint64 {
+	if this != nil && this.Id != nil {
+		return *this.Id
+	}
+	return 0
+}
+
+func (this *Download) GetResume() int64 {
+	if this != nil && this.Resume != nil {
+		return *this.Resume
+	}
+	return 0
+}
+
+type DownloadReply struct {
+	Size             *int64 `protobuf:"varint,1,req,name=size" json:"size,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *DownloadReply) Reset()         { *this = DownloadReply{} }
+func (this *DownloadReply) String() string { return proto.CompactTextString(this) }
+func (*DownloadReply) ProtoMessage()       {}
+
+func (this *DownloadReply) GetSize() int64 {
+	if this != nil && this.Size != nil {
+		return *this.Size
+	}
+	return 0
 }
 
 type KeyExchange struct {

@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net"
@@ -72,16 +73,17 @@ func runHandshake(clientPrivate, clientPublic, serverPrivate, serverPublic *[32]
 	return err1, err2
 }
 
+func randBytes(b []byte) {
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic(err)
+	}
+}
+
 func TestHandshake(t *testing.T) {
 	var serverPrivate, clientPrivate, serverPublic, clientPublic [32]byte
 
-	if _, err := io.ReadFull(rand.Reader, serverPrivate[:]); err != nil {
-		t.Fatalf("reading from rand: %s", err)
-	}
-	if _, err := io.ReadFull(rand.Reader, clientPrivate[:]); err != nil {
-		t.Fatalf("reading from rand: %s", err)
-	}
-
+	randBytes(serverPrivate[:])
+	randBytes(clientPrivate[:])
 	curve25519.ScalarBaseMult(&serverPublic, &serverPrivate)
 	curve25519.ScalarBaseMult(&clientPublic, &clientPrivate)
 
@@ -95,4 +97,60 @@ func TestHandshake(t *testing.T) {
 	if clientError == nil && serverError == nil {
 		t.Fatal("bad handshake succeeded")
 	}
+}
+
+func TestStreamData(t *testing.T) {
+	var serverPrivate, clientPrivate, serverPublic, clientPublic [32]byte
+
+	randBytes(serverPrivate[:])
+	randBytes(clientPrivate[:])
+	curve25519.ScalarBaseMult(&serverPublic, &serverPrivate)
+	curve25519.ScalarBaseMult(&clientPublic, &clientPrivate)
+
+	x, y := NewBiDiPipe()
+	client := NewClient(x, &clientPrivate, &clientPublic, &serverPublic)
+	server := NewServer(y, &serverPrivate)
+
+	clientComplete := make(chan bool)
+	go func() {
+		defer x.Close()
+		err := client.Handshake()
+		if err != nil {
+			panic(err)
+		}
+		if _, err = client.Write(nil); err != nil {
+			panic(err)
+		}
+		if _, err = client.Write([]byte("hello")); err != nil {
+			panic(err)
+		}
+		if _, err = client.Write([]byte("world")); err != nil {
+			panic(err)
+		}
+		if _, err = client.Write(make([]byte, 20*1024)); err != nil {
+			panic(err)
+		}
+		close(clientComplete)
+	}()
+
+	serverComplete := make(chan bool)
+	go func() {
+		defer y.Close()
+		err := server.Handshake()
+		if err != nil {
+			panic(err)
+		}
+
+		h := sha256.New()
+		if _, err := io.Copy(h, server); err != nil {
+			panic(err)
+		}
+		if h.Sum(nil)[0] != 0xec {
+			panic("bad data received")
+		}
+		close(serverComplete)
+	}()
+
+	<-clientComplete
+	<-serverComplete
 }

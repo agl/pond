@@ -16,6 +16,12 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
+// blockSize is the size of the blocks of data that we'll send and receive when
+// working in streaming mode. Each block is prefixed by two length bytes (which
+// aren't counted in blockSize) and includes secretbox.Overhead bytes of MAC
+// tag (which are).
+const blockSize = 4096 - 2
+
 type Conn struct {
 	conn                     io.ReadWriteCloser
 	isServer                 bool
@@ -25,6 +31,21 @@ type Conn struct {
 	writeKey, readKey           [32]byte
 	writeKeyValid, readKeyValid bool
 	writeSequence, readSequence [24]byte
+
+	// readBuffer is used to receive bytes from the network when this Conn
+	// is used to stream data.
+	readBuffer []byte
+	// decryptBuffer is used to store decrypted payloads when this Conn is
+	// used to stream data and the caller's buffer isn't large enough to
+	// decrypt into directly.
+	decryptBuffer []byte
+	// readPending aliases into decryptBuffer when a partial decryption had
+	// to be returned to a caller because of buffer size limitations.
+	readPending []byte
+
+	// writeBuffer is used to hold encrypted payloads when this Conn is
+	// used for streaming data.
+	writeBuffer []byte
 }
 
 func NewServer(conn io.ReadWriteCloser, identity *[32]byte) *Conn {
@@ -54,6 +75,73 @@ func incSequence(seq *[24]byte) {
 		seq[i] = byte(n)
 		n >>= 8
 	}
+}
+
+func (c *Conn) Read(out []byte) (n int, err error) {
+	if len(c.readPending) > 0 {
+		n = copy(out, c.readPending)
+		c.readPending = c.readPending[n:]
+		return
+	}
+
+	if c.readBuffer == nil {
+		c.readBuffer = make([]byte, blockSize+2)
+	}
+
+	if _, err := io.ReadFull(c.conn, c.readBuffer[:2]); err != nil {
+		return 0, err
+	}
+	n = int(c.readBuffer[0]) | int(c.readBuffer[1])<<8
+	if n > len(c.readBuffer) {
+		return 0, errors.New("transport: peer's message too large for Read")
+	}
+	if _, err := io.ReadFull(c.conn, c.readBuffer[:n]); err != nil {
+		return 0, err
+	}
+
+	var ok bool
+	if len(out) >= n-secretbox.Overhead {
+		// We can decrypt directly into the output buffer.
+		out, ok = secretbox.Open(out[:0], c.readBuffer[:n], &c.readSequence, &c.readKey)
+		n = len(out)
+	} else {
+		// We need to decrypt into a side buffer and copy a prefix of
+		// the result into the caller's buffer.
+		c.decryptBuffer, ok = secretbox.Open(c.decryptBuffer[:0], c.readBuffer[:n], &c.readSequence, &c.readKey)
+		n = copy(out, c.decryptBuffer)
+		c.readPending = c.decryptBuffer[n:]
+	}
+	incSequence(&c.readSequence)
+	if !ok {
+		c.readPending = c.readPending[:0]
+		return 0, errors.New("transport: bad MAC")
+	}
+
+	return
+}
+
+func (c *Conn) Write(buf []byte) (n int, err error) {
+	if c.writeBuffer == nil {
+		c.writeBuffer = make([]byte, blockSize+2)
+	}
+
+	for len(buf) > 0 {
+		m := len(buf)
+		if m > blockSize-secretbox.Overhead {
+			m = blockSize - secretbox.Overhead
+		}
+		l := len(secretbox.Seal(c.writeBuffer[2:2], buf[:m], &c.writeSequence, &c.writeKey))
+		c.writeBuffer[0] = byte(l)
+		c.writeBuffer[1] = byte(l >> 8)
+		if _, err = c.conn.Write(c.writeBuffer[:2+l]); err != nil {
+			return n, err
+		}
+		n += m
+		buf = buf[m:]
+		incSequence(&c.writeSequence)
+	}
+
+	return
 }
 
 func (c *Conn) ReadProto(out proto.Message) error {

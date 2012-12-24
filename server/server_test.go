@@ -96,10 +96,13 @@ type script struct {
 }
 
 type action struct {
-	player       int
-	buildRequest func(*scriptState) *pond.Request
-	request      *pond.Request
-	validate     func(*testing.T, *pond.Reply)
+	player          int
+	buildRequest    func(*scriptState) *pond.Request
+	request         *pond.Request
+	payload         []byte
+	validate        func(*testing.T, *pond.Reply)
+	payloadSize     int
+	validatePayload func(*testing.T, []byte)
 }
 
 type scriptState struct {
@@ -192,6 +195,22 @@ func runScript(t *testing.T, s script) {
 			t.Fatal(err)
 		}
 		a.validate(t, reply)
+
+		if len(a.payload) > 0 {
+			_, err := conn.Write(a.payload)
+			if err != nil {
+				t.Fatalf("Failed to write payload: %s", err)
+			}
+		}
+		if a.payloadSize > 0 {
+			fromServer := make([]byte, a.payloadSize)
+			if _, err := io.ReadFull(conn, fromServer); err != nil {
+				t.Errorf("Failed to read payload: %s", err)
+			}
+			if a.validatePayload != nil {
+				a.validatePayload(t, fromServer)
+			}
+		}
 		conn.Close()
 	}
 }
@@ -199,7 +218,12 @@ func runScript(t *testing.T, s script) {
 func oneShotTest(t *testing.T, request *pond.Request, validate func(*testing.T, *pond.Reply)) {
 	runScript(t, script{
 		numPlayers: 1,
-		actions:    []action{{0, nil, request, validate}},
+		actions: []action{
+			{
+				request:  request,
+				validate: validate,
+			},
+		},
 	})
 }
 
@@ -249,20 +273,20 @@ func TestNoSuchAddress(t *testing.T) {
 	})
 }
 
-func BadNewAccount(t *testing.T) {
+func TestBadNewAccount(t *testing.T) {
 	oneShotTest(t, &pond.Request{
 		NewAccount: &pond.NewAccount{
 			Generation: proto.Uint32(0),
 			Group:      make([]byte, 5),
 		},
 	}, func(t *testing.T, reply *pond.Reply) {
-		if reply.AccountCreated == nil {
+		if reply.AccountCreated != nil {
 			t.Errorf("Bad reply to new account: %s", reply)
 		}
 	})
 }
 
-func NewAccount(t *testing.T) {
+func TestNewAccount(t *testing.T) {
 	groupPrivateKey, err := bbssig.GenerateGroup(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -345,6 +369,248 @@ func TestPingPong(t *testing.T) {
 					if reply.Fetched != nil {
 						t.Errorf("Fetched message twice!: %s", reply)
 						return
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestUpload(t *testing.T) {
+	payload := []byte("hello world")
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				request: &pond.Request{
+					Upload: &pond.Upload{
+						Id:   proto.Uint64(1),
+						Size: proto.Int64(int64(len(payload))),
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+					if reply.Upload == nil {
+						t.Fatalf("Upload reply missing: %s", reply)
+					}
+					if reply.Upload.Resume != nil {
+						t.Fatalf("Upload reply contained unexpected Resume: %s", reply)
+					}
+				},
+				payload: payload,
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return &pond.Request{
+						Download: &pond.Download{
+							From: s.publicIdentities[0][:],
+							Id:   proto.Uint64(1),
+						},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to download: %s", reply)
+					}
+					if reply.Download == nil {
+						t.Fatalf("Download reply missing: %s", reply)
+					}
+					if *reply.Download.Size != int64(len(payload)) {
+						t.Fatalf("Download reply contained wrong size: %d vs %d", *reply.Download.Size, len(payload))
+					}
+				},
+				payloadSize: len(payload),
+				validatePayload: func(t *testing.T, fromServer []byte) {
+					if !bytes.Equal(payload, fromServer) {
+						t.Errorf("bad payload in download: %x", fromServer)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestOversizeUpload(t *testing.T) {
+	runScript(t, script{
+		numPlayers:             1,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				request: &pond.Request{
+					Upload: &pond.Upload{
+						Id:   proto.Uint64(1),
+						Size: proto.Int64(1 << 32),
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status == nil || *reply.Status != pond.Reply_OVER_QUOTA {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestResumeUpload(t *testing.T) {
+	payload := []byte("hello world")
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				request: &pond.Request{
+					Upload: &pond.Upload{
+						Id:   proto.Uint64(1),
+						Size: proto.Int64(int64(len(payload))),
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+					if reply.Upload == nil {
+						t.Fatalf("Upload reply missing: %s", reply)
+					}
+					if reply.Upload.Resume != nil {
+						t.Fatalf("Upload reply contained unexpected Resume: %s", reply)
+					}
+				},
+				payload: payload[:2],
+			},
+			{
+				player: 0,
+				request: &pond.Request{
+					Upload: &pond.Upload{
+						Id:   proto.Uint64(1),
+						Size: proto.Int64(int64(len(payload))),
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+					if reply.Upload == nil {
+						t.Fatalf("Upload reply missing: %s", reply)
+					}
+					if reply.Upload.Resume == nil || *reply.Upload.Resume != 2 {
+						t.Fatalf("Upload reply contained unexpected Resume: %s", reply)
+					}
+				},
+				payload: payload[2:],
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return &pond.Request{
+						Download: &pond.Download{
+							From: s.publicIdentities[0][:],
+							Id:   proto.Uint64(1),
+						},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to download: %s", reply)
+					}
+					if reply.Download == nil {
+						t.Fatalf("Download reply missing: %s", reply)
+					}
+					if *reply.Download.Size != int64(len(payload)) {
+						t.Fatalf("Download reply contained wrong size: %d vs %d", *reply.Download.Size, len(payload))
+					}
+				},
+				payloadSize: len(payload),
+				validatePayload: func(t *testing.T, fromServer []byte) {
+					if !bytes.Equal(payload, fromServer) {
+						t.Errorf("bad payload in download: %x", fromServer)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestResumeDownload(t *testing.T) {
+	payload := []byte("hello world")
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				request: &pond.Request{
+					Upload: &pond.Upload{
+						Id:   proto.Uint64(1),
+						Size: proto.Int64(int64(len(payload))),
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+					if reply.Upload == nil {
+						t.Fatalf("Upload reply missing: %s", reply)
+					}
+					if reply.Upload.Resume != nil {
+						t.Fatalf("Upload reply contained unexpected Resume: %s", reply)
+					}
+				},
+				payload: payload,
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return &pond.Request{
+						Download: &pond.Download{
+							From:   s.publicIdentities[0][:],
+							Id:     proto.Uint64(1),
+							Resume: proto.Int64(2),
+						},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to download: %s", reply)
+					}
+					if reply.Download == nil {
+						t.Fatalf("Download reply missing: %s", reply)
+					}
+					if *reply.Download.Size != int64(len(payload)) {
+						t.Fatalf("Download reply contained wrong size: %d vs %d", *reply.Download.Size, len(payload))
+					}
+				},
+				payloadSize: len(payload) - 2,
+				validatePayload: func(t *testing.T, fromServer []byte) {
+					if !bytes.Equal(payload[2:], fromServer) {
+						t.Errorf("bad payload in download: %x", fromServer)
+					}
+				},
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return &pond.Request{
+						Download: &pond.Download{
+							From:   s.publicIdentities[0][:],
+							Id:     proto.Uint64(1),
+							Resume: proto.Int64(20),
+						},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status == nil || *reply.Status != pond.Reply_RESUME_PAST_END_OF_FILE {
+						t.Fatalf("Bad reply to download: %s", reply)
 					}
 				},
 			},

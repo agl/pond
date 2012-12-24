@@ -15,6 +15,8 @@ message Request {
 	optional NewAccount new_account = 1;
 	optional Delivery deliver = 2;
 	optional Fetch fetch = 3;
+	optional Upload upload = 4;
+	optional Download download = 5;
 }
 
 // Reply is the server's reply to the client.
@@ -34,12 +36,21 @@ message Reply {
 		MAILBOX_FULL = 15;
 
 		NO_ACCOUNT = 16;
+
+		OVER_QUOTA = 17;
+		FILE_LARGER_THAN_SIZE = 18;
+		FILE_COMPLETE = 19;
+
+		NO_SUCH_FILE = 20;
+		RESUME_PAST_END_OF_FILE = 21;
 	}
 	optional Status status = 1 [ default = OK ];
 
 	optional AccountCreated account_created = 2;
 	optional Fetched fetched = 3;
 	optional ServerAnnounce announce = 4;
+	optional UploadReply upload = 5;
+	optional DownloadReply download = 6;
 }
 
 // NewAccount is a request that the client may send to the server to request a
@@ -107,6 +118,25 @@ message Fetched {
 message ServerAnnounce {
 	required int64 time = 1;
 	required string msg = 2;
+}
+
+message Upload {
+	required fixed64 id = 1;
+	required int64 size = 2;
+}
+
+message UploadReply {
+	optional int64 resume = 1;
+}
+
+message Download {
+	required bytes from = 1;
+	required fixed64 id = 2;
+	optional int64 resume = 3;
+}
+
+message DownloadReply {
+	required int64 size = 1;
 }
 
 // KeyExchange is a message sent between clients to establish a relation. It's

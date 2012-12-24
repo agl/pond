@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,19 +24,161 @@ const (
 	maxQueue = 100
 )
 
+type Account struct {
+	sync.Mutex
+
+	server     *Server
+	id         [32]byte
+	group      *bbssig.Group
+	filesValid bool
+	filesCount int
+	filesSize  int64
+}
+
+func NewAccount(s *Server, id *[32]byte) *Account {
+	a := &Account{
+		server: s,
+	}
+	copy(a.id[:], id[:])
+	return a
+}
+
+func (a *Account) Group() *bbssig.Group {
+	a.Lock()
+	defer a.Unlock()
+
+	if a.group != nil {
+		return a.group
+	}
+
+	groupPath := filepath.Join(a.Path(), "group")
+	groupBytes, err := ioutil.ReadFile(groupPath)
+	if err != nil {
+		log.Printf("Failed to load group from %s: %s", groupPath, err)
+		return nil
+	}
+
+	var ok bool
+	if a.group, ok = new(bbssig.Group).Unmarshal(groupBytes); !ok {
+		log.Printf("Failed to parse group from %s", groupPath)
+		return nil
+	}
+
+	return a.group
+}
+
+func (a *Account) Path() string {
+	return filepath.Join(a.server.baseDirectory, "accounts", fmt.Sprintf("%x", a.id[:]))
+}
+
+func (a *Account) FilePath() string {
+	return filepath.Join(a.Path(), "files")
+}
+
+func (a *Account) LoadFileInfo() bool {
+	a.Lock()
+	defer a.Unlock()
+
+	return a.loadFileInfo()
+}
+
+func (a *Account) loadFileInfo() bool {
+	if a.filesValid {
+		return true
+	}
+
+	path := filepath.Join(a.Path(), "files")
+	dir, err := os.Open(path)
+	if err != nil {
+		if err = os.Mkdir(path, 0700); err != nil {
+			log.Printf("Failed to create files directory %s: %s", path, err)
+			return false
+		}
+		dir, err = os.Open(path)
+	}
+	if err != nil {
+		log.Printf("Failed to open files directory %s: %s", path, err)
+		return false
+	}
+	defer dir.Close()
+
+	ents, err := dir.Readdir(0)
+	if err != nil {
+		log.Printf("Failed to read %s: %s", path, err)
+		return false
+	}
+
+	for _, ent := range ents {
+		if ent.IsDir() {
+			continue
+		}
+		a.filesCount++
+		a.filesSize += ent.Size()
+	}
+
+	a.filesValid = true
+	return true
+}
+
+func (a *Account) ReserveFile(newFile bool, size int64) bool {
+	a.Lock()
+	defer a.Unlock()
+
+	if !a.loadFileInfo() {
+		return false
+	}
+
+	newCount := a.filesCount
+	if newFile {
+		newCount++
+		if newCount < a.filesCount {
+			return false
+		}
+	}
+
+	newSize := a.filesSize + size
+	if newSize < a.filesSize {
+		return false
+	}
+
+	if newCount > maxFilesCount || newSize > maxFilesSize {
+		return false
+	}
+
+	a.filesCount = newCount
+	a.filesSize = newSize
+	return true
+}
+
+func (a *Account) ReleaseFile(removedFile bool, size int64) {
+	a.Lock()
+	defer a.Unlock()
+
+	if !a.loadFileInfo() {
+		return
+	}
+
+	if removedFile && a.filesCount > 0 {
+		a.filesCount--
+	}
+	if a.filesSize >= size {
+		a.filesSize -= size
+	}
+}
+
 type Server struct {
 	sync.Mutex
 
 	baseDirectory string
 	// accounts caches the groups for users to save loading them every
 	// time.
-	accounts map[string]*bbssig.Group
+	accounts map[string]*Account
 }
 
 func NewServer(dir string) *Server {
 	return &Server{
 		baseDirectory: dir,
-		accounts:      make(map[string]*bbssig.Group),
+		accounts:      make(map[string]*Account),
 	}
 }
 
@@ -55,6 +199,18 @@ func (s *Server) Process(conn *transport.Conn) {
 		reply = s.deliver(from, req.Deliver)
 	} else if req.Fetch != nil {
 		reply, messageFetched = s.fetch(from, req.Fetch)
+	} else if req.Upload != nil {
+		reply = s.upload(from, conn, req.Upload)
+		if reply == nil {
+			// Connection will be handled by upload.
+			return
+		}
+	} else if req.Download != nil {
+		reply = s.download(conn, req.Download)
+		if reply == nil {
+			// Connection will be handled by download.
+			return
+		}
 	} else {
 		reply = &pond.Reply{Status: pond.Reply_NO_REQUEST.Enum()}
 	}
@@ -81,17 +237,16 @@ func (s *Server) Process(conn *transport.Conn) {
 	}
 }
 
-func (s *Server) accountPath(account *[32]byte) string {
-	return filepath.Join(s.baseDirectory, "accounts", fmt.Sprintf("%x", account[:]))
-}
-
 func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
-	group, ok := new(bbssig.Group).Unmarshal(req.Group)
+	account := NewAccount(s, from)
+
+	var ok bool
+	account.group, ok = new(bbssig.Group).Unmarshal(req.Group)
 	if !ok {
 		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
 	}
 
-	path := s.accountPath(from)
+	path := account.Path()
 	if _, err := os.Stat(path); err == nil {
 		return &pond.Reply{Status: pond.Reply_IDENTITY_ALREADY_KNOWN.Enum()}
 	}
@@ -107,7 +262,7 @@ func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 	}
 
 	s.Lock()
-	s.accounts[string(from[:])] = group
+	s.accounts[string(from[:])] = account
 	s.Unlock()
 
 	return &pond.Reply{
@@ -120,52 +275,37 @@ func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 	}
 
 err:
-	os.Remove(s.accountPath(from))
+	os.Remove(account.Path())
 	return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
 }
 
-func (s *Server) getAccount(account *[32]byte) (*bbssig.Group, bool) {
+func (s *Server) getAccount(id *[32]byte) (*Account, bool) {
+	key := string(id[:])
+
 	s.Lock()
-	group, ok := s.accounts[string(account[:])]
+	account, ok := s.accounts[key]
 	s.Unlock()
 
 	if ok {
-		return group, true
+		return account, true
 	}
 
-	path := s.accountPath(account)
+	account = NewAccount(s, id)
+	path := account.Path()
 	if _, err := os.Stat(path); err != nil {
 		return nil, false
 	}
 
-	groupPath := filepath.Join(path, "group")
-	groupBytes, err := ioutil.ReadFile(groupPath)
-	if err != nil {
-		log.Print("group file doesn't exist for " + path)
-		return nil, false
-	}
-
-	group, ok = new(bbssig.Group).Unmarshal(groupBytes)
-	if !ok {
-		log.Print("group corrupt for " + path)
-		return nil, false
-	}
-
-	return group, true
-}
-
-func (s *Server) haveAccount(account *[32]byte) bool {
 	s.Lock()
-	_, ok := s.accounts[string(account[:])]
+	if other, ok := s.accounts[key]; ok {
+		// We raced with another goroutine to create this and they won.
+		account = other
+	} else {
+		s.accounts[key] = account
+	}
 	s.Unlock()
 
-	if ok {
-		return true
-	}
-
-	path := s.accountPath(account)
-	_, err := os.Stat(path)
-	return err == nil
+	return account, true
 }
 
 func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
@@ -175,7 +315,7 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	}
 	copy(to[:], del.To)
 
-	group, ok := s.getAccount(&to)
+	account, ok := s.getAccount(&to)
 	if !ok {
 		return &pond.Reply{Status: pond.Reply_NO_SUCH_ADDRESS.Enum()}
 	}
@@ -185,13 +325,18 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	digest := sha.Sum(nil)
 	sha.Reset()
 
+	group := account.Group()
+	if group == nil {
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+
 	if !group.Verify(digest, sha, del.Signature) {
 		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}
 	}
 
 	serialized, _ := proto.Marshal(del)
 
-	path := s.accountPath(&to)
+	path := account.Path()
 	dir, err := os.Open(path)
 	if err != nil {
 		log.Printf("Failed to open %s: %s", dir, err)
@@ -216,10 +361,11 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 }
 
 func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) {
-	if !s.haveAccount(from) {
+	account, ok := s.getAccount(from)
+	if !ok {
 		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}, ""
 	}
-	path := s.accountPath(from)
+	path := account.Path()
 
 	dir, err := os.Open(path)
 	if err != nil {
@@ -309,10 +455,140 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 }
 
 func (s *Server) confirmedDelivery(from *[32]byte, messageName string) {
-	path := s.accountPath(from)
+	account, ok := s.getAccount(from)
+	if !ok {
+		return
+	}
+	path := account.Path()
 	msgPath := filepath.Join(path, messageName)
 
 	if err := os.Remove(msgPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to delete message file in %s: %s", msgPath, err)
 	}
+}
+
+const maxFilesCount = 100
+const maxFilesSize = 100 * 1024 * 1024
+
+func (s *Server) upload(from *[32]byte, conn *transport.Conn, upload *pond.Upload) *pond.Reply {
+	account, ok := s.getAccount(from)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}
+	}
+
+	if *upload.Size < 1 {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
+	path := filepath.Join(account.FilePath(), strconv.FormatUint(*upload.Id, 16))
+
+	if !account.LoadFileInfo() {
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		log.Printf("Failed to create file %s: %s", path, err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+	defer file.Close()
+
+	offset, err := file.Seek(0, 2 /* from end */)
+
+	switch {
+	case offset == *upload.Size:
+		return &pond.Reply{Status: pond.Reply_FILE_COMPLETE.Enum()}
+	case offset > *upload.Size:
+		return &pond.Reply{Status: pond.Reply_FILE_LARGER_THAN_SIZE.Enum()}
+	}
+
+	size := *upload.Size - offset
+	if !account.ReserveFile(offset > 0, size) {
+		return &pond.Reply{Status: pond.Reply_OVER_QUOTA.Enum()}
+	}
+
+	var resume *int64
+	if offset > 0 {
+		resume = proto.Int64(offset)
+	}
+
+	reply := &pond.Reply{
+		Upload: &pond.UploadReply{
+			Resume: resume,
+		},
+	}
+	if err := conn.WriteProto(reply); err != nil {
+		return nil
+	}
+
+	n, err := io.Copy(file, io.LimitReader(conn, size))
+	switch {
+	case n == 0:
+		os.Remove(path)
+		account.ReleaseFile(true, size)
+	case n < size:
+		account.ReleaseFile(false, size-n)
+	case n == size:
+		if err == nil {
+			conn.Write([]byte{0})
+		}
+	case n > size:
+		panic("impossible")
+	}
+
+	return nil
+}
+
+func (s *Server) download(conn *transport.Conn, download *pond.Download) *pond.Reply {
+	var from [32]byte
+	if len(download.From) != len(from) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+	copy(from[:], download.From)
+
+	account, ok := s.getAccount(&from)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_SUCH_ADDRESS.Enum()}
+	}
+
+	path := filepath.Join(account.FilePath(), strconv.FormatUint(*download.Id, 16))
+	file, err := os.OpenFile(path, os.O_RDONLY, 0600)
+	if err != nil {
+		return &pond.Reply{Status: pond.Reply_NO_SUCH_FILE.Enum()}
+	}
+	defer file.Close()
+
+	fi, err := file.Stat()
+	if err != nil {
+		log.Printf("failed to stat file %s: %s", path, err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+	size := fi.Size()
+
+	if download.Resume != nil {
+		if *download.Resume < 1 {
+			return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+		}
+
+		if size <= *download.Resume {
+			return &pond.Reply{Status: pond.Reply_RESUME_PAST_END_OF_FILE.Enum()}
+		}
+		pos, err := file.Seek(*download.Resume, 0 /* from start */)
+		if pos != *download.Resume || err != nil {
+			log.Printf("failed to seek to %d in %s: got %d %s", *download.Resume, path, pos, err)
+			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+		}
+	}
+
+	reply := &pond.Reply{
+		Download: &pond.DownloadReply{
+			Size: proto.Int64(size),
+		},
+	}
+	if err := conn.WriteProto(reply); err != nil {
+		return nil
+	}
+
+	io.Copy(conn, file)
+	return nil
 }
