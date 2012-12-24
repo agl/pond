@@ -406,12 +406,12 @@ func (c *client) doCreateAccount() error {
 		Generation: proto.Uint32(c.generation),
 		Group:      c.groupPriv.Group.Marshal(),
 	}
-	if err := conn.Write(request); err != nil {
+	if err := conn.WriteProto(request); err != nil {
 		return err
 	}
 
 	reply := new(pond.Reply)
-	if err := conn.Read(reply); err != nil {
+	if err := conn.ReadProto(reply); err != nil {
 		return err
 	}
 	if err := replyToError(reply); err != nil {
@@ -495,13 +495,13 @@ func (c *client) transact() {
 			c.log.Printf("Failed to connect to %s: %s", server, err)
 			continue
 		}
-		if err := conn.Write(req); err != nil {
+		if err := conn.WriteProto(req); err != nil {
 			c.log.Printf("Failed to send to %s: %s", server, err)
 			continue
 		}
 
 		reply := new(pond.Reply)
-		if err := conn.Read(reply); err != nil {
+		if err := conn.ReadProto(reply); err != nil {
 			c.log.Printf("Failed to read from %s: %s", server, err)
 			continue
 		}

@@ -40,7 +40,7 @@ func NewServer(dir string) *Server {
 
 func (s *Server) Process(conn *transport.Conn) {
 	req := new(pond.Request)
-	if err := conn.Read(req); err != nil {
+	if err := conn.ReadProto(req); err != nil {
 		log.Printf("Error from Read: %s", err)
 		return
 	}
@@ -63,7 +63,7 @@ func (s *Server) Process(conn *transport.Conn) {
 		reply = &pond.Reply{}
 	}
 
-	if err := conn.Write(reply); err != nil {
+	if err := conn.WriteProto(reply); err != nil {
 		log.Printf("Error from Write: %s", err)
 		return
 	}

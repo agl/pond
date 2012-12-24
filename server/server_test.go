@@ -151,7 +151,7 @@ func runScript(t *testing.T, s script) {
 		}
 
 		conn := server.Dial(&identities[i], &publicIdentities[i])
-		if err := conn.Write(&pond.Request{
+		if err := conn.WriteProto(&pond.Request{
 			NewAccount: &pond.NewAccount{
 				Generation: proto.Uint32(0),
 				Group:      groupPrivateKeys[i].Group.Marshal(),
@@ -161,7 +161,7 @@ func runScript(t *testing.T, s script) {
 		}
 
 		reply := new(pond.Reply)
-		if err := conn.Read(reply); err != nil {
+		if err := conn.ReadProto(reply); err != nil {
 			t.Fatalf("Error while reading reply from server: %s", err)
 		}
 		if reply.AccountCreated == nil {
@@ -183,12 +183,12 @@ func runScript(t *testing.T, s script) {
 		if a.buildRequest != nil {
 			req = a.buildRequest(state)
 		}
-		if err := conn.Write(req); err != nil {
+		if err := conn.WriteProto(req); err != nil {
 			t.Fatal(err)
 		}
 
 		reply := new(pond.Reply)
-		if err := conn.Read(reply); err != nil {
+		if err := conn.ReadProto(reply); err != nil {
 			t.Fatal(err)
 		}
 		a.validate(t, reply)

@@ -45,7 +45,7 @@ func runHandshake(clientPrivate, clientPublic, serverPrivate, serverPublic *[32]
 		defer close(clientError)
 		err := client.Handshake()
 		if err == nil {
-			err = client.Write(&pond.Fetch{})
+			err = client.WriteProto(&pond.Fetch{})
 		}
 		clientError <- err
 	}()
@@ -62,7 +62,7 @@ func runHandshake(clientPrivate, clientPublic, serverPrivate, serverPublic *[32]
 		}
 		if err == nil {
 			msg := new(pond.Fetch)
-			err = server.Read(msg)
+			err = server.ReadProto(msg)
 		}
 		serverError <- err
 	}()

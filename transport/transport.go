@@ -56,7 +56,7 @@ func incSequence(seq *[24]byte) {
 	}
 }
 
-func (c *Conn) Read(out proto.Message) error {
+func (c *Conn) ReadProto(out proto.Message) error {
 	buf := make([]byte, pond.TransportSize+2+secretbox.Overhead)
 	n, err := c.read(buf)
 	if err != nil {
@@ -74,7 +74,7 @@ func (c *Conn) Read(out proto.Message) error {
 	return proto.Unmarshal(buf[:n], out)
 }
 
-func (c *Conn) Write(msg proto.Message) error {
+func (c *Conn) WriteProto(msg proto.Message) error {
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		return err
