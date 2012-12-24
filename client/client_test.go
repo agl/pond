@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -97,7 +98,8 @@ type TestUI struct {
 	currentStateID int
 	t              *testing.T
 	text           map[string]string
-	fileOpen       bool
+	fileOpen       FileOpen
+	haveFileOpen   bool
 	panicOnSignal  bool
 }
 
@@ -182,7 +184,8 @@ ReadActions:
 					ui.processWidget(child)
 				}
 			case FileOpen:
-				ui.fileOpen = true
+				ui.fileOpen = action
+				ui.haveFileOpen = true
 			}
 		default:
 			break ReadActions
@@ -193,13 +196,14 @@ ReadActions:
 	return uierr
 }
 
-func (ui *TestUI) WaitForFileOpen() {
-	ui.fileOpen = false
-	for ui.fileOpen == false {
+func (ui *TestUI) WaitForFileOpen() FileOpen {
+	ui.haveFileOpen = false
+	for !ui.haveFileOpen {
 		if err := ui.WaitForSignal(); err != nil {
 			ui.t.Fatal(err)
 		}
 	}
+	return ui.fileOpen
 }
 
 type TestClient struct {
@@ -826,4 +830,122 @@ func TestDraft(t *testing.T) {
 
 	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
 	client.ui.WaitForSignal()
+}
+
+func TestDetachedFiles(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	proceedToPaired(t, client1, client2, server)
+	client1.ui.events <- Click{name: "compose"}
+	client1.AdvanceTo(uiStateCompose)
+
+	plaintextPath := filepath.Join(client1.stateDir, "file")
+	ciphertextPath := filepath.Join(client1.stateDir, "encrypted")
+	plaintext := make([]byte, 20*1024)
+	io.ReadFull(rand.Reader, plaintext)
+	if err := ioutil.WriteFile(plaintextPath, plaintext, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	client1.ui.events <- Click{name: "attach"}
+	client1.ui.WaitForFileOpen()
+	client1.ui.events <- OpenResult{path: plaintextPath, ok: true}
+	client1.ui.WaitForSignal()
+	for name := range client1.ui.text {
+		const labelPrefix = "attachment-label-"
+		if strings.HasPrefix(name, labelPrefix) {
+			attachmentID, err := strconv.ParseUint(name[len(labelPrefix):], 16, 64)
+			if err != nil {
+				t.Fatalf("Failed to parse attachment label: %s", name)
+			}
+			client1.ui.events <- Click{name: fmt.Sprintf("attachment-convert-%x", attachmentID)}
+			break
+		}
+	}
+	fo := client1.ui.WaitForFileOpen()
+	client1.ui.events <- OpenResult{path: ciphertextPath, ok: true, arg: fo.arg}
+	client1.ui.WaitForSignal()
+
+	var draft *Draft
+	for _, d := range client1.drafts {
+		draft = d
+		break
+	}
+
+	for len(draft.detachments) == 0 {
+		client1.ui.WaitForSignal()
+	}
+
+	client1.ui.events <- Click{
+		name:      "send",
+		combos:    map[string]string{"to": "client2"},
+		textViews: map[string]string{"body": "foo"},
+	}
+
+	client1.AdvanceTo(uiStateOutbox)
+	ackChan := make(chan bool)
+	client1.fetchNowChan <- ackChan
+	<-ackChan
+
+	_, msg := fetchMessage(client2)
+	if len(msg.message.DetachedFiles) != 1 {
+		t.Fatalf("message received with no detachments")
+	}
+
+	for _, e := range client2.inboxUI.entries {
+		if e.id == msg.id {
+			client2.ui.events <- Click{name: e.boxName}
+			break
+		}
+	}
+
+	client2.AdvanceTo(uiStateInbox)
+	client2.ui.events <- Click{name: "detachment-decrypt-0"}
+	fo = client2.ui.WaitForFileOpen()
+	client2.ui.events <- OpenResult{ok: true, path: ciphertextPath, arg: fo.arg}
+	fo = client2.ui.WaitForFileOpen()
+	outputPath := filepath.Join(client1.stateDir, "output")
+	client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+	client2.ui.WaitForSignal()
+
+	var id uint64
+	for dID := range msg.decryptions {
+		id = dID
+		break
+	}
+
+	if id == 0 {
+		t.Fatalf("Failed to get id of decryption")
+	}
+
+	for len(msg.decryptions) > 0 {
+		client2.ui.WaitForSignal()
+	}
+
+	result, err := ioutil.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(result, plaintext) {
+		t.Fatalf("bad decryption")
+	}
 }

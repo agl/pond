@@ -142,6 +142,13 @@ type client struct {
 	backgroundChan  chan interface{}
 }
 
+// pendingDecryption represents a detachment decryption/download operation
+// that's in progress. These are not saved to disk.
+type pendingDecryption struct {
+	index  int
+	cancel func()
+}
+
 // InboxMessage represents a message in the client's inbox. (Although acks also
 // appear as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -156,6 +163,8 @@ type InboxMessage struct {
 	// message may be nil if the contact who sent this is pending. In this
 	// case, sealed with contain the encrypted message.
 	message *pond.Message
+
+	decryptions map[uint64]*pendingDecryption
 }
 
 // NewMessage is sent from the network goroutine to the client goroutine and
@@ -1014,6 +1023,102 @@ func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []W
 	}
 }
 
+type DetachmentUI interface {
+	IsValid(id uint64) bool
+	ProgressName(id uint64) string
+	VBoxName(id uint64) string
+	OnFinal(id uint64)
+	OnSuccess(id uint64, detachment *pond.Message_Detachment)
+}
+
+type ComposeDetachmentUI struct {
+	draft       *Draft
+	detachments map[uint64]int
+	ui          UI
+	final       func()
+}
+
+func (i ComposeDetachmentUI) IsValid(id uint64) bool {
+	_, ok := i.draft.pendingDetachments[id]
+	return ok
+}
+
+func (i ComposeDetachmentUI) ProgressName(id uint64) string {
+	return fmt.Sprintf("attachment-progress-%x", id)
+}
+
+func (i ComposeDetachmentUI) VBoxName(id uint64) string {
+	return fmt.Sprintf("attachment-vbox-%x", id)
+}
+
+func (i ComposeDetachmentUI) OnFinal(id uint64) {
+	delete(i.draft.pendingDetachments, id)
+	i.final()
+}
+
+func (i ComposeDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
+	i.detachments[id] = len(i.draft.detachments)
+	i.draft.detachments = append(i.draft.detachments, detachment)
+}
+
+func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
+	if derr, ok := event.(DetachmentError); ok {
+		id := derr.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		c.ui.Actions() <- Destroy{name: ui.ProgressName(id)}
+		c.ui.Actions() <- Append{
+			name: ui.VBoxName(id),
+			children: []Widget{
+				Label{
+					widgetBase: widgetBase{
+						foreground: colorRed,
+					},
+					text: derr.err.Error(),
+				},
+			},
+		}
+		ui.OnFinal(id)
+		c.ui.Signal()
+		return true
+	}
+	if prog, ok := event.(DetachmentProgress); ok {
+		id := prog.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		if prog.total == 0 {
+			return true
+		}
+		f := float64(prog.done) / float64(prog.total)
+		if f > 1 {
+			f = 1
+		}
+		c.ui.Actions() <- SetProgress{
+			name:     ui.ProgressName(id),
+			fraction: f,
+		}
+		c.ui.Signal()
+		return true
+	}
+	if complete, ok := event.(DetachmentComplete); ok {
+		id := complete.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		c.ui.Actions() <- Destroy{
+			name: ui.ProgressName(id),
+		}
+		ui.OnFinal(id)
+		ui.OnSuccess(id, complete.detachment)
+		c.ui.Signal()
+		return true
+	}
+
+	return false
+}
+
 func (c *client) updateUsage(validContactSelected bool, draft *Draft) bool {
 	usageMessage, over := usageString(draft)
 	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
@@ -1199,6 +1304,10 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		}
 	}
 
+	detachmentUI := ComposeDetachmentUI{draft, detachments, c.ui, func() {
+		overSize = c.updateUsage(validContactSelected, draft)
+	}}
+
 	c.ui.Actions() <- UIState{uiStateCompose}
 	c.ui.Signal()
 
@@ -1312,61 +1421,12 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 					},
 				},
 			}
-			draft.pendingDetachments[id].cancel = c.startConversion(id, open.path, draft.pendingDetachments[id].path)
+			draft.pendingDetachments[id].cancel = c.startEncryption(id, open.path, draft.pendingDetachments[id].path)
 			c.ui.Signal()
 		}
 
-		if derr, ok := event.(DetachmentError); ok {
-			id := derr.id
-			if _, ok := draft.pendingDetachments[id]; !ok {
-				continue
-			}
-			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-progress-%x", id)}
-			c.ui.Actions() <- Append{
-				name: fmt.Sprintf("attachment-vbox-%x", id),
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{
-							foreground: colorRed,
-						},
-						text: derr.err.Error(),
-					},
-				},
-			}
-			delete(draft.pendingDetachments, id)
-			c.ui.Signal()
-		}
-		if prog, ok := event.(DetachmentProgress); ok {
-			id := prog.id
-			if _, ok := draft.pendingDetachments[id]; !ok {
-				continue
-			}
-			if prog.total == 0 {
-				continue
-			}
-			f := float64(prog.done) / float64(prog.total)
-			if f > 1 {
-				f = 1
-			}
-			c.ui.Actions() <- SetProgress{
-				name:     fmt.Sprintf("attachment-progress-%x", id),
-				fraction: f,
-			}
-			c.ui.Signal()
-		}
-		if complete, ok := event.(DetachmentComplete); ok {
-			id := complete.id
-			if _, ok := draft.pendingDetachments[id]; !ok {
-				continue
-			}
-			c.ui.Actions() <- Destroy{
-				name: fmt.Sprintf("attachment-progress-%x", id),
-			}
-			detachments[id] = len(draft.detachments)
-			draft.detachments = append(draft.detachments, complete.detachment)
-			delete(draft.pendingDetachments, id)
-			overSize = c.updateUsage(validContactSelected, draft)
-			c.ui.Signal()
+		if c.maybeProcessDetachmentMsg(event, detachmentUI) {
+			continue
 		}
 
 		click, ok := event.(Click)
@@ -1539,6 +1599,44 @@ func (c *client) sendAck(msg *InboxMessage) {
 	}
 }
 
+func maybeTruncate(s string) string {
+	if runes := []rune(s); len(runes) > 30 {
+		runes = runes[:30]
+		runes = append(runes, 0x2026 /* ellipsis */)
+		return string(runes)
+	}
+	return s
+}
+
+type InboxDetachmentUI struct {
+	msg *InboxMessage
+	ui  UI
+}
+
+func (i InboxDetachmentUI) IsValid(id uint64) bool {
+	_, ok := i.msg.decryptions[id]
+	return ok
+}
+
+func (i InboxDetachmentUI) ProgressName(id uint64) string {
+	return fmt.Sprintf("detachment-progress-%d", i.msg.decryptions[id].index)
+}
+
+func (i InboxDetachmentUI) VBoxName(id uint64) string {
+	return fmt.Sprintf("detachment-vbox-%d", i.msg.decryptions[id].index)
+}
+
+func (i InboxDetachmentUI) OnFinal(id uint64) {
+	i.ui.Actions() <- Sensitive{
+		name:      fmt.Sprintf("detachment-decrypt-%d", i.msg.decryptions[id].index),
+		sensitive: true,
+	}
+	delete(i.msg.decryptions, id)
+}
+
+func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
+}
+
 func (c *client) showInbox(id uint64) interface{} {
 	var msg *InboxMessage
 	for _, candidate := range c.inbox {
@@ -1697,12 +1795,7 @@ func (c *client) showInbox(id uint64) interface{} {
 	if msg.message != nil && len(msg.message.Files) != 0 {
 		var attachmentWidgets []Widget
 		for i, attachment := range msg.message.Files {
-			filename := *attachment.Filename
-			if runes := []rune(filename); len(runes) > 30 {
-				runes = runes[:30]
-				runes = append(runes, 0x2026 /* ellipsis */)
-				filename = string(runes)
-			}
+			filename := maybeTruncate(*attachment.Filename)
 			attachmentWidgets = append(attachmentWidgets, HBox{
 				children: []Widget{
 					Label{text: filename, yAlign: 0.5},
@@ -1737,8 +1830,85 @@ func (c *client) showInbox(id uint64) interface{} {
 		c.ui.Actions() <- Append{name: "lhs", children: attachmentsUI}
 	}
 
+	if msg.message != nil && len(msg.message.DetachedFiles) != 0 {
+		var detachmentWidgets []Widget
+		for i, detachment := range msg.message.DetachedFiles {
+			filename := maybeTruncate(*detachment.Filename)
+			var pending *pendingDecryption
+			for _, candidate := range msg.decryptions {
+				if candidate.index == i {
+					pending = candidate
+					break
+				}
+			}
+			vbox := VBox{
+				widgetBase: widgetBase{
+					name: fmt.Sprintf("detachment-vbox-%d", i),
+				},
+				children: []Widget{
+					HBox{
+						children: []Widget{
+							Label{text: filename, yAlign: 0.5},
+							Button{
+								widgetBase: widgetBase{name: fmt.Sprintf("detachment-decrypt-%d", i), padding: 3},
+								text:       "Decrypt file",
+							},
+							Button{
+								widgetBase: widgetBase{
+									name:        fmt.Sprintf("detachment-save-%d", i),
+									padding:     3,
+									insensitive: pending != nil,
+								},
+								text: "Save",
+							},
+						},
+					},
+				},
+			}
+			if pending != nil {
+				vbox.children = append(vbox.children, Progress{
+					widgetBase: widgetBase{
+						name: fmt.Sprintf("detachment-progress-%d", i),
+					},
+				})
+			}
+			detachmentWidgets = append(detachmentWidgets, vbox)
+		}
+		detachmentsUI := []Widget{
+			HBox{
+				widgetBase: widgetBase{padding: 3},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "KEYS",
+						yAlign:     0.5,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 3},
+				children: []Widget{
+					VBox{
+						widgetBase: widgetBase{padding: 25},
+						children:   detachmentWidgets,
+					},
+				},
+			},
+		}
+		c.ui.Actions() <- Append{name: "lhs", children: detachmentsUI}
+	}
+
 	c.ui.Actions() <- UIState{uiStateInbox}
 	c.ui.Signal()
+
+	detachmentUI := InboxDetachmentUI{msg, c.ui}
+
+	const detachmentDecryptPrefix = "detachment-decrypt-"
+	const detachmentProgressPrefix = "detachment-progress-"
+
+	if msg.decryptions == nil {
+		msg.decryptions = make(map[uint64]*pendingDecryption)
+	}
 
 	for {
 		event, wanted := c.nextEvent()
@@ -1746,20 +1916,97 @@ func (c *client) showInbox(id uint64) interface{} {
 			return event
 		}
 
+		type attachmentSaveIndex int
+		type detachmentSaveIndex int
+		type detachmentDecryptIndex int
+		type detachmentDecryptInput struct {
+			index  int
+			inPath string
+		}
+
 		if open, ok := event.(OpenResult); ok && open.ok {
-			ioutil.WriteFile(open.path, msg.message.Files[open.arg.(int)].Contents, 0600)
+			switch i := open.arg.(type) {
+			case attachmentSaveIndex:
+				ioutil.WriteFile(open.path, msg.message.Files[i].Contents, 0600)
+			case detachmentSaveIndex:
+				bytes, err := proto.Marshal(msg.message.DetachedFiles[i])
+				if err != nil {
+					panic(err)
+				}
+				ioutil.WriteFile(open.path, bytes, 0600)
+			case detachmentDecryptIndex:
+				c.ui.Actions() <- FileOpen{
+					save:  true,
+					title: "Save decrypted file",
+					arg: detachmentDecryptInput{
+						index:  int(i),
+						inPath: open.path,
+					},
+				}
+				c.ui.Signal()
+			case detachmentDecryptInput:
+				c.ui.Actions() <- Sensitive{
+					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i.index),
+					sensitive: false,
+				}
+				c.ui.Actions() <- Append{
+					name: fmt.Sprintf("detachment-vbox-%d", i.index),
+					children: []Widget{
+						Progress{
+							widgetBase: widgetBase{
+								name: fmt.Sprintf("detachment-progress-%d", i.index),
+							},
+						},
+					},
+				}
+				id := c.randId()
+				msg.decryptions[id] = &pendingDecryption{
+					index:  i.index,
+					cancel: c.startDecryption(id, open.path, i.inPath, msg.message.DetachedFiles[i.index]),
+				}
+				c.ui.Signal()
+			default:
+				panic("unimplemented OpenResult")
+			}
+			continue
+		}
+
+		if c.maybeProcessDetachmentMsg(event, detachmentUI) {
+			continue
 		}
 
 		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(click.name, "attachment-") {
-			i, _ := strconv.Atoi(click.name[11:])
+		const attachmentPrefix = "attachment-"
+		if strings.HasPrefix(click.name, attachmentPrefix) {
+			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
 			c.ui.Actions() <- FileOpen{
 				save:  true,
 				title: "Save Attachment",
-				arg:   i}
+				arg:   attachmentSaveIndex(i),
+			}
+			c.ui.Signal()
+			continue
+		}
+		const detachmentSavePrefix = "detachment-save-"
+		if strings.HasPrefix(click.name, detachmentSavePrefix) {
+			i, _ := strconv.Atoi(click.name[len(detachmentSavePrefix):])
+			c.ui.Actions() <- FileOpen{
+				save:  true,
+				title: "Save Key",
+				arg:   detachmentSaveIndex(i),
+			}
+			c.ui.Signal()
+			continue
+		}
+		if strings.HasPrefix(click.name, detachmentDecryptPrefix) {
+			i, _ := strconv.Atoi(click.name[len(detachmentDecryptPrefix):])
+			c.ui.Actions() <- FileOpen{
+				title: "Select encrypted file",
+				arg:   detachmentDecryptIndex(i),
+			}
 			c.ui.Signal()
 			continue
 		}

@@ -427,6 +427,7 @@ func (ui *GTKUI) handle(action interface{}) {
 	case Destroy:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.Destroy()
+		delete(ui.widgets, action.name)
 	case FileOpen:
 		fileAction := gtk.GTK_FILE_CHOOSER_ACTION_OPEN
 		but := gtk.GTK_STOCK_OPEN
