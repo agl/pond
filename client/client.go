@@ -210,6 +210,7 @@ type Contact struct {
 // pendingDetachment represents a detachment conversion/upload operation that's
 // in progress. These are not saved to disk.
 type pendingDetachment struct {
+	size   int64
 	path   string
 	cancel func()
 }
@@ -749,6 +750,9 @@ func (cs *listUI) Remove(id uint64) {
 			}
 			cs.ui.Actions() <- Destroy{name: entry.boxName}
 			cs.ui.Signal()
+			if cs.selected == id {
+				cs.selected = 0
+			}
 			return
 		}
 	}
@@ -1097,6 +1101,7 @@ func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) b
 		}
 		c.ui.Actions() <- SetProgress{
 			name:     ui.ProgressName(id),
+			s:        prog.status,
 			fraction: f,
 		}
 		c.ui.Signal()
@@ -1288,6 +1293,10 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
 
+	if draft.pendingDetachments == nil {
+		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
+	}
+
 	var initialAttachmentChildren []Widget
 	for id, index := range attachments {
 		attachment := draft.attachments[index]
@@ -1297,6 +1306,16 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		detachment := draft.detachments[index]
 		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
 	}
+	for id, pending := range draft.pendingDetachments {
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", filepath.Base(pending.path), pending.size), false, []Widget{
+			Progress{
+				widgetBase: widgetBase{
+					name: fmt.Sprintf("attachment-progress-%x", id),
+				},
+			},
+		}))
+	}
+
 	if len(initialAttachmentChildren) > 0 {
 		c.ui.Actions() <- Append{
 			name:     "filesvbox",
@@ -1310,10 +1329,6 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 	c.ui.Actions() <- UIState{uiStateCompose}
 	c.ui.Signal()
-
-	if draft.pendingDetachments == nil {
-		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
-	}
 
 	for {
 		event, wanted := c.nextEvent()
@@ -1380,6 +1395,12 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 									},
 									text: "Save Encrypted",
 								},
+								Button{
+									widgetBase: widgetBase{
+										name: fmt.Sprintf("attachment-upload-%x", id),
+									},
+									text: "Upload",
+								},
 							},
 						},
 					},
@@ -1387,6 +1408,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 				draft.pendingDetachments[id] = &pendingDetachment{
 					path: open.path,
+					size: size,
 				}
 			} else {
 				label = fmt.Sprintf("%s (%d bytes)", base, len(contents))
@@ -1495,6 +1517,27 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				title: "Save encrypted file",
 				arg:   id,
 			}
+			c.ui.Signal()
+		}
+		const uploadPrefix = "attachment-upload-"
+		if strings.HasPrefix(click.name, uploadPrefix) {
+			idStr := click.name[len(uploadPrefix):]
+			id, err := strconv.ParseUint(idStr, 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.ui.Actions() <- Append{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+				children: []Widget{
+					Progress{
+						widgetBase: widgetBase{
+							name: fmt.Sprintf("attachment-progress-%x", id),
+						},
+					},
+				},
+			}
+			draft.pendingDetachments[id].cancel = c.startUpload(id, draft.pendingDetachments[id].path)
 			c.ui.Signal()
 		}
 
@@ -1629,6 +1672,10 @@ func (i InboxDetachmentUI) VBoxName(id uint64) string {
 func (i InboxDetachmentUI) OnFinal(id uint64) {
 	i.ui.Actions() <- Sensitive{
 		name:      fmt.Sprintf("detachment-decrypt-%d", i.msg.decryptions[id].index),
+		sensitive: true,
+	}
+	i.ui.Actions() <- Sensitive{
+		name:      fmt.Sprintf("detachment-download-%d", i.msg.decryptions[id].index),
 		sensitive: true,
 	}
 	delete(i.msg.decryptions, id)
@@ -1841,27 +1888,41 @@ func (c *client) showInbox(id uint64) interface{} {
 					break
 				}
 			}
+			hboxChildren := []Widget{
+				Label{text: filename, yAlign: 0.5},
+				Button{
+					widgetBase: widgetBase{
+						name:        fmt.Sprintf("detachment-decrypt-%d", i),
+						padding:     3,
+						insensitive: pending != nil,
+					},
+					text: "Decrypt file",
+				},
+				Button{
+					widgetBase: widgetBase{
+						name:    fmt.Sprintf("detachment-save-%d", i),
+						padding: 3,
+					},
+					text: "Save",
+				},
+			}
+			if detachment.Url != nil && len(*detachment.Url) > 0 {
+				hboxChildren = append(hboxChildren, Button{
+					widgetBase: widgetBase{
+						name:        fmt.Sprintf("detachment-download-%d", i),
+						padding:     3,
+						insensitive: pending != nil,
+					},
+					text: "Download",
+				})
+			}
 			vbox := VBox{
 				widgetBase: widgetBase{
 					name: fmt.Sprintf("detachment-vbox-%d", i),
 				},
 				children: []Widget{
 					HBox{
-						children: []Widget{
-							Label{text: filename, yAlign: 0.5},
-							Button{
-								widgetBase: widgetBase{name: fmt.Sprintf("detachment-decrypt-%d", i), padding: 3},
-								text:       "Decrypt file",
-							},
-							Button{
-								widgetBase: widgetBase{
-									name:        fmt.Sprintf("detachment-save-%d", i),
-									padding:     3,
-									insensitive: pending != nil,
-								},
-								text: "Save",
-							},
-						},
+						children: hboxChildren,
 					},
 				},
 			}
@@ -1905,6 +1966,7 @@ func (c *client) showInbox(id uint64) interface{} {
 
 	const detachmentDecryptPrefix = "detachment-decrypt-"
 	const detachmentProgressPrefix = "detachment-progress-"
+	const detachmentDownloadPrefix = "detachment-download-"
 
 	if msg.decryptions == nil {
 		msg.decryptions = make(map[uint64]*pendingDecryption)
@@ -1923,6 +1985,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			index  int
 			inPath string
 		}
+		type detachmentDownloadIndex int
 
 		if open, ok := event.(OpenResult); ok && open.ok {
 			switch i := open.arg.(type) {
@@ -1949,6 +2012,10 @@ func (c *client) showInbox(id uint64) interface{} {
 					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i.index),
 					sensitive: false,
 				}
+				c.ui.Actions() <- Sensitive{
+					name:      fmt.Sprintf("%s%d", detachmentDownloadPrefix, i.index),
+					sensitive: false,
+				}
 				c.ui.Actions() <- Append{
 					name: fmt.Sprintf("detachment-vbox-%d", i.index),
 					children: []Widget{
@@ -1963,6 +2030,31 @@ func (c *client) showInbox(id uint64) interface{} {
 				msg.decryptions[id] = &pendingDecryption{
 					index:  i.index,
 					cancel: c.startDecryption(id, open.path, i.inPath, msg.message.DetachedFiles[i.index]),
+				}
+				c.ui.Signal()
+			case detachmentDownloadIndex:
+				c.ui.Actions() <- Sensitive{
+					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i),
+					sensitive: false,
+				}
+				c.ui.Actions() <- Sensitive{
+					name:      fmt.Sprintf("%s%d", detachmentDownloadPrefix, i),
+					sensitive: false,
+				}
+				c.ui.Actions() <- Append{
+					name: fmt.Sprintf("detachment-vbox-%d", i),
+					children: []Widget{
+						Progress{
+							widgetBase: widgetBase{
+								name: fmt.Sprintf("detachment-progress-%d", i),
+							},
+						},
+					},
+				}
+				id := c.randId()
+				msg.decryptions[id] = &pendingDecryption{
+					index:  int(i),
+					cancel: c.startDownload(id, open.path, msg.message.DetachedFiles[i]),
 				}
 				c.ui.Signal()
 			default:
@@ -2006,6 +2098,15 @@ func (c *client) showInbox(id uint64) interface{} {
 			c.ui.Actions() <- FileOpen{
 				title: "Select encrypted file",
 				arg:   detachmentDecryptIndex(i),
+			}
+			c.ui.Signal()
+			continue
+		}
+		if strings.HasPrefix(click.name, detachmentDownloadPrefix) {
+			i, _ := strconv.Atoi(click.name[len(detachmentDownloadPrefix):])
+			c.ui.Actions() <- FileOpen{
+				title: "Save to",
+				arg:   detachmentDownloadIndex(i),
 			}
 			c.ui.Signal()
 			continue

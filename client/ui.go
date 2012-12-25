@@ -255,6 +255,7 @@ type SetForeground struct {
 type SetProgress struct {
 	name     string
 	fraction float64
+	s        string
 }
 
 type UIState struct {

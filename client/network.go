@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	mrand "math/rand"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -527,4 +530,317 @@ func (c *client) transact() {
 		}
 
 	}
+}
+
+type detachmentTransfer interface {
+	Request() *pond.Request
+	ProcessReply(*pond.Reply) (*os.File, bool, int64, bool, error)
+	Complete(conn *transport.Conn) bool
+}
+
+type uploadTransfer struct {
+	id    uint64
+	file  *os.File
+	total int64
+}
+
+func (ut uploadTransfer) Request() *pond.Request {
+	return &pond.Request{
+		Upload: &pond.Upload{
+			Id:   proto.Uint64(ut.id),
+			Size: proto.Int64(ut.total),
+		},
+	}
+}
+
+func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
+	var offset int64
+	if reply.Upload != nil && reply.Upload.Resume != nil {
+		offset = *reply.Upload.Resume
+	}
+
+	if offset == ut.total {
+		isComplete = true
+		return
+	}
+	pos, err := ut.file.Seek(offset, 0 /* from start */)
+	if err != nil || pos != offset {
+		err = fmt.Errorf("failed to seek in temp file: %d %d %s", pos, offset, err)
+		return
+	}
+
+	file = ut.file
+	isUpload = true
+	total = ut.total - offset
+	return
+}
+
+func (ut uploadTransfer) Complete(conn *transport.Conn) bool {
+	// The server will send us a zero byte if it got everything.
+	buf := []byte{1}
+	io.ReadFull(conn, buf)
+	return buf[0] == 0
+}
+
+func (c *client) uploadDetachment(out chan interface{}, in *os.File, id uint64, killChan chan bool) error {
+	transfer := uploadTransfer{file: in, id: id}
+
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	transfer.total = fi.Size()
+
+	return c.transferDetachment(out, c.server, transfer, id, killChan)
+}
+
+type downloadTransfer struct {
+	fileID uint64
+	file   *os.File
+	resume int64
+	from   *[32]byte
+}
+
+func (dt downloadTransfer) Request() *pond.Request {
+	var resume *int64
+	if dt.resume > 0 {
+		resume = proto.Int64(dt.resume)
+	}
+
+	return &pond.Request{
+		Download: &pond.Download{
+			From:   dt.from[:],
+			Id:     proto.Uint64(dt.fileID),
+			Resume: resume,
+		},
+	}
+}
+
+func (dt downloadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
+	if reply.Download == nil {
+		err = errors.New("Reply from server didn't include a download section")
+		return
+	}
+
+	size := *reply.Download.Size
+	if size < dt.resume {
+		err = errors.New("Reply from server suggested that the file was truncated")
+		return
+	}
+
+	file = dt.file
+	total = size - dt.resume
+	return
+}
+
+func (dt downloadTransfer) Complete(conn *transport.Conn) bool {
+	return true
+}
+
+func (c *client) downloadDetachment(out chan interface{}, file *os.File, id uint64, downloadURL string, killChan chan bool) error {
+	u, err := url.Parse(downloadURL)
+	if err != nil {
+		return errors.New("failed to parse download URL: " + err.Error())
+	}
+	if u.Scheme != "pondserver" {
+		return errors.New("download URL is a not a Pond URL")
+	}
+	path := u.Path
+	if len(path) == 0 {
+		return errors.New("download URL is missing a path")
+	}
+	path = path[1:]
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		return errors.New("download URL has incorrect number of path elements")
+	}
+	fromSlice, err := hex.DecodeString(parts[0])
+	if err != nil {
+		return errors.New("failed to parse public identity from download URL: " + err.Error())
+	}
+	if len(fromSlice) != 32 {
+		return errors.New("public identity in download URL is wrong length")
+	}
+	var from [32]byte
+	copy(from[:], fromSlice)
+
+	fileID, err := strconv.ParseUint(parts[1], 16, 64)
+	if err != nil {
+		return errors.New("failed to parse download ID from URL: " + err.Error())
+	}
+
+	u.Path = ""
+	server := u.String()
+
+	transfer := downloadTransfer{file: file, fileID: fileID, from: &from}
+
+	pos, err := file.Seek(0, 2 /* from end */)
+	if err != nil {
+		return err
+	}
+	transfer.resume = pos
+
+	return c.transferDetachment(out, server, transfer, id, killChan)
+}
+
+func (c *client) transferDetachment(out chan interface{}, server string, transfer detachmentTransfer, id uint64, killChan chan bool) error {
+	var transferred, total int64
+
+	sendStatus := func(s string) {
+		select {
+		case out <- DetachmentProgress{
+			id:     id,
+			done:   uint64(transferred),
+			total:  uint64(total),
+			status: s,
+		}:
+			break
+		default:
+		}
+	}
+
+	const initialBackoff = 10 * time.Second
+	const maxBackoff = 5 * time.Minute
+	backoff := initialBackoff
+
+	for {
+		sendStatus("Connecting")
+
+		conn, err := c.dialServer(server, false)
+		if err != nil {
+			c.log.Printf("Failed to connect to %s: %s", c.server, err)
+			sendStatus("Waiting to reconnect")
+
+			select {
+			case <-time.After(backoff):
+				break
+			case <-killChan:
+				return backgroundCanceledError
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		backoff = initialBackoff
+
+		sendStatus("Requesting transfer")
+		if err := conn.WriteProto(transfer.Request()); err != nil {
+			c.log.Printf("Failed to write request to %s: %s", c.server, err)
+			conn.Close()
+			continue
+		}
+
+		reply := new(pond.Reply)
+		if err := conn.ReadProto(reply); err != nil {
+			c.log.Printf("Failed to read reply from %s: %s", c.server, err)
+			conn.Close()
+			continue
+		}
+
+		if reply.Status != nil && *reply.Status == pond.Reply_RESUME_PAST_END_OF_FILE {
+			conn.Close()
+			return nil
+		}
+
+		if err := replyToError(reply); err != nil {
+			c.log.Printf("Request failed: %s", err)
+			conn.Close()
+			return err
+		}
+
+		var file *os.File
+		var isUpload, isComplete bool
+		if file, isUpload, total, isComplete, err = transfer.ProcessReply(reply); err != nil {
+			c.log.Printf("Request failed: %s", err)
+			conn.Close()
+			return err
+		}
+		if isComplete {
+			conn.Close()
+			return nil
+		}
+
+		var in io.Reader
+		var out io.Writer
+		if isUpload {
+			out = conn
+			in = file
+		} else {
+			out = file
+			in = conn
+		}
+
+		buf := make([]byte, 16*1024)
+		var lastUpdate time.Time
+
+		for {
+			select {
+			case <-killChan:
+				conn.Close()
+				return backgroundCanceledError
+			default:
+				break
+			}
+
+			conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+			n, err := in.Read(buf)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				conn.Close()
+				if isUpload {
+					err = fmt.Errorf("failed to read during transfer: %s", err)
+					c.log.Printf("%s", err)
+					return err
+				}
+				// Read errors from the network are transient.
+				continue
+			}
+
+			n, err = out.Write(buf[:n])
+			if err != nil {
+				conn.Close()
+				if !isUpload {
+					err = fmt.Errorf("failed to write during download: %s", err)
+					c.log.Printf("%s", err)
+					return err
+				}
+				// Write errors to the network are transient.
+				continue
+			}
+
+			transferred += int64(n)
+			if transferred > total {
+				err = errors.New("transferred more than the expected amount")
+				conn.Close()
+				c.log.Printf("%s", err)
+				return err
+			}
+			now := time.Now()
+			if lastUpdate.IsZero() || now.Sub(lastUpdate) > 500*time.Millisecond {
+				lastUpdate = now
+				sendStatus("")
+			}
+
+			time.Sleep(5 * time.Millisecond)
+		}
+
+		if transferred < total {
+			conn.Close()
+			continue
+		}
+
+		ok := transfer.Complete(conn)
+		conn.Close()
+		if ok {
+			return nil
+		}
+	}
+
+	return nil
 }

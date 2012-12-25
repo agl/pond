@@ -9,6 +9,7 @@ import (
 	"hash"
 	"io"
 	"strconv"
+	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/go.crypto/nacl/secretbox"
@@ -74,6 +75,16 @@ func incSequence(seq *[24]byte) {
 		n += uint32(seq[i])
 		seq[i] = byte(n)
 		n >>= 8
+	}
+}
+
+type deadlineable interface {
+	SetDeadline(time.Time)
+}
+
+func (c *Conn) SetDeadline(t time.Time) {
+	if d, ok := c.conn.(deadlineable); ok {
+		d.SetDeadline(t)
 	}
 }
 
