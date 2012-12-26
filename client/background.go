@@ -91,6 +91,7 @@ func (c *client) startUpload(id uint64, inPath string) (cancel func()) {
 		}
 		if err == nil {
 			detachment.Url = proto.String(c.buildDetachmentURL(id))
+			c.log.Printf("Finished upload of %s", *detachment.Url)
 			c.backgroundChan <- DetachmentComplete{id, detachment}
 		} else {
 			c.backgroundChan <- DetachmentError{id, err}

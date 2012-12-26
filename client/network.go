@@ -638,6 +638,7 @@ func (dt downloadTransfer) Complete(conn *transport.Conn) bool {
 }
 
 func (c *client) downloadDetachment(out chan interface{}, file *os.File, id uint64, downloadURL string, killChan chan bool) error {
+	c.log.Printf("Starting download of %s", downloadURL)
 	u, err := url.Parse(downloadURL)
 	if err != nil {
 		return errors.New("failed to parse download URL: " + err.Error())

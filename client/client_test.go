@@ -832,7 +832,7 @@ func TestDraft(t *testing.T) {
 	client.ui.WaitForSignal()
 }
 
-func TestDetachedFiles(t *testing.T) {
+func testDetached(t *testing.T, upload bool) {
 	t.Parallel()
 
 	server, err := NewTestServer(t)
@@ -859,7 +859,7 @@ func TestDetachedFiles(t *testing.T) {
 
 	plaintextPath := filepath.Join(client1.stateDir, "file")
 	ciphertextPath := filepath.Join(client1.stateDir, "encrypted")
-	plaintext := make([]byte, 20*1024)
+	plaintext := make([]byte, 200*1024)
 	io.ReadFull(rand.Reader, plaintext)
 	if err := ioutil.WriteFile(plaintextPath, plaintext, 0644); err != nil {
 		t.Fatal(err)
@@ -876,13 +876,19 @@ func TestDetachedFiles(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to parse attachment label: %s", name)
 			}
-			client1.ui.events <- Click{name: fmt.Sprintf("attachment-convert-%x", attachmentID)}
+			if upload {
+				client1.ui.events <- Click{name: fmt.Sprintf("attachment-upload-%x", attachmentID)}
+			} else {
+				client1.ui.events <- Click{name: fmt.Sprintf("attachment-convert-%x", attachmentID)}
+			}
 			break
 		}
 	}
-	fo := client1.ui.WaitForFileOpen()
-	client1.ui.events <- OpenResult{path: ciphertextPath, ok: true, arg: fo.arg}
-	client1.ui.WaitForSignal()
+	if !upload {
+		fo := client1.ui.WaitForFileOpen()
+		client1.ui.events <- OpenResult{path: ciphertextPath, ok: true, arg: fo.arg}
+		client1.ui.WaitForSignal()
+	}
 
 	var draft *Draft
 	for _, d := range client1.drafts {
@@ -918,12 +924,20 @@ func TestDetachedFiles(t *testing.T) {
 	}
 
 	client2.AdvanceTo(uiStateInbox)
-	client2.ui.events <- Click{name: "detachment-decrypt-0"}
-	fo = client2.ui.WaitForFileOpen()
-	client2.ui.events <- OpenResult{ok: true, path: ciphertextPath, arg: fo.arg}
-	fo = client2.ui.WaitForFileOpen()
+	if upload {
+		client2.ui.events <- Click{name: "detachment-download-0"}
+	} else {
+		client2.ui.events <- Click{name: "detachment-decrypt-0"}
+	}
+	fo := client2.ui.WaitForFileOpen()
 	outputPath := filepath.Join(client1.stateDir, "output")
-	client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+	if upload {
+		client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+	} else {
+		client2.ui.events <- OpenResult{ok: true, path: ciphertextPath, arg: fo.arg}
+		fo = client2.ui.WaitForFileOpen()
+		client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+	}
 	client2.ui.WaitForSignal()
 
 	var id uint64
@@ -948,4 +962,12 @@ func TestDetachedFiles(t *testing.T) {
 	if !bytes.Equal(result, plaintext) {
 		t.Fatalf("bad decryption")
 	}
+}
+
+func TestDetachedFile(t *testing.T) {
+	testDetached(t, false)
+}
+
+func TestUploadDownload(t *testing.T) {
+	testDetached(t, true)
 }
