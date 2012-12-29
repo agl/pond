@@ -121,3 +121,33 @@ func TestSign(t *testing.T) {
 		t.Errorf("updated signature failed to verify")
 	}
 }
+
+func BenchmarkVerify(b *testing.B) {
+	priv, err := GenerateGroup(rand.Reader)
+	if err != nil {
+		b.Fatalf("failed to generate group: %s", err)
+	}
+
+	group := priv.Group
+	member, err := priv.NewMember(rand.Reader)
+	if err != nil {
+		b.Fatalf("failed to add member to group: %s", err)
+	}
+
+	msg := []byte("hello world")
+	h := sha256.New()
+	h.Write(msg)
+	digest := h.Sum(nil)
+
+	sig, err := member.Sign(rand.Reader, digest, h)
+	if err != nil {
+		b.Fatalf("failed to sign message: %s", err)
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if !group.Verify(digest, h, sig) {
+			b.Errorf("signature failed to verify")
+		}
+	}
+}
