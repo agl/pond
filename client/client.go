@@ -1174,7 +1174,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		var replyToId, contactId uint64
 		from := preSelected
 
-		for inReplyTo != nil {
+		if inReplyTo != nil {
 			replyToId = inReplyTo.id
 			contactId = inReplyTo.from
 		}
