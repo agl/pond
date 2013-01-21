@@ -351,6 +351,19 @@ func (c *client) DeselectAll() {
 	c.draftsUI.Deselect()
 }
 
+var rightPlaceholderUI = EventBox{
+	widgetBase: widgetBase{background: colorGray, name: "right"},
+	child: Label{
+		widgetBase: widgetBase{
+			foreground: colorTitleForeground,
+			font:       fontLoadLarge,
+		},
+		text:   "Pond",
+		xAlign: 0.5,
+		yAlign: 0.5,
+	},
+}
+
 func (c *client) mainUI() {
 	ui := Paned{
 		left: Scrolled{
@@ -484,18 +497,7 @@ func (c *client) mainUI() {
 		right: Scrolled{
 			horizontal: true,
 			viewport:   true,
-			child: EventBox{
-				widgetBase: widgetBase{background: colorGray, name: "right"},
-				child: Label{
-					widgetBase: widgetBase{
-						foreground: colorTitleForeground,
-						font:       fontLoadLarge,
-					},
-					text:   "Pond",
-					xAlign: 0.5,
-					yAlign: 0.5,
-				},
-			},
+			child:      rightPlaceholderUI,
 		},
 	}
 
@@ -1196,25 +1198,8 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	initialUsageMessage, overSize := usageString(draft)
 	validContactSelected := len(preSelected) > 0
 
-	ui := VBox{
+	lhs := VBox{
 		children: []Widget{
-			EventBox{
-				widgetBase: widgetBase{background: colorHeaderBackground},
-				child: VBox{
-					children: []Widget{
-						HBox{
-							widgetBase: widgetBase{padding: 10},
-							children: []Widget{
-								Label{
-									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
-									text:       "COMPOSE",
-								},
-							},
-						},
-					},
-				},
-			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 			HBox{
 				widgetBase: widgetBase{padding: 2},
 				children: []Widget{
@@ -1230,13 +1215,6 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 						},
 						labels:      contactNames,
 						preSelected: preSelected,
-					},
-					Label{
-						widgetBase: widgetBase{expand: true},
-					},
-					Button{
-						widgetBase: widgetBase{packEnd: true, padding: 10, name: "send", insensitive: !validContactSelected},
-						text:       "Send",
 					},
 				},
 			},
@@ -1274,6 +1252,49 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 					VBox{
 						widgetBase: widgetBase{name: "filesvbox", padding: 25},
 					},
+				},
+			},
+		},
+	}
+	rhs := VBox{
+		widgetBase: widgetBase{padding: 5},
+		children: []Widget{
+			Button{
+				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2},
+				text:       "Send",
+			},
+			Button{
+				widgetBase: widgetBase{name: "discard", padding: 2},
+				text:       "Discard",
+			},
+		},
+	}
+	ui := VBox{
+		children: []Widget{
+			EventBox{
+				widgetBase: widgetBase{background: colorHeaderBackground},
+				child: VBox{
+					children: []Widget{
+						HBox{
+							widgetBase: widgetBase{padding: 10},
+							children: []Widget{
+								Label{
+									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
+									text:       "COMPOSE",
+								},
+							},
+						},
+					},
+				},
+			},
+			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			HBox{
+				children: []Widget{
+					lhs,
+					Label{
+						widgetBase: widgetBase{expand: true, fill: true},
+					},
+					rhs,
 				},
 			},
 			Scrolled{
@@ -1478,6 +1499,15 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				c.ui.Signal()
 			}
 			continue
+		}
+		if click.name == "discard" {
+			c.draftsUI.Remove(draft.id)
+			delete(c.drafts, draft.id)
+			c.save()
+			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.ui.Actions() <- UIState{uiStateMain}
+			c.ui.Signal()
+			return nil
 		}
 		if strings.HasPrefix(click.name, "remove-") {
 			// One of the attachment remove buttons.

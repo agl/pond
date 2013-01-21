@@ -832,6 +832,37 @@ func TestDraft(t *testing.T) {
 	client.ui.WaitForSignal()
 }
 
+func TestDraftDiscard(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	proceedToMainUI(t, client, server)
+	client.ui.events <- Click{name: "compose"}
+	client.AdvanceTo(uiStateCompose)
+
+	if l := len(client.drafts); l != 1 {
+		t.Fatalf("Bad number of drafts: %d", l)
+	}
+
+	client.ui.events <- Click{name: "discard"}
+	client.AdvanceTo(uiStateMain)
+
+	if l := len(client.drafts); l != 0 {
+		t.Fatalf("Bad number of drafts after discard: %d", l)
+	}
+}
+
 func testDetached(t *testing.T, upload bool) {
 	t.Parallel()
 
