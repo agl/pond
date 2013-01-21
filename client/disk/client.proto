@@ -1,4 +1,4 @@
-package protos;
+package disk;
 
 import "github.com/agl/pond/protos/pond.proto";
 

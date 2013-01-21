@@ -20,6 +20,7 @@ import (
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
+	"github.com/agl/pond/client/disk"
 	pond "github.com/agl/pond/protos"
 )
 
@@ -89,7 +90,7 @@ type client struct {
 	stateFilename string
 	// diskSalt contains the scrypt salt used to derive the state
 	// encryption key.
-	diskSalt [sCryptSaltLen]byte
+	diskSalt [disk.SCryptSaltLen]byte
 	// diskKey is the XSalsa20 key used to encrypt the disk state.
 	diskKey [32]byte
 
@@ -282,7 +283,7 @@ func (c *client) loadUI() {
 
 	state, err := ioutil.ReadFile(c.stateFilename)
 	var ok bool
-	c.diskSalt, ok = getSCryptSaltFromState(state)
+	c.diskSalt, ok = disk.GetSCryptSaltFromState(state)
 
 	newAccount := false
 	if err != nil || !ok {
@@ -303,8 +304,8 @@ func (c *client) loadUI() {
 		newAccount = true
 	} else {
 		// First try with zero key.
-		err = c.loadState(state, &c.diskKey)
-		for err == badPasswordError {
+		err = c.loadState(state)
+		for err == disk.BadPasswordError {
 			// That didn't work, try prompting for a key.
 			err = c.keyPromptUI(state)
 		}
@@ -334,7 +335,7 @@ func (c *client) loadUI() {
 	c.fetchNowChan = make(chan chan bool, 1)
 
 	// Start disk and network workers.
-	go stateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)
+	go disk.StateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)
 	go c.transact()
 	if newAccount {
 		c.save()
@@ -2789,14 +2790,14 @@ func (c *client) keyPromptUI(state []byte) error {
 		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
 		c.ui.Signal()
 
-		if diskKey, err := c.deriveKey(pw); err != nil {
+		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
 			panic(err)
 		} else {
 			copy(c.diskKey[:], diskKey)
 		}
 
-		err := c.loadState(state, &c.diskKey)
-		if err != badPasswordError {
+		err := c.loadState(state)
+		if err != disk.BadPasswordError {
 			return err
 		}
 
@@ -2882,7 +2883,7 @@ func (c *client) createPassphraseUI() {
 		c.ui.Signal()
 
 		c.randBytes(c.diskSalt[:])
-		if diskKey, err := c.deriveKey(pw); err != nil {
+		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
 			panic(err)
 		} else {
 			copy(c.diskKey[:], diskKey)

@@ -1,24 +1,22 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
-	"io"
-	"os"
 	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/go.crypto/scrypt"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/bbssig"
-	"github.com/agl/pond/client/protos"
+	"github.com/agl/pond/client/disk"
 	pond "github.com/agl/pond/protos"
 )
 
-func (c *client) deriveKey(pw string) ([]byte, error) {
-	return scrypt.Key([]byte(pw), c.diskSalt[:], 32768, 16, 1, 32)
+func (c *client) loadState(state []byte) error {
+	parsedState, err := disk.LoadState(state, &c.diskKey)
+	if err != nil {
+		return err
+	}
+	return c.unmarshal(parsedState)
 }
 
 func (c *client) save() {
@@ -27,7 +25,7 @@ func (c *client) save() {
 	c.writerChan <- serialized
 }
 
-func (c *client) unmarshal(state *protos.State) error {
+func (c *client) unmarshal(state *disk.State) error {
 	c.server = *state.Server
 
 	if len(state.Identity) != len(c.identity) {
@@ -179,10 +177,10 @@ func (c *client) unmarshal(state *protos.State) error {
 
 func (c *client) marshal() []byte {
 	var err error
-	var contacts []*protos.Contact
+	var contacts []*disk.Contact
 
 	for _, contact := range c.contacts {
-		cont := &protos.Contact{
+		cont := &disk.Contact{
 			Id:               proto.Uint64(contact.id),
 			Name:             proto.String(contact.name),
 			GroupKey:         contact.groupKey.Marshal(),
@@ -204,12 +202,12 @@ func (c *client) marshal() []byte {
 		contacts = append(contacts, cont)
 	}
 
-	var inbox []*protos.Inbox
+	var inbox []*disk.Inbox
 	for _, msg := range c.inbox {
 		if time.Since(msg.receivedTime) > messageLifetime {
 			continue
 		}
-		m := &protos.Inbox{
+		m := &disk.Inbox{
 			Id:           proto.Uint64(msg.id),
 			From:         proto.Uint64(msg.from),
 			ReceivedTime: proto.Int64(msg.receivedTime.Unix()),
@@ -225,12 +223,12 @@ func (c *client) marshal() []byte {
 		inbox = append(inbox, m)
 	}
 
-	var outbox []*protos.Outbox
+	var outbox []*disk.Outbox
 	for _, msg := range c.outbox {
 		if time.Since(msg.created) > messageLifetime {
 			continue
 		}
-		m := &protos.Outbox{
+		m := &disk.Outbox{
 			Id:      proto.Uint64(msg.id),
 			To:      proto.Uint64(msg.to),
 			Server:  proto.String(msg.server),
@@ -254,9 +252,9 @@ func (c *client) marshal() []byte {
 		outbox = append(outbox, m)
 	}
 
-	var drafts []*protos.Draft
+	var drafts []*disk.Draft
 	for _, draft := range c.drafts {
-		m := &protos.Draft{
+		m := &disk.Draft{
 			Id:          proto.Uint64(draft.id),
 			Body:        proto.String(draft.body),
 			Attachments: draft.attachments,
@@ -273,7 +271,7 @@ func (c *client) marshal() []byte {
 		drafts = append(drafts, m)
 	}
 
-	state := &protos.State{
+	state := &disk.State{
 		Private:      c.priv[:],
 		Public:       c.pub[:],
 		Identity:     c.identity[:],
@@ -291,113 +289,4 @@ func (c *client) marshal() []byte {
 		panic(err)
 	}
 	return s
-}
-
-const sCryptSaltLen = 32
-const diskSaltLen = 32
-const smearedCopies = 32768 / 24
-
-func getSCryptSaltFromState(state []byte) ([32]byte, bool) {
-	var salt [32]byte
-	if len(state) < sCryptSaltLen {
-		return salt, false
-	}
-	copy(salt[:], state)
-	return salt, true
-}
-
-func stateWriter(stateFilename string, key *[32]byte, salt *[sCryptSaltLen]byte, states chan []byte, done chan bool) {
-	for {
-		s, ok := <-states
-		if !ok {
-			close(done)
-			return
-		}
-
-		length := uint32(len(s)) + 4
-		for i := uint(17); i < 32; i++ {
-			if n := (uint32(1) << i); n >= length {
-				length = n
-				break
-			}
-		}
-
-		plaintext := make([]byte, length)
-		copy(plaintext[4:], s)
-		if _, err := io.ReadFull(rand.Reader, plaintext[len(s)+4:]); err != nil {
-			panic(err)
-		}
-		binary.LittleEndian.PutUint32(plaintext, uint32(len(s)))
-
-		var nonceSmear [24 * smearedCopies]byte
-		if _, err := io.ReadFull(rand.Reader, nonceSmear[:]); err != nil {
-			panic(err)
-		}
-
-		var nonce [24]byte
-		for i := 0; i < smearedCopies; i++ {
-			for j := 0; j < 24; j++ {
-				nonce[j] ^= nonceSmear[24*i+j]
-			}
-		}
-
-		ciphertext := secretbox.Seal(nil, plaintext, &nonce, key)
-
-		out, err := os.Create(stateFilename)
-		if err != nil {
-			panic(err)
-		}
-		if _, err := out.Write(salt[:]); err != nil {
-			panic(err)
-		}
-		if _, err := out.Write(nonceSmear[:]); err != nil {
-			panic(err)
-		}
-		if _, err := out.Write(ciphertext); err != nil {
-			panic(err)
-		}
-		out.Close()
-	}
-}
-
-var badPasswordError = errors.New("bad password")
-
-func (c *client) loadState(b []byte, key *[32]byte) error {
-	if len(b) < sCryptSaltLen+24*smearedCopies {
-		return errors.New("state file is too small to be valid")
-	}
-
-	b = b[sCryptSaltLen:]
-
-	var nonce [24]byte
-	for i := 0; i < smearedCopies; i++ {
-		for j := 0; j < 24; j++ {
-			nonce[j] ^= b[24*i+j]
-		}
-	}
-
-	b = b[24*smearedCopies:]
-	plaintext, ok := secretbox.Open(nil, b, &nonce, key)
-	if !ok {
-		return badPasswordError
-	}
-	if len(plaintext) < 4 {
-		return errors.New("state file corrupt")
-	}
-	length := binary.LittleEndian.Uint32(plaintext[:4])
-	plaintext = plaintext[4:]
-	if length > 1<<31 || length > uint32(len(plaintext)) {
-		return errors.New("state file corrupt")
-	}
-	plaintext = plaintext[:int(length)]
-
-	var state protos.State
-	if err := proto.Unmarshal(plaintext, &state); err != nil {
-		return err
-	}
-
-	if err := c.unmarshal(&state); err != nil {
-		return err
-	}
-	return nil
 }
