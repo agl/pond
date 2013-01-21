@@ -19,8 +19,8 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -I/home/agl/devel/dclxvi-20110718
-// #cgo LDFLAGS: -L/home/agl/devel/dclxvi-20110718 -lpair -lm
+// #cgo CFLAGS: -I/home/agl/devel/dclxvi
+// #cgo LDFLAGS: -L/home/agl/devel/dclxvi -ldclxvipairing -lm
 /*
 #include <stdio.h>
 #include <string.h>
