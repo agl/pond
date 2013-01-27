@@ -9,11 +9,11 @@ import (
 	"net"
 	"testing"
 
-	"code.google.com/p/go.crypto/bbssig"
 	"code.google.com/p/go.crypto/curve25519"
 
 	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/transport"
 )
 
