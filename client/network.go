@@ -165,6 +165,7 @@ func (c *client) processFetch(m NewMessage) {
 	}
 
 	c.inbox = append(c.inbox, inboxMsg)
+	c.updateWindowTitle()
 	c.save()
 }
 

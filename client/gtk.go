@@ -454,6 +454,8 @@ func (ui *GTKUI) handle(action interface{}) {
 		widget := gtk.GtkProgressBar{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetFraction(action.fraction)
 		widget.SetText(action.s)
+	case SetTitle:
+		ui.window.SetTitle(action.title)
 
 	case UIError:
 	case UIState:

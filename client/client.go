@@ -365,6 +365,23 @@ var rightPlaceholderUI = EventBox{
 	},
 }
 
+func (c *client) updateWindowTitle() {
+	unreadCount := 0
+
+	for _, msg := range c.inbox {
+		if msg.message != nil && !msg.read && len(msg.message.Body) > 0 {
+			unreadCount++
+		}
+	}
+
+	if unreadCount == 0 {
+		c.ui.Actions() <- SetTitle{"Pond"}
+	} else {
+		c.ui.Actions() <- SetTitle{fmt.Sprintf("Pond (%d)", unreadCount)}
+	}
+	c.ui.Signal()
+}
+
 func (c *client) mainUI() {
 	ui := Paned{
 		left: Scrolled{
@@ -540,6 +557,7 @@ func (c *client) mainUI() {
 		}
 		c.inboxUI.Add(msg.id, c.contacts[msg.from].name, subline, i)
 	}
+	c.updateWindowTitle()
 
 	c.outboxUI = &listUI{
 		ui:       c.ui,
@@ -1729,6 +1747,7 @@ func (c *client) showInbox(id uint64) interface{} {
 	if msg.message != nil && !msg.read {
 		msg.read = true
 		c.inboxUI.SetIndicator(id, indicatorNone)
+		c.updateWindowTitle()
 		c.save()
 	}
 
@@ -2605,6 +2624,7 @@ func (c *client) newContactUI(contact *Contact) interface{} {
 			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 			c.inboxUI.SetSubline(msg.id, subline)
 			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
+			c.updateWindowTitle()
 		}
 	}
 

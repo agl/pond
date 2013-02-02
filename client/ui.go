@@ -258,6 +258,10 @@ type SetProgress struct {
 	s        string
 }
 
+type SetTitle struct {
+	title string
+}
+
 type UIState struct {
 	stateID int
 }
