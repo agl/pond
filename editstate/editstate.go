@@ -174,7 +174,6 @@ func do() bool {
 			return false
 		}
 		keySlice, err := disk.DeriveKey(string(password), &salt)
-		var key [32]byte
 		copy(key[:], keySlice)
 	}
 
