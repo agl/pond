@@ -2171,6 +2171,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			c.ui.Actions() <- UIState{uiStateInbox}
 			c.ui.Signal()
 		case "reply":
+			c.inboxUI.Deselect()
 			return c.composeUI(nil, msg)
 		}
 	}
