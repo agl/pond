@@ -221,6 +221,7 @@ func NewTestClient(t *testing.T) (*TestClient, error) {
 		return nil, err
 	}
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	tc.client.log.toStderr = false
 	return tc, nil
 }
 
@@ -259,6 +260,7 @@ func (tc *TestClient) Reload() {
 	tc.Shutdown()
 	tc.ui = NewTestUI(tc.ui.t)
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	tc.client.log.toStderr = false
 }
 
 func TestAccountCreation(t *testing.T) {
@@ -1001,4 +1003,28 @@ func TestDetachedFile(t *testing.T) {
 
 func TestUploadDownload(t *testing.T) {
 	testDetached(t, true)
+}
+
+func TestLogOverflow(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+	proceedToMainUI(t, client1, server)
+
+	client1.ui.events <- Click{name: client1.clientUI.entries[1].boxName}
+	client1.AdvanceTo(uiStateLog)
+
+	for i := 0; i < 2*(logLimit+logSlack); i++ {
+		client1.log.Printf("%d", i)
+	}
 }

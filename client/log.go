@@ -16,6 +16,7 @@ type logEntry struct {
 type Log struct {
 	sync.Mutex
 	entries    []logEntry
+	epoch      uint64
 	updateChan chan bool
 	toStderr   bool
 }
@@ -34,6 +35,14 @@ func (l *Log) Errorf(format string, args ...interface{}) {
 	l.add(true, format, args...)
 }
 
+const (
+	// logLimit is the maximum number of entries in the log.
+	logLimit = 500
+	// logSlack is the number of entries past the maximum that we'll allow
+	// before the log is recompacted down to logLimit enties.
+	logSlack = 250
+)
+
 func (l *Log) add(isError bool, format string, args ...interface{}) {
 	l.Lock()
 	defer l.Unlock()
@@ -42,6 +51,12 @@ func (l *Log) add(isError bool, format string, args ...interface{}) {
 		time.Now(),
 		isError,
 		fmt.Sprintf(format, args...),
+	}
+	if len(l.entries) > logLimit+logSlack {
+		newEntries := make([]logEntry, logLimit)
+		copy(newEntries, l.entries[logSlack:])
+		l.entries = newEntries
+		l.epoch++
 	}
 	l.entries = append(l.entries, entry)
 	select {
@@ -107,14 +122,18 @@ func (c *client) logUI() interface{} {
 
 	log := ""
 	lastProcessedIndex := -1
+
+	c.log.Lock()
+	logEpoch := c.log.epoch
 	for _, entry := range c.log.entries {
 		log += fmt.Sprintf("%s: %s\n", entry.Format(logTimeFormat), entry.s)
 		lastProcessedIndex++
 	}
+	c.log.Unlock()
 
 	c.ui.Actions() <- SetChild{name: "right", child: ui}
 	c.ui.Actions() <- SetTextView{name: "log", text: log}
-	c.ui.Actions() <- UIState{uiStateCompose}
+	c.ui.Actions() <- UIState{uiStateLog}
 	c.ui.Signal()
 
 	for {
@@ -132,6 +151,11 @@ func (c *client) logUI() interface{} {
 		}
 
 		c.log.Lock()
+		if logEpoch != c.log.epoch {
+			logEpoch = c.log.epoch
+			lastProcessedIndex = -1
+			log = ""
+		}
 		for _, entry := range c.log.entries[lastProcessedIndex+1:] {
 			log += fmt.Sprintf("%s: %s\n", entry.Format(logTimeFormat), entry.s)
 			lastProcessedIndex++

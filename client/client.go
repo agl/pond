@@ -70,6 +70,7 @@ const (
 	uiStateShowIdentity
 	uiStatePassphrase
 	uiStateInbox
+	uiStateLog
 )
 
 const shortTimeFormat = "Jan _2 15:04"
