@@ -1211,6 +1211,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		}
 
 		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
+		c.draftsUI.Select(draft.id)
 		c.drafts[draft.id] = draft
 	}
 
