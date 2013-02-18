@@ -133,8 +133,8 @@ func serialiseValue(out io.Writer, name string, v reflect.Value, t reflect.Type,
 		// This must be a byte slice.
 		out.Write(valueSep)
 		if context == "Outbox" && name == "Request" ||
-		   context == "Outbox.Message.Files" && name == "Contents" ||
-		   context == "Inbox.Message.Files" && name == "Contents" {
+			context == "Outbox.Message.Files" && name == "Contents" ||
+			context == "Inbox.Message.Files" && name == "Contents" {
 			entityName := setEntity(entities, v.Bytes())
 			fmt.Fprintf(out, "<%x>", entityName)
 		} else {
@@ -175,7 +175,7 @@ func serialiseValue(out io.Writer, name string, v reflect.Value, t reflect.Type,
 		}
 		out.Write(structEnd)
 	default:
-		panic(fmt.Sprintf("Don't know how to serialise a %s %s", t))
+		panic(fmt.Sprintf("Don't know how to serialise a %s", t))
 	}
 	fmt.Fprintf(out, "\n")
 }
