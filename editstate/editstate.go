@@ -5,18 +5,22 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"math/rand"
-	"hash/crc32"
 	"os"
+	"os/exec"
+	"os/signal"
 	"reflect"
-	"strings"
 	"strconv"
+	"strings"
+	"syscall"
 
 	"code.google.com/p/go.crypto/ssh/terminal"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/system"
 	pond "github.com/agl/pond/protos"
 )
 
@@ -90,8 +94,12 @@ func setEntity(entities map[uint32][]byte, data []byte) uint32 {
 	table := crc32.MakeTable(crc32.Castagnoli)
 	crc := crc32.Checksum(data, table)
 	for {
-		if _, ok := entities[crc]; !ok {
+		other, ok := entities[crc]
+		if !ok {
 			entities[crc] = data
+			return crc
+		}
+		if bytes.Equal(other, data) {
 			return crc
 		}
 		crc++
@@ -124,7 +132,9 @@ func serialiseValue(out io.Writer, name string, v reflect.Value, t reflect.Type,
 	case reflect.Slice:
 		// This must be a byte slice.
 		out.Write(valueSep)
-		if context == "Outbox" && name == "Request" {
+		if context == "Outbox" && name == "Request" ||
+		   context == "Outbox.Message.Files" && name == "Contents" ||
+		   context == "Inbox.Message.Files" && name == "Contents" {
 			entityName := setEntity(entities, v.Bytes())
 			fmt.Fprintf(out, "<%x>", entityName)
 		} else {
@@ -229,7 +239,7 @@ func parseStructField(v reflect.Value, t reflect.Type, context, fieldName string
 		}
 	case reflect.Slice:
 		fieldIsProtobuf = f.Type.Elem().Kind() == reflect.Ptr &&
-				  f.Type.Elem().Elem().Kind() == reflect.Struct
+			f.Type.Elem().Elem().Kind() == reflect.Struct
 		if fieldIsProtobuf {
 			protobufType = f.Type.Elem().Elem()
 		}
@@ -395,6 +405,17 @@ func parseValue(v reflect.Value, t reflect.StructField, context string, in *Toke
 }
 
 func do() bool {
+	if err := system.IsSafe(); err != nil {
+		fmt.Fprintf(os.Stderr, "System checks failed: %s\n", err)
+		return false
+	}
+
+	editor := os.Getenv("EDITOR")
+	if len(editor) == 0 {
+		fmt.Fprintf(os.Stderr, "$EDITOR is not set\n")
+		return false
+	}
+
 	encrypted, err := ioutil.ReadFile(*stateFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read state file: %s\n", err)
@@ -431,14 +452,67 @@ func do() bool {
 		copy(key[:], keySlice)
 	}
 
-
-	tmpFile, err := ioutil.TempFile("", "pond-editstate-
-        entities := serialise(&buffer, state)
-	newState := new(disk.State)
-	if err := parse(newState, &buffer, entities); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing: %s\n", err)
+	tempDir, err := system.SafeTempDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get safe temp directory: %s\n", err)
 		return false
 	}
+
+	tempFile, err := ioutil.TempFile(tempDir, "pond-editstate-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp file: %s\n", err)
+		return false
+	}
+	defer func() {
+		os.Remove(tempFile.Name())
+	}()
+
+	signals := make(chan os.Signal, 8)
+	signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-signals
+		println("Caught signal: removing", tempFile.Name())
+		os.Remove(tempFile.Name())
+		os.Exit(1)
+	}()
+
+	entities := serialise(tempFile, state)
+
+	var newStateSerialized []byte
+	for {
+		cmd := exec.Command(editor, tempFile.Name())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to run editor: %s\n", err)
+			return false
+		}
+		tempFile.Seek(0, 0)
+
+		newState := new(disk.State)
+		err := parse(newState, tempFile, entities)
+		if err == nil {
+			newStateSerialized, err = proto.Marshal(newState)
+		}
+		if err == nil {
+			break
+		}
+
+		fmt.Fprintf(os.Stderr, "Error parsing: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Hit enter to edit again, or Ctrl-C to abort\n")
+
+		var buf [100]byte
+		os.Stdin.Read(buf[:])
+	}
+
+	states := make(chan []byte)
+	done := make(chan bool)
+	go disk.StateWriter(*stateFile, &key, &salt, states, done)
+	states <- newStateSerialized
+	close(states)
+	<-done
 
 	return true
 }
