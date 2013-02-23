@@ -29,6 +29,7 @@ import (
 const messageLifetime = 7 * 24 * time.Hour
 
 const (
+	colorDefault               = 0
 	colorWhite                 = 0xffffff
 	colorGray                  = 0xfafafa
 	colorHighlight             = 0xffebcd
@@ -89,6 +90,7 @@ type client struct {
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
 	stateFilename string
+	stateLock     *disk.Lock
 	// diskSalt contains the scrypt salt used to derive the state
 	// encryption key.
 	diskSalt [disk.SCryptSaltLen]byte
@@ -240,8 +242,29 @@ type queuedMessage struct {
 	message *pond.Message
 }
 
+func (c *client) errorUI(errorText string, bgColor uint32) {
+	ui := EventBox{
+		widgetBase: widgetBase{background: bgColor, expand: true, fill: true},
+		child: Label{
+			widgetBase: widgetBase{
+				foreground: colorBlack,
+				font:       "Ariel Bold 12",
+			},
+			text:   errorText,
+			xAlign: 0.5,
+			yAlign: 0.5,
+		},
+	}
+	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.ui.Actions() <- UIState{uiStateError}
+	c.ui.Signal()
+}
+
 func (c *client) loadUI() {
 	ui := VBox{
+		widgetBase: widgetBase{
+			background: colorWhite,
+		},
 		children: []Widget{
 			EventBox{
 				widgetBase: widgetBase{background: 0x333355},
@@ -259,14 +282,19 @@ func (c *client) loadUI() {
 				},
 			},
 			HBox{
-				widgetBase: widgetBase{name: "body", padding: 30, expand: true, fill: true},
+				widgetBase: widgetBase{
+					name:    "body",
+					padding: 30,
+					expand:  true,
+					fill:    true,
+				},
 			},
 		},
 	}
 	c.ui.Actions() <- Reset{ui}
 
 	loading := EventBox{
-		widgetBase: widgetBase{background: colorGray},
+		widgetBase: widgetBase{expand: true, fill: true},
 		child: Label{
 			widgetBase: widgetBase{
 				foreground: colorTitleForeground,
@@ -282,9 +310,35 @@ func (c *client) loadUI() {
 	c.ui.Actions() <- UIState{uiStateLoading}
 	c.ui.Signal()
 
-	state, err := ioutil.ReadFile(c.stateFilename)
-	var ok bool
-	c.diskSalt, ok = disk.GetSCryptSaltFromState(state)
+	stateFile, err := os.Open(c.stateFilename)
+
+	ok := true
+	var state []byte
+	if err == nil {
+		if c.stateLock, ok = disk.LockStateFile(stateFile); !ok {
+			c.errorUI("State file locked by another process. Waiting for lock.", colorDefault)
+			c.log.Errorf("Waiting for locked state file")
+		}
+		for {
+			select {
+			case _, ok := <-c.ui.Events():
+				if !ok {
+					// User asked to close the window.
+					close(c.ui.Actions())
+					select {}
+				}
+			case <-time.After(1 * time.Second):
+				break
+			}
+			if c.stateLock, ok = disk.LockStateFile(stateFile); ok {
+				break
+			}
+		}
+
+		state, err = ioutil.ReadAll(stateFile)
+		stateFile.Close()
+		c.diskSalt, ok = disk.GetSCryptSaltFromState(state)
+	}
 
 	newAccount := false
 	if err != nil || !ok {
@@ -312,22 +366,23 @@ func (c *client) loadUI() {
 		}
 		if err != nil {
 			// Fatal error loading state. Abort.
-			ui := EventBox{
-				widgetBase: widgetBase{background: colorError},
-				child: Label{
-					widgetBase: widgetBase{
-						foreground: colorBlack,
-						font:       "Ariel Bold 12",
-					},
-					text:   err.Error(),
-					xAlign: 0.5,
-					yAlign: 0.5,
-				},
+			c.errorUI(err.Error(), colorError)
+			c.ShutdownAndSuspend()
+		}
+	}
+
+	if newAccount {
+		file, err := os.Create(c.stateFilename)
+		if err == nil {
+			c.stateLock, ok = disk.LockStateFile(file)
+			if !ok {
+				err = errors.New("Failed to obtain lock on newly created state file")
 			}
-			c.ui.Actions() <- Reset{ui}
-			c.ui.Actions() <- UIState{uiStateError}
-			c.ui.Signal()
-			select {}
+			file.Close()
+		}
+		if err != nil {
+			c.errorUI(err.Error(), colorError)
+			c.ShutdownAndSuspend()
 		}
 	}
 
@@ -3038,6 +3093,7 @@ func (c *client) Shutdown() {
 	if c.fetchNowChan != nil {
 		close(c.fetchNowChan)
 	}
+	c.stateLock.Close()
 }
 
 func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {

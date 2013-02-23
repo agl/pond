@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"syscall"
 
 	"code.google.com/p/go.crypto/nacl/secretbox"
 	"code.google.com/p/go.crypto/scrypt"
@@ -27,6 +28,30 @@ func GetSCryptSaltFromState(state []byte) ([32]byte, bool) {
 	}
 	copy(salt[:], state)
 	return salt, true
+}
+
+type Lock struct {
+	fd int
+}
+
+func (l *Lock) Close() {
+	syscall.Flock(l.fd, syscall.LOCK_UN)
+	syscall.Close(l.fd)
+}
+
+// LockStateFile attempts to lock the given file. If successful, it returns
+// true and the lock persists for the lifetime of the process.
+func LockStateFile(stateFile *os.File) (*Lock, bool) {
+	fd := int(stateFile.Fd())
+	newFd, err := syscall.Dup(fd)
+	if err != nil {
+		panic(err)
+	}
+	if syscall.Flock(newFd, syscall.LOCK_EX | syscall.LOCK_NB) != nil {
+		syscall.Close(newFd)
+		return nil, false
+	}
+	return &Lock{newFd}, true
 }
 
 func StateWriter(stateFilename string, key *[32]byte, salt *[SCryptSaltLen]byte, states chan []byte, done chan bool) {

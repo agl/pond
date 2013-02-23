@@ -24,7 +24,7 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-var stateFile *string = flag.String("state-file", "state", "File in which to save persistent state")
+var stateFileName *string = flag.String("state-file", "state", "File in which to save persistent state")
 
 func main() {
 	flag.Parse()
@@ -416,7 +416,21 @@ func do() bool {
 		return false
 	}
 
-	encrypted, err := ioutil.ReadFile(*stateFile)
+	stateFile, err := os.Open(*stateFileName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open state file: %s\n", err)
+		return false
+	}
+	defer stateFile.Close()
+
+	stateLock, ok := disk.LockStateFile(stateFile)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Cannot obtain lock on state file\n")
+		return false
+	}
+	defer stateLock.Close()
+
+	encrypted, err := ioutil.ReadAll(stateFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read state file: %s\n", err)
 		return false
@@ -509,7 +523,7 @@ func do() bool {
 
 	states := make(chan []byte)
 	done := make(chan bool)
-	go disk.StateWriter(*stateFile, &key, &salt, states, done)
+	go disk.StateWriter(*stateFileName, &key, &salt, states, done)
 	states <- newStateSerialized
 	close(states)
 	<-done
