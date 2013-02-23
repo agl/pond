@@ -20,7 +20,7 @@ type GTKUI struct {
 	widgets   map[string]gtk.WidgetLike
 	entries   map[string]*gtk.GtkEntry
 	textViews map[string]*gtk.GtkTextView
-	combos    map[string]*gtk.GtkComboBox
+	combos    map[string]*gtk.GtkComboBoxText
 }
 
 func NewGTKUI() *GTKUI {
@@ -166,7 +166,7 @@ func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 	switch v := v.(type) {
 	case VBox:
-		vbox := gtk.VBox(v.homogeneous, v.spacing)
+		vbox := gtk.Box(gtk.GTK_ORIENTATION_VERTICAL, v.spacing)
 		for _, child := range v.children {
 			widget := ui.newWidget(child)
 			if child.PackEnd() {
@@ -177,7 +177,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		}
 		return vbox
 	case HBox:
-		hbox := gtk.HBox(v.homogeneous, v.spacing)
+		hbox := gtk.Box(gtk.GTK_ORIENTATION_HORIZONTAL, v.spacing)
 		for _, child := range v.children {
 			widget := ui.newWidget(child)
 			hbox.PackStart(widget, child.Expand(), child.Fill(), child.Padding())
@@ -247,7 +247,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		spinner.Start()
 		return spinner
 	case Paned:
-		paned := gtk.HPaned()
+		paned := gtk.Paned(gtk.GTK_ORIENTATION_HORIZONTAL)
 		left := ui.newWidget(v.left)
 		right := ui.newWidget(v.right)
 		paned.Add1(left)
@@ -298,7 +298,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		configureWidget(&view.GtkWidget, v.widgetBase)
 		return view
 	case Combo:
-		combo := gtk.ComboBoxNewText()
+		combo := gtk.ComboBoxText()
 		selectedIndex := -1
 		for i, l := range v.labels {
 			combo.AppendText(l)
@@ -358,7 +358,7 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.widgets = make(map[string]gtk.WidgetLike)
 		ui.entries = make(map[string]*gtk.GtkEntry)
 		ui.textViews = make(map[string]*gtk.GtkTextView)
-		ui.combos = make(map[string]*gtk.GtkComboBox)
+		ui.combos = make(map[string]*gtk.GtkComboBoxText)
 		if ui.topWidget != nil {
 			ui.window.Remove(ui.topWidget)
 			ui.topWidget = nil

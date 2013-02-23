@@ -66,14 +66,12 @@ func (w widgetBase) Focused() bool {
 
 type VBox struct {
 	widgetBase
-	homogeneous bool
 	spacing     uint
 	children    []Widget
 }
 
 type HBox struct {
 	widgetBase
-	homogeneous bool
 	spacing     uint
 	children    []Widget
 }
