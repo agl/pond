@@ -66,14 +66,14 @@ func (w widgetBase) Focused() bool {
 
 type VBox struct {
 	widgetBase
-	spacing     uint
-	children    []Widget
+	spacing  uint
+	children []Widget
 }
 
 type HBox struct {
 	widgetBase
-	spacing     uint
-	children    []Widget
+	spacing  uint
+	children []Widget
 }
 
 type EventBox struct {
