@@ -113,12 +113,12 @@ func (c *client) logUI() interface{} {
 					},
 				},
 			},
-			Scrolled {
+			Scrolled{
 				horizontal: true,
 				widgetBase: widgetBase{expand: true, fill: true},
 				child: TextView{
-						widgetBase: widgetBase{expand: true, fill: true, name: "log"},
-						editable:   true,
+					widgetBase: widgetBase{expand: true, fill: true, name: "log"},
+					editable:   true,
 				},
 			},
 		},
