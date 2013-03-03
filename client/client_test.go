@@ -14,6 +14,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"code.google.com/p/goprotobuf/proto"
+	pond "github.com/agl/pond/protos"
 )
 
 type TestServer struct {
@@ -515,7 +519,9 @@ WaitForAck:
 		panic("no messages")
 	}
 	msg = client.inbox[len(client.inbox)-1]
-	from = client.contacts[msg.from].name
+	if msg.from != 0 {
+		from = client.contacts[msg.from].name
+	}
 	return
 }
 
@@ -1037,4 +1043,52 @@ func TestLogOverflow(t *testing.T) {
 	for i := 0; i < 2*(logLimit+logSlack); i++ {
 		client1.log.Printf("%d", i)
 	}
+}
+
+func TestServerAnnounce(t *testing.T) {
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	proceedToMainUI(t, client, server)
+
+	const testMessage = "Hello world"
+	announce := &pond.Message{
+		Id:           proto.Uint64(0),
+		Time:         proto.Int64(time.Now().Unix()),
+		Body:         []byte(testMessage),
+		MyNextDh:     []byte{},
+		BodyEncoding: pond.Message_RAW.Enum(),
+	}
+	announceBytes, err := proto.Marshal(announce)
+	if err != nil {
+		t.Fatalf("Failed to marshal announce message: %s", err)
+	}
+	if err := ioutil.WriteFile(fmt.Sprintf("%s/accounts/%x/announce-00000000", server.stateDir, client.identityPublic[:]), announceBytes, 0666); err != nil {
+		t.Fatalf("Failed to write announce message: %s", err)
+	}
+
+	fetchMessage(client)
+
+	if len(client.inbox) != 1 {
+		t.Fatalf("Inbox doesn't have a message")
+	}
+	client.ui.events <- Click{
+		name: client.inboxUI.entries[0].boxName,
+	}
+	client.AdvanceTo(uiStateInbox)
+	if s := client.ui.text["body"]; s != testMessage {
+		t.Fatalf("resolved message is incorrect: %s", s)
+	}
+
+	client.Reload()
+	client.AdvanceTo(uiStateMain)
 }

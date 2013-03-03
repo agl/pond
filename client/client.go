@@ -174,8 +174,9 @@ type InboxMessage struct {
 // NewMessage is sent from the network goroutine to the client goroutine and
 // contains messages fetched from the home server.
 type NewMessage struct {
-	fetched *pond.Fetched
-	ack     chan bool
+	fetched  *pond.Fetched
+	announce *pond.ServerAnnounce
+	ack      chan bool
 }
 
 // Contact represents a contact to which we can send messages.
@@ -611,7 +612,11 @@ func (c *client) mainUI() {
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
-		c.inboxUI.Add(msg.id, c.contacts[msg.from].name, subline, i)
+		fromString := "Home Server"
+		if msg.from != 0 {
+			fromString = c.contacts[msg.from].name
+		}
+		c.inboxUI.Add(msg.id, fromString, subline, i)
 	}
 	c.updateWindowTitle()
 
@@ -1807,8 +1812,16 @@ func (c *client) showInbox(id uint64) interface{} {
 		c.updateWindowTitle()
 		c.save()
 	}
+	isServerAnnounce := msg.from == 0
 
-	contact := c.contacts[msg.from]
+	var contact *Contact
+	var fromString string
+	if isServerAnnounce {
+		fromString = "<Home Server>"
+	} else {
+		contact = c.contacts[msg.from]
+		fromString = contact.name
+	}
 	isPending := msg.message == nil
 	var msgText, sentTimeText string
 	if isPending {
@@ -1862,7 +1875,7 @@ func (c *client) showInbox(id uint64) interface{} {
 										yAlign:     0.5,
 									},
 									Label{
-										text: contact.name,
+										text: fromString,
 									},
 								},
 							},
@@ -1909,7 +1922,7 @@ func (c *client) showInbox(id uint64) interface{} {
 								widgetBase: widgetBase{
 									name:        "reply",
 									padding:     2,
-									insensitive: isPending,
+									insensitive: isServerAnnounce || isPending,
 								},
 								text: "Reply",
 							},
@@ -1917,7 +1930,7 @@ func (c *client) showInbox(id uint64) interface{} {
 								widgetBase: widgetBase{
 									name:        "ack",
 									padding:     2,
-									insensitive: isPending || msg.acked,
+									insensitive: isServerAnnounce || isPending || msg.acked,
 								},
 								text: "Ack",
 							},
@@ -2699,7 +2712,7 @@ func (c *client) nextEvent() (event interface{}, wanted bool) {
 			c.ShutdownAndSuspend()
 		}
 	case newMessage := <-c.newMessageChan:
-		c.processFetch(newMessage)
+		c.processNewMessage(newMessage)
 		return
 	case id := <-c.messageSentChan:
 		c.processMessageSent(id)

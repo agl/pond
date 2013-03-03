@@ -108,11 +108,18 @@ func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool
 	return plaintext, true
 }
 
-func (c *client) processFetch(m NewMessage) {
-	f := m.fetched
+func (c *client) processNewMessage(m NewMessage) {
 	defer func() { m.ack <- true }()
 
-	// TODO: support ServerAnnounce messages.
+	if m.fetched != nil {
+		c.processFetch(m)
+	} else {
+		c.processServerAnnounce(m)
+	}
+}
+
+func (c *client) processFetch(m NewMessage) {
+	f := m.fetched
 
 	sha := sha256.New()
 	sha.Write(f.Message)
@@ -163,6 +170,22 @@ func (c *client) processFetch(m NewMessage) {
 	} else {
 		c.inboxUI.Add(inboxMsg.id, from.name, "pending", indicatorRed)
 	}
+
+	c.inbox = append(c.inbox, inboxMsg)
+	c.updateWindowTitle()
+	c.save()
+}
+
+func (c *client) processServerAnnounce(m NewMessage) {
+	inboxMsg := &InboxMessage{
+		id:           c.randId(),
+		receivedTime: time.Now(),
+		from:         0,
+		message:      m.announce.Message,
+	}
+
+	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
+	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
 
 	c.inbox = append(c.inbox, inboxMsg)
 	c.updateWindowTitle()
@@ -511,9 +534,9 @@ func (c *client) transact() {
 		}
 
 		if reply.Status == nil {
-			if isFetch && reply.Fetched != nil {
+			if isFetch && (reply.Fetched != nil || reply.Announce != nil) {
 				ackChan := make(chan bool)
-				c.newMessageChan <- NewMessage{reply.Fetched, ackChan}
+				c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}
 				<-ackChan
 			} else if !isFetch {
 				c.queueMutex.Lock()
