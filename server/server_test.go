@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"testing"
+	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
 
 	"code.google.com/p/goprotobuf/proto"
-	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/bbssig"
+	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
 )
 
@@ -109,6 +111,7 @@ type scriptState struct {
 	identities       [][32]byte
 	publicIdentities [][32]byte
 	groupPrivateKeys []*bbssig.PrivateKey
+	testServer       *TestServer
 }
 
 func (s *scriptState) buildDelivery(to int, message []byte) *pond.Request {
@@ -177,6 +180,7 @@ func runScript(t *testing.T, s script) {
 		identities:       identities,
 		publicIdentities: publicIdentities,
 		groupPrivateKeys: groupPrivateKeys,
+		testServer:       server,
 	}
 
 	for _, a := range s.actions {
@@ -611,6 +615,45 @@ func TestResumeDownload(t *testing.T) {
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status == nil || *reply.Status != pond.Reply_RESUME_PAST_END_OF_FILE {
 						t.Fatalf("Bad reply to download: %s", reply)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestAnnounce(t *testing.T) {
+	runScript(t, script{
+		numPlayers:             1,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				buildRequest: func(state *scriptState) *pond.Request {
+					announce := &pond.Message{
+						Id:       proto.Uint64(0),
+						Time:     proto.Int64(time.Now().Unix()),
+						Body:     []byte("Hello world"),
+						MyNextDh: []byte{},
+					}
+					announceBytes, err := proto.Marshal(announce)
+					t.Logf("%x", announceBytes)
+					if err != nil {
+						t.Fatalf("Failed to marshal announce message: %s", err)
+					}
+					if err = ioutil.WriteFile(fmt.Sprintf("%s/accounts/%x/announce-00000000", state.testServer.dir, state.publicIdentities[0]), announceBytes, 0666); err != nil {
+						t.Fatalf("Failed to write announce message: %s", err)
+					}
+					return &pond.Request{
+						Fetch: &pond.Fetch{},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+					if reply.Announce == nil {
+						t.Fatalf("Announce reply missing: %s", reply)
 					}
 				},
 			},

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -360,6 +361,8 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	return &pond.Reply{}
 }
 
+const announcePrefix = "announce-"
+
 func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) {
 	account, ok := s.getAccount(from)
 	if !ok {
@@ -375,11 +378,10 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 	defer dir.Close()
 
 	var del *pond.Delivery
+	var announce *pond.Message
+	var isAnnounce bool
 	var name string
 	var queueLen uint32
-
-	// TODO: in the future we would look for a server announce message at
-	// this point.
 
 	for attempts := 0; attempts < 5; attempts++ {
 		dir.Seek(0, 0)
@@ -393,7 +395,8 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 		var minName string
 		for _, ent := range ents {
 			name := ent.Name()
-			if len(name) != sha256.Size*2 {
+			if len(name) != sha256.Size*2 &&
+				(!strings.HasPrefix(name, announcePrefix) || len(name) != len(announcePrefix)+8) {
 				continue
 			}
 			if mtime := ent.ModTime(); minTime.IsZero() || mtime.Before(minTime) {
@@ -405,6 +408,10 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 		if len(minName) == 0 {
 			// No messages at this time.
 			return nil, ""
+		}
+
+		if strings.HasPrefix(minName, announcePrefix) {
+			isAnnounce = true
 		}
 
 		msgPath := filepath.Join(path, minName)
@@ -424,11 +431,22 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 			continue
 		}
 
-		del = new(pond.Delivery)
-		if err := proto.Unmarshal(contents, del); err != nil {
-			log.Printf("Corrupt message file: %s. Renaming out of the way.", msgPath)
-			os.Rename(msgPath, msgPath+"-corrupt")
+		var unmarshaled proto.Message
+		if isAnnounce {
+			announce = new(pond.Message)
+			unmarshaled = announce
+		} else {
+			del = new(pond.Delivery)
+			unmarshaled = del
+		}
+
+		if err := proto.Unmarshal(contents, unmarshaled); err != nil {
+			log.Printf("Corrupt message file: %s (%s). Renaming out of the way.", msgPath, err)
+			if err := os.Rename(msgPath, msgPath+"-corrupt"); err != nil {
+				log.Printf("Failed to rename file: %s", err)
+			}
 			del = nil
+			announce = nil
 			continue
 		}
 		name = minName
@@ -439,6 +457,14 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 	if len(name) == 0 {
 		log.Printf("Failed to open any message file in %s", path)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}, ""
+	}
+
+	if isAnnounce {
+		serverAnnounce := &pond.ServerAnnounce{
+			Message: announce,
+		}
+
+		return &pond.Reply{Announce: serverAnnounce}, name
 	}
 
 	fetched := &pond.Fetched{
