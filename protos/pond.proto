@@ -116,8 +116,7 @@ message Fetched {
 // comes from the server, rather than from another client and it's intended to
 // be used for announcements from the server operator to all or some users.
 message ServerAnnounce {
-	required int64 time = 1;
-	required string msg = 2;
+	required Message message = 1;
 }
 
 message Upload {
