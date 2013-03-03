@@ -103,7 +103,11 @@ func findSafeTempDir() {
 
 	suggested := os.TempDir()
 	preferred := []string{suggested}
-	otherOptions := []string{"/tmp", "/var/tmp"}
+	var otherOptions []string
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); len(dir) > 0 {
+		otherOptions = append(otherOptions, dir)
+	}
+	otherOptions = append(otherOptions, "/tmp", "/var/tmp")
 	for _, d := range otherOptions {
 		if suggested != d {
 			preferred = append(preferred, d)
