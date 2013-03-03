@@ -3093,7 +3093,9 @@ func (c *client) Shutdown() {
 	if c.fetchNowChan != nil {
 		close(c.fetchNowChan)
 	}
-	c.stateLock.Close()
+	if c.stateLock != nil {
+		c.stateLock.Close()
+	}
 }
 
 func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {

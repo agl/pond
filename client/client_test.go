@@ -263,6 +263,16 @@ func (tc *TestClient) Reload() {
 	tc.client.log.toStderr = false
 }
 
+func TestOpenClose(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+}
+
 func TestAccountCreation(t *testing.T) {
 	t.Parallel()
 
