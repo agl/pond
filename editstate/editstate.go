@@ -477,16 +477,17 @@ func do() bool {
 		fmt.Fprintf(os.Stderr, "Failed to create temp file: %s\n", err)
 		return false
 	}
+	tempFileName := tempFile.Name()
 	defer func() {
-		os.Remove(tempFile.Name())
+		os.Remove(tempFileName)
 	}()
 
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-signals
-		println("Caught signal: removing", tempFile.Name())
-		os.Remove(tempFile.Name())
+		println("Caught signal: removing", tempFileName)
+		os.Remove(tempFileName)
 		os.Exit(1)
 	}()
 
@@ -494,7 +495,7 @@ func do() bool {
 
 	var newStateSerialized []byte
 	for {
-		cmd := exec.Command(editor, tempFile.Name())
+		cmd := exec.Command(editor, tempFileName)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -503,10 +504,15 @@ func do() bool {
 			fmt.Fprintf(os.Stderr, "Failed to run editor: %s\n", err)
 			return false
 		}
-		tempFile.Seek(0, 0)
+		tempFile.Close()
+		tempFile, err := os.Open(tempFileName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open temp file: %s\n", err)
+			return false
+		}
 
 		newState := new(disk.State)
-		err := parse(newState, tempFile, entities)
+		err = parse(newState, tempFile, entities)
 		if err == nil {
 			newStateSerialized, err = proto.Marshal(newState)
 		}
