@@ -23,6 +23,12 @@ const (
 	// maxQueue is the maximum number of messages that we'll queue for any
 	// given user.
 	maxQueue = 100
+	// sweepInterval is the period between when the server checks for
+	// expired files.
+	sweepInterval = 24 * time.Hour
+	// fileLifetime is the amount of time that an uploaded file is kept
+	// for.
+	fileLifetime = 14 * 24 * time.Hour
 )
 
 type Account struct {
@@ -174,6 +180,9 @@ type Server struct {
 	// accounts caches the groups for users to save loading them every
 	// time.
 	accounts map[string]*Account
+	// lastSweepTime is the time when the server last performed a sweep for
+	// expired files.
+	lastSweepTime time.Time
 }
 
 func NewServer(dir string) *Server {
@@ -235,6 +244,75 @@ func (s *Server) Process(conn *transport.Conn) {
 		// message by securely closing the connection. So we can mark
 		// the message as delivered.
 		s.confirmedDelivery(from, messageFetched)
+	}
+
+	s.Lock()
+	needSweep := false
+	now := time.Now()
+	if s.lastSweepTime.IsZero() || now.Before(s.lastSweepTime) || now.Sub(s.lastSweepTime) > sweepInterval {
+		s.lastSweepTime = now
+		needSweep = true
+	}
+	s.Unlock()
+
+	if needSweep {
+		s.sweep()
+	}
+}
+
+func notLowercaseHex(r rune) bool {
+	return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+}
+
+func (s *Server) sweep() {
+	log.Printf("Performing sweep for old files")
+	now := time.Now()
+
+	accountsPath := filepath.Join(s.baseDirectory, "accounts")
+	accountsDir, err := os.Open(accountsPath)
+	if err != nil {
+		log.Printf("Failed to open %s: %s", accountsPath, err)
+		return
+	}
+	defer accountsDir.Close()
+
+	ents, err := accountsDir.Readdir(0)
+	if err != nil {
+		log.Printf("Failed to read %s: %s", accountsPath, err)
+		return
+	}
+
+	for _, ent := range ents {
+		name := ent.Name()
+		if len(name) == 64 && strings.IndexFunc(name, notLowercaseHex) == -1 {
+			filesPath := filepath.Join(accountsPath, name, "files")
+			filesDir, err := os.Open(filesPath)
+			if os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				log.Printf("Failed to open %s: %s", filesPath, err)
+				continue
+			}
+
+			filesEnts, err := filesDir.Readdir(0)
+			if err == nil {
+				for _, fileEnt := range filesEnts {
+					name := fileEnt.Name()
+					if len(name) > 0 && strings.IndexFunc(name, notLowercaseHex) == -1 {
+						mtime := fileEnt.ModTime()
+						if now.After(mtime) && now.Sub(mtime) > fileLifetime {
+							if err := os.Remove(filepath.Join(filesPath, name)); err != nil {
+								log.Printf("Failed to delete file: %s", err)
+							}
+						}
+					}
+				}
+			} else {
+				log.Printf("Failed to read %s: %s", filesPath, err)
+			}
+
+			filesDir.Close()
+		}
 	}
 }
 

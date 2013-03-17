@@ -8,6 +8,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +23,8 @@ import (
 )
 
 type TestServer struct {
+	sync.WaitGroup
+
 	listener       *net.TCPListener
 	addr           *net.TCPAddr
 	server         *Server
@@ -29,14 +34,17 @@ type TestServer struct {
 }
 
 func (t *TestServer) Loop() {
+	t.Add(1)
 	for {
 		conn, err := t.listener.Accept()
 		if err != nil {
 			break
 		}
 
+		t.Add(1)
 		go t.handleConnection(conn)
 	}
+	t.Done()
 }
 
 func (t *TestServer) handleConnection(rawConn net.Conn) {
@@ -48,6 +56,7 @@ func (t *TestServer) handleConnection(rawConn net.Conn) {
 
 	t.server.Process(conn)
 	conn.Close()
+	t.Done()
 }
 
 func (t *TestServer) Dial(identity, identityPublic *[32]byte) *transport.Conn {
@@ -65,9 +74,10 @@ func (t *TestServer) Dial(identity, identityPublic *[32]byte) *transport.Conn {
 
 func (t *TestServer) Close() {
 	t.listener.Close()
+	t.Wait()
 }
 
-func NewTestServer() *TestServer {
+func NewTestServer(setup func(dir string)) *TestServer {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		panic(err)
@@ -76,6 +86,10 @@ func NewTestServer() *TestServer {
 	dir, err := ioutil.TempDir("", "servertest")
 	if err != nil {
 		panic(err)
+	}
+
+	if setup != nil {
+		setup(dir)
 	}
 
 	testServer := &TestServer{
@@ -94,6 +108,7 @@ func NewTestServer() *TestServer {
 type script struct {
 	numPlayers             int
 	numPlayersWithAccounts int
+	setupDir               func(dir string)
 	actions                []action
 }
 
@@ -138,7 +153,7 @@ func (s *scriptState) buildDelivery(to int, message []byte) *pond.Request {
 }
 
 func runScript(t *testing.T, s script) {
-	server := NewTestServer()
+	server := NewTestServer(s.setupDir)
 	defer server.Close()
 
 	identities := make([][32]byte, s.numPlayers)
@@ -198,7 +213,9 @@ func runScript(t *testing.T, s script) {
 		if err := conn.ReadProto(reply); err != nil {
 			t.Fatal(err)
 		}
-		a.validate(t, reply)
+		if a.validate != nil {
+			a.validate(t, reply)
+		}
 
 		if len(a.payload) > 0 {
 			_, err := conn.Write(a.payload)
@@ -659,4 +676,49 @@ func TestAnnounce(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestSweep(t *testing.T) {
+	var fileDir, oldPath, newPath string
+
+	runScript(t, script{
+		numPlayers: 1,
+		setupDir: func(dir string) {
+			fileDir = filepath.Join(dir, "accounts", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff", "files")
+			if err := os.MkdirAll(fileDir, 0700); err != nil {
+				t.Fatalf("Failed to create files directory: %s", err)
+			}
+
+			oldPath = filepath.Join(fileDir, "01")
+			file, err := os.Create(oldPath)
+			if err != nil {
+				t.Fatalf("Failed to create file: %s", err)
+			}
+			file.Close()
+			oldTime := time.Now().AddDate(0, -2, 0)
+			if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+				t.Fatalf("Failed to set times for old file: %s", err)
+			}
+
+			newPath = filepath.Join(fileDir, "02")
+			file, err = os.Create(newPath)
+			if err != nil {
+				t.Fatalf("Failed to create file: %s", err)
+			}
+			file.Close()
+		},
+		actions: []action{
+			{
+				request: &pond.Request{},
+			},
+		},
+	})
+
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("old path was not removed: %s", err)
+	}
+
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("new path was removed: %s", err)
+	}
 }
