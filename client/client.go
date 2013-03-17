@@ -321,6 +321,9 @@ func (c *client) loadUI() {
 			c.log.Errorf("Waiting for locked state file")
 		}
 		for {
+			if c.stateLock, ok = disk.LockStateFile(stateFile); ok {
+				break
+			}
 			select {
 			case _, ok := <-c.ui.Events():
 				if !ok {
@@ -329,9 +332,6 @@ func (c *client) loadUI() {
 					select {}
 				}
 			case <-time.After(1 * time.Second):
-				break
-			}
-			if c.stateLock, ok = disk.LockStateFile(stateFile); ok {
 				break
 			}
 		}
