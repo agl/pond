@@ -101,6 +101,9 @@ func (c *client) unmarshal(state *disk.State) error {
 		if cont.Generation != nil {
 			contact.generation = *cont.Generation
 		}
+		if cont.SupportedVersion != nil {
+			contact.supportedVersion = *cont.SupportedVersion
+		}
 	}
 
 	for _, m := range state.Inbox {
@@ -188,6 +191,7 @@ func (c *client) marshal() []byte {
 			KeyExchangeBytes: contact.kxsBytes,
 			LastPrivate:      contact.lastDHPrivate[:],
 			CurrentPrivate:   contact.currentDHPrivate[:],
+			SupportedVersion: proto.Int32(contact.supportedVersion),
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()

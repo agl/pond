@@ -203,4 +203,8 @@ message Message {
 	}
 	repeated Attachment files = 7;
 	repeated Detachment detached_files = 8;
+
+	// supported_version allows a client to advertise the maximum supported
+	// version that it speaks.
+	optional int32 supported_version = 9;
 }

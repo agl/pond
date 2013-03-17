@@ -24,9 +24,13 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-// messageLifetime is the default amount of time for which we'll keep a
-// message. (Counting from the time that it was received.)
-const messageLifetime = 7 * 24 * time.Hour
+const (
+	// messageLifetime is the default amount of time for which we'll keep a
+	// message. (Counting from the time that it was received.)
+	messageLifetime = 7 * 24 * time.Hour
+	// The current protocol version implemented by this code.
+	protoVersion = 1
+)
 
 const (
 	colorDefault               = 0
@@ -204,6 +208,9 @@ type Contact struct {
 	// theirIdentityPublic is the public identity that their home server
 	// knows them by.
 	theirIdentityPublic [32]byte
+	// supportedVersion contains the greatest protocol version number that
+	// we have observed from this contact.
+	supportedVersion int32
 
 	lastDHPrivate    [32]byte
 	currentDHPrivate [32]byte
@@ -960,6 +967,7 @@ func (c *client) showContact(id uint64) interface{} {
 		{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
 		{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
 		{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+		{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
 	}
 
 	if len(contact.kxsBytes) > 0 {
@@ -1064,6 +1072,7 @@ func usageString(draft *Draft) (string, bool) {
 		MyNextDh:      dhPub[:],
 		Files:         draft.attachments,
 		DetachedFiles: draft.detachments,
+		SupportedVersion: proto.Int32(protoVersion),
 	}
 
 	serialized, err := proto.Marshal(msg)
@@ -1703,6 +1712,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			MyNextDh:      nextDHPub[:],
 			Files:         draft.attachments,
 			DetachedFiles: draft.detachments,
+			SupportedVersion: proto.Int32(protoVersion),
 		})
 		if err != nil {
 			// TODO: handle this case better.
@@ -1757,6 +1767,7 @@ func (c *client) sendAck(msg *InboxMessage) {
 		BodyEncoding: pond.Message_RAW.Enum(),
 		MyNextDh:     nextDHPub[:],
 		InReplyTo:    msg.message.Id,
+		SupportedVersion: proto.Int32(protoVersion),
 	})
 	if err != nil {
 		c.log.Errorf("Error sending message: %s", err)

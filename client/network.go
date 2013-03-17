@@ -26,10 +26,12 @@ import (
 	"github.com/agl/pond/transport"
 )
 
-func (c *client) send(to *Contact, message *pond.Message) error {
-	var nonce [24]byte
-	c.randBytes(nonce[:])
+const (
+	nonceLen = 24
+	ephemeralBlockLen = nonceLen + 32 + box.Overhead
+)
 
+func (c *client) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -44,9 +46,33 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	copy(plaintext[4:], messageBytes)
 	c.randBytes(plaintext[4+len(messageBytes):])
 
-	sealed := make([]byte, len(plaintext)+box.Overhead+len(nonce))
-	copy(sealed, nonce[:])
-	box.Seal(sealed[len(nonce):len(nonce)], plaintext, &nonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
+	var innerNonce [24]byte
+	c.randBytes(innerNonce[:])
+	var sealed, innerSealed []byte
+	sealedLen := nonceLen+len(plaintext)+box.Overhead
+	dhPrivate := &to.lastDHPrivate
+
+	if to.supportedVersion >= 1 {
+		public, private, err := box.GenerateKey(c.rand)
+		if err != nil {
+			return err
+		}
+		dhPrivate = private
+
+		var outerNonce [24]byte
+		c.randBytes(outerNonce[:])
+		sealedLen += ephemeralBlockLen
+		sealed = make([]byte, sealedLen)
+		copy(sealed, outerNonce[:])
+		box.Seal(sealed[nonceLen:nonceLen], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
+		innerSealed = sealed[ephemeralBlockLen:]
+	} else {
+		sealed = make([]byte, sealedLen)
+		innerSealed = sealed
+	}
+
+	copy(innerSealed, innerNonce[:])
+	box.Seal(innerSealed[nonceLen:nonceLen], plaintext, &innerNonce, &to.theirCurrentDHPublic, dhPrivate)
 
 	sha := sha256.New()
 	sha.Write(sealed)
@@ -83,6 +109,46 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 }
 
 func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
+	plaintext, ok := decryptMessageInner(sealed, nonce, from)
+	if ok {
+		return plaintext, true
+	}
+
+	// The message might have an ephemeral block, the nonce of which has already been split off.
+	headerLen := ephemeralBlockLen - len(nonce)
+	if len(sealed) > headerLen {
+		publicBytes, ok := decryptMessageInner(sealed[:headerLen], nonce, from)
+		if !ok || len(publicBytes) != 32 {
+			return nil, false
+		}
+		var innerNonce [nonceLen]byte
+		sealed = sealed[headerLen:]
+		copy(innerNonce[:], sealed)
+		sealed = sealed[nonceLen:]
+		var ephemeralPublicKey [32]byte
+		copy(ephemeralPublicKey[:], publicBytes)
+
+		if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
+			return plaintext, ok
+		}
+
+		plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
+		if !ok {
+			return nil, false
+		}
+		// They have clearly received our current DH value. Time to
+		// rotate.
+		copy(from.lastDHPrivate[:], from.currentDHPrivate[:])
+		if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
+			panic(err)
+		}
+		return plaintext, true
+	}
+
+	return nil, false
+}
+
+func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
 	if plaintext, ok := box.Open(nil, sealed, nonce, &from.theirLastDHPublic, &from.lastDHPrivate); ok {
 		return plaintext, true
 	}
@@ -258,6 +324,10 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 				c.outboxUI.SetIndicator(id, indicatorGreen)
 			}
 		}
+	}
+
+	if msg.SupportedVersion != nil {
+		from.supportedVersion = *msg.SupportedVersion
 	}
 
 	from.kxsBytes = nil

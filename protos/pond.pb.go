@@ -586,6 +586,7 @@ type Message struct {
 	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
 	DetachedFiles    []*Message_Detachment `protobuf:"bytes,8,rep,name=detached_files" json:"detached_files,omitempty"`
+	SupportedVersion *int32                `protobuf:"varint,9,opt,name=supported_version" json:"supported_version,omitempty"`
 	XXX_unrecognized []byte                `json:"-"`
 }
 
@@ -631,6 +632,27 @@ func (this *Message) GetMyNextDh() []byte {
 func (this *Message) GetInReplyTo() uint64 {
 	if this != nil && this.InReplyTo != nil {
 		return *this.InReplyTo
+	}
+	return 0
+}
+
+func (this *Message) GetFiles() []*Message_Attachment {
+	if this != nil {
+		return this.Files
+	}
+	return nil
+}
+
+func (this *Message) GetDetachedFiles() []*Message_Detachment {
+	if this != nil {
+		return this.DetachedFiles
+	}
+	return nil
+}
+
+func (this *Message) GetSupportedVersion() int32 {
+	if this != nil && this.SupportedVersion != nil {
+		return *this.SupportedVersion
 	}
 	return 0
 }
