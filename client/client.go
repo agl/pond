@@ -259,6 +259,16 @@ func (c *client) errorUI(errorText string, bgColor uint32) {
 	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
 	c.ui.Actions() <- UIState{uiStateError}
 	c.ui.Signal()
+	if !c.testing {
+		select {
+		case _, ok := <-c.ui.Events():
+			if !ok {
+				// User asked to close the window.
+				close(c.ui.Actions())
+				select {}
+			}
+		}
+	}
 }
 
 func (c *client) loadUI() {
