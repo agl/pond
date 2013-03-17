@@ -1064,14 +1064,14 @@ func usageString(draft *Draft) (string, bool) {
 	var dhPub [32]byte
 
 	msg := &pond.Message{
-		Id:            proto.Uint64(0),
-		Time:          proto.Int64(1 << 62),
-		Body:          []byte(draft.body),
-		BodyEncoding:  pond.Message_RAW.Enum(),
-		InReplyTo:     replyToId,
-		MyNextDh:      dhPub[:],
-		Files:         draft.attachments,
-		DetachedFiles: draft.detachments,
+		Id:               proto.Uint64(0),
+		Time:             proto.Int64(1 << 62),
+		Body:             []byte(draft.body),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		InReplyTo:        replyToId,
+		MyNextDh:         dhPub[:],
+		Files:            draft.attachments,
+		DetachedFiles:    draft.detachments,
 		SupportedVersion: proto.Int32(protoVersion),
 	}
 
@@ -1704,14 +1704,14 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 		id := c.randId()
 		err := c.send(to, &pond.Message{
-			Id:            proto.Uint64(id),
-			Time:          proto.Int64(time.Now().Unix()),
-			Body:          []byte(body),
-			BodyEncoding:  pond.Message_RAW.Enum(),
-			InReplyTo:     replyToId,
-			MyNextDh:      nextDHPub[:],
-			Files:         draft.attachments,
-			DetachedFiles: draft.detachments,
+			Id:               proto.Uint64(id),
+			Time:             proto.Int64(time.Now().Unix()),
+			Body:             []byte(body),
+			BodyEncoding:     pond.Message_RAW.Enum(),
+			InReplyTo:        replyToId,
+			MyNextDh:         nextDHPub[:],
+			Files:            draft.attachments,
+			DetachedFiles:    draft.detachments,
 			SupportedVersion: proto.Int32(protoVersion),
 		})
 		if err != nil {
@@ -1761,12 +1761,12 @@ func (c *client) sendAck(msg *InboxMessage) {
 
 	id := c.randId()
 	err := c.send(to, &pond.Message{
-		Id:           proto.Uint64(id),
-		Time:         proto.Int64(time.Now().Unix()),
-		Body:         make([]byte, 0),
-		BodyEncoding: pond.Message_RAW.Enum(),
-		MyNextDh:     nextDHPub[:],
-		InReplyTo:    msg.message.Id,
+		Id:               proto.Uint64(id),
+		Time:             proto.Int64(time.Now().Unix()),
+		Body:             make([]byte, 0),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		MyNextDh:         nextDHPub[:],
+		InReplyTo:        msg.message.Id,
 		SupportedVersion: proto.Int32(protoVersion),
 	})
 	if err != nil {

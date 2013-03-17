@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	nonceLen = 24
+	nonceLen          = 24
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
@@ -49,7 +49,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	var innerNonce [24]byte
 	c.randBytes(innerNonce[:])
 	var sealed, innerSealed []byte
-	sealedLen := nonceLen+len(plaintext)+box.Overhead
+	sealedLen := nonceLen + len(plaintext) + box.Overhead
 	dhPrivate := &to.lastDHPrivate
 
 	if to.supportedVersion >= 1 {
