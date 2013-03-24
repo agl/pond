@@ -32,6 +32,7 @@ const (
 	Reply_FILE_COMPLETE              Reply_Status = 19
 	Reply_NO_SUCH_FILE               Reply_Status = 20
 	Reply_RESUME_PAST_END_OF_FILE    Reply_Status = 21
+	Reply_GENERATION_REVOKED         Reply_Status = 22
 )
 
 var Reply_Status_name = map[int32]string{
@@ -51,6 +52,7 @@ var Reply_Status_name = map[int32]string{
 	19: "FILE_COMPLETE",
 	20: "NO_SUCH_FILE",
 	21: "RESUME_PAST_END_OF_FILE",
+	22: "GENERATION_REVOKED",
 }
 var Reply_Status_value = map[string]int32{
 	"OK":                         0,
@@ -69,6 +71,7 @@ var Reply_Status_value = map[string]int32{
 	"FILE_COMPLETE":              19,
 	"NO_SUCH_FILE":               20,
 	"RESUME_PAST_END_OF_FILE":    21,
+	"GENERATION_REVOKED":         22,
 }
 
 func (x Reply_Status) Enum() *Reply_Status {
@@ -128,12 +131,13 @@ func (x *Message_Encoding) UnmarshalJSON(data []byte) error {
 }
 
 type Request struct {
-	NewAccount       *NewAccount `protobuf:"bytes,1,opt,name=new_account" json:"new_account,omitempty"`
-	Deliver          *Delivery   `protobuf:"bytes,2,opt,name=deliver" json:"deliver,omitempty"`
-	Fetch            *Fetch      `protobuf:"bytes,3,opt,name=fetch" json:"fetch,omitempty"`
-	Upload           *Upload     `protobuf:"bytes,4,opt,name=upload" json:"upload,omitempty"`
-	Download         *Download   `protobuf:"bytes,5,opt,name=download" json:"download,omitempty"`
-	XXX_unrecognized []byte      `json:"-"`
+	NewAccount       *NewAccount       `protobuf:"bytes,1,opt,name=new_account" json:"new_account,omitempty"`
+	Deliver          *Delivery         `protobuf:"bytes,2,opt,name=deliver" json:"deliver,omitempty"`
+	Fetch            *Fetch            `protobuf:"bytes,3,opt,name=fetch" json:"fetch,omitempty"`
+	Upload           *Upload           `protobuf:"bytes,4,opt,name=upload" json:"upload,omitempty"`
+	Download         *Download         `protobuf:"bytes,5,opt,name=download" json:"download,omitempty"`
+	Revocation       *SignedRevocation `protobuf:"bytes,6,opt,name=revocation" json:"revocation,omitempty"`
+	XXX_unrecognized []byte            `json:"-"`
 }
 
 func (this *Request) Reset()         { *this = Request{} }
@@ -175,14 +179,22 @@ func (this *Request) GetDownload() *Download {
 	return nil
 }
 
+func (this *Request) GetRevocation() *SignedRevocation {
+	if this != nil {
+		return this.Revocation
+	}
+	return nil
+}
+
 type Reply struct {
-	Status           *Reply_Status   `protobuf:"varint,1,opt,name=status,enum=protos.Reply_Status,def=0" json:"status,omitempty"`
-	AccountCreated   *AccountCreated `protobuf:"bytes,2,opt,name=account_created" json:"account_created,omitempty"`
-	Fetched          *Fetched        `protobuf:"bytes,3,opt,name=fetched" json:"fetched,omitempty"`
-	Announce         *ServerAnnounce `protobuf:"bytes,4,opt,name=announce" json:"announce,omitempty"`
-	Upload           *UploadReply    `protobuf:"bytes,5,opt,name=upload" json:"upload,omitempty"`
-	Download         *DownloadReply  `protobuf:"bytes,6,opt,name=download" json:"download,omitempty"`
-	XXX_unrecognized []byte          `json:"-"`
+	Status           *Reply_Status     `protobuf:"varint,1,opt,name=status,enum=protos.Reply_Status,def=0" json:"status,omitempty"`
+	AccountCreated   *AccountCreated   `protobuf:"bytes,2,opt,name=account_created" json:"account_created,omitempty"`
+	Fetched          *Fetched          `protobuf:"bytes,3,opt,name=fetched" json:"fetched,omitempty"`
+	Announce         *ServerAnnounce   `protobuf:"bytes,4,opt,name=announce" json:"announce,omitempty"`
+	Upload           *UploadReply      `protobuf:"bytes,5,opt,name=upload" json:"upload,omitempty"`
+	Download         *DownloadReply    `protobuf:"bytes,6,opt,name=download" json:"download,omitempty"`
+	Revocation       *SignedRevocation `protobuf:"bytes,7,opt,name=revocation" json:"revocation,omitempty"`
+	XXX_unrecognized []byte            `json:"-"`
 }
 
 func (this *Reply) Reset()         { *this = Reply{} }
@@ -229,6 +241,13 @@ func (this *Reply) GetUpload() *UploadReply {
 func (this *Reply) GetDownload() *DownloadReply {
 	if this != nil {
 		return this.Download
+	}
+	return nil
+}
+
+func (this *Reply) GetRevocation() *SignedRevocation {
+	if this != nil {
+		return this.Revocation
 	}
 	return nil
 }
@@ -487,6 +506,54 @@ func (this *DownloadReply) GetSize() int64 {
 		return *this.Size
 	}
 	return 0
+}
+
+type SignedRevocation struct {
+	Revocation       *SignedRevocation_Revocation `protobuf:"bytes,1,req,name=revocation" json:"revocation,omitempty"`
+	Signature        []byte                       `protobuf:"bytes,2,req,name=signature" json:"signature,omitempty"`
+	XXX_unrecognized []byte                       `json:"-"`
+}
+
+func (this *SignedRevocation) Reset()         { *this = SignedRevocation{} }
+func (this *SignedRevocation) String() string { return proto.CompactTextString(this) }
+func (*SignedRevocation) ProtoMessage()       {}
+
+func (this *SignedRevocation) GetRevocation() *SignedRevocation_Revocation {
+	if this != nil {
+		return this.Revocation
+	}
+	return nil
+}
+
+func (this *SignedRevocation) GetSignature() []byte {
+	if this != nil {
+		return this.Signature
+	}
+	return nil
+}
+
+type SignedRevocation_Revocation struct {
+	Generation       *uint32 `protobuf:"fixed32,1,req,name=generation" json:"generation,omitempty"`
+	Revocation       []byte  `protobuf:"bytes,2,req,name=revocation" json:"revocation,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *SignedRevocation_Revocation) Reset()         { *this = SignedRevocation_Revocation{} }
+func (this *SignedRevocation_Revocation) String() string { return proto.CompactTextString(this) }
+func (*SignedRevocation_Revocation) ProtoMessage()       {}
+
+func (this *SignedRevocation_Revocation) GetGeneration() uint32 {
+	if this != nil && this.Generation != nil {
+		return *this.Generation
+	}
+	return 0
+}
+
+func (this *SignedRevocation_Revocation) GetRevocation() []byte {
+	if this != nil {
+		return this.Revocation
+	}
+	return nil
 }
 
 type KeyExchange struct {

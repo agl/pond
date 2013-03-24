@@ -129,7 +129,7 @@ type scriptState struct {
 	testServer       *TestServer
 }
 
-func (s *scriptState) buildDelivery(to int, message []byte) *pond.Request {
+func (s *scriptState) buildDelivery(to int, message []byte, generation uint32) *pond.Request {
 	memberKey, err := s.groupPrivateKeys[to].NewMember(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -146,7 +146,7 @@ func (s *scriptState) buildDelivery(to int, message []byte) *pond.Request {
 		Deliver: &pond.Delivery{
 			To:         s.publicIdentities[to][:],
 			Signature:  sig,
-			Generation: proto.Uint32(0),
+			Generation: proto.Uint32(generation),
 			Message:    message,
 		},
 	}
@@ -249,6 +249,8 @@ func oneShotTest(t *testing.T, request *pond.Request, validate func(*testing.T, 
 }
 
 func TestNoAccount(t *testing.T) {
+	t.Parallel()
+
 	oneShotTest(t, &pond.Request{Fetch: new(pond.Fetch)}, func(t *testing.T, reply *pond.Reply) {
 		if reply.Status == nil || *reply.Status != pond.Reply_NO_ACCOUNT {
 			t.Errorf("Bad reply when fetching from invalid account: %s", reply)
@@ -257,6 +259,8 @@ func TestNoAccount(t *testing.T) {
 }
 
 func TestNoRequest(t *testing.T) {
+	t.Parallel()
+
 	oneShotTest(t, &pond.Request{}, func(t *testing.T, reply *pond.Reply) {
 		if reply.Status == nil || *reply.Status != pond.Reply_NO_REQUEST {
 			t.Errorf("Bad reply with no request: %s", reply)
@@ -265,6 +269,8 @@ func TestNoRequest(t *testing.T) {
 }
 
 func TestInvalidAddress(t *testing.T) {
+	t.Parallel()
+
 	oneShotTest(t, &pond.Request{
 		Deliver: &pond.Delivery{
 			To:         make([]byte, 5),
@@ -280,6 +286,8 @@ func TestInvalidAddress(t *testing.T) {
 }
 
 func TestNoSuchAddress(t *testing.T) {
+	t.Parallel()
+
 	oneShotTest(t, &pond.Request{
 		Deliver: &pond.Delivery{
 			To:         make([]byte, 32),
@@ -295,6 +303,8 @@ func TestNoSuchAddress(t *testing.T) {
 }
 
 func TestBadNewAccount(t *testing.T) {
+	t.Parallel()
+
 	oneShotTest(t, &pond.Request{
 		NewAccount: &pond.NewAccount{
 			Generation: proto.Uint32(0),
@@ -308,6 +318,8 @@ func TestBadNewAccount(t *testing.T) {
 }
 
 func TestNewAccount(t *testing.T) {
+	t.Parallel()
+
 	groupPrivateKey, err := bbssig.GenerateGroup(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -326,6 +338,8 @@ func TestNewAccount(t *testing.T) {
 }
 
 func TestPingPong(t *testing.T) {
+	t.Parallel()
+
 	message0 := make([]byte, 1000)
 	io.ReadFull(rand.Reader, message0)
 	message1 := make([]byte, 1000)
@@ -338,7 +352,7 @@ func TestPingPong(t *testing.T) {
 			{
 				player: 0,
 				buildRequest: func(s *scriptState) *pond.Request {
-					return s.buildDelivery(1, message1)
+					return s.buildDelivery(1, message1, 1)
 				},
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status != nil {
@@ -349,7 +363,7 @@ func TestPingPong(t *testing.T) {
 			{
 				player: 1,
 				buildRequest: func(s *scriptState) *pond.Request {
-					return s.buildDelivery(0, message0)
+					return s.buildDelivery(0, message0, 1)
 				},
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status != nil {
@@ -398,6 +412,8 @@ func TestPingPong(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte("hello world")
 
 	runScript(t, script{
@@ -458,6 +474,8 @@ func TestUpload(t *testing.T) {
 }
 
 func TestOversizeUpload(t *testing.T) {
+	t.Parallel()
+
 	runScript(t, script{
 		numPlayers:             1,
 		numPlayersWithAccounts: 1,
@@ -481,6 +499,8 @@ func TestOversizeUpload(t *testing.T) {
 }
 
 func TestResumeUpload(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte("hello world")
 
 	runScript(t, script{
@@ -562,6 +582,8 @@ func TestResumeUpload(t *testing.T) {
 }
 
 func TestResumeDownload(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte("hello world")
 
 	runScript(t, script{
@@ -640,6 +662,8 @@ func TestResumeDownload(t *testing.T) {
 }
 
 func TestAnnounce(t *testing.T) {
+	t.Parallel()
+
 	runScript(t, script{
 		numPlayers:             1,
 		numPlayersWithAccounts: 1,
@@ -679,6 +703,8 @@ func TestAnnounce(t *testing.T) {
 }
 
 func TestSweep(t *testing.T) {
+	t.Parallel()
+
 	var fileDir, oldPath, newPath string
 
 	runScript(t, script{
@@ -721,4 +747,59 @@ func TestSweep(t *testing.T) {
 	if _, err := os.Stat(newPath); err != nil {
 		t.Errorf("new path was removed: %s", err)
 	}
+}
+
+func TestRevocation(t *testing.T) {
+	t.Parallel()
+
+	message := []byte{1, 2, 3}
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				request: &pond.Request{
+					Revocation: &pond.SignedRevocation{
+						SignedRevocation: &pond.SignedRevocation_SignedRevocation{
+							Generation: proto.Uint32(0x1234),
+							Revocation: []byte{4, 5, 6},
+						},
+						Signature: []byte{7, 8, 9},
+					},
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Errorf("Bad reply to revocation: %s", reply)
+					}
+				},
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return s.buildDelivery(0, message, 0x1234)
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status == nil || *reply.Status != pond.Reply_GENERATION_REVOKED {
+						t.Errorf("Bad status to delivery request: %#v", reply)
+					}
+					if reply.Revocation == nil {
+						t.Errorf("Missing revocation information: %#v", reply)
+					}
+				},
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return s.buildDelivery(0, message, 0x1235)
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Errorf("Bad reply to revocation: %s", reply)
+					}
+				},
+			},
+		},
+	})
 }

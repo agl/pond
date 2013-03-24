@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ const (
 	// fileLifetime is the amount of time that an uploaded file is kept
 	// for.
 	fileLifetime = 14 * 24 * time.Hour
+	// maxRevocations is the maximum number of revocations that we'll store
+	// on disk for any one account.
+	maxRevocations = 100
 )
 
 type Account struct {
@@ -80,6 +84,10 @@ func (a *Account) Path() string {
 
 func (a *Account) FilePath() string {
 	return filepath.Join(a.Path(), "files")
+}
+
+func (a *Account) RevocationPath() string {
+	return filepath.Join(a.Path(), "revocations")
 }
 
 func (a *Account) LoadFileInfo() bool {
@@ -221,6 +229,8 @@ func (s *Server) Process(conn *transport.Conn) {
 			// Connection will be handled by download.
 			return
 		}
+	} else if req.Revocation != nil {
+		reply = s.revocation(from, req.Revocation)
 	} else {
 		reply = &pond.Reply{Status: pond.Reply_NO_REQUEST.Enum()}
 	}
@@ -411,6 +421,17 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 
 	if !group.Verify(digest, sha, del.Signature) {
 		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}
+	}
+
+	revPath := filepath.Join(account.RevocationPath(), fmt.Sprintf("%08x", *del.Generation))
+	revBytes, err := ioutil.ReadFile(revPath)
+	if err == nil {
+		var revocation pond.SignedRevocation
+		if err := proto.Unmarshal(revBytes, &revocation); err != nil {
+			log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
+			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+		}
+		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation}
 	}
 
 	serialized, _ := proto.Marshal(del)
@@ -694,5 +715,59 @@ func (s *Server) download(conn *transport.Conn, download *pond.Download) *pond.R
 	}
 
 	io.Copy(conn, file)
+	return nil
+}
+
+func (s *Server) revocation(from *[32]byte, revocation *pond.SignedRevocation) *pond.Reply {
+	account, ok := s.getAccount(from)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}
+	}
+
+	// First check that the account doesn't have too many revocations
+	// stored.
+
+	revPath := account.RevocationPath()
+	os.MkdirAll(revPath, 0777)
+
+	revDir, err := os.Open(revPath)
+	if err != nil {
+		log.Printf("Failed to open %s: %s", revPath, err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+	defer revDir.Close()
+
+	ents, err := revDir.Readdir(0)
+	if err != nil {
+		log.Printf("Failed to read %s: %s", revDir, err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+
+	if len(ents) > maxRevocations {
+		// Delete the oldest revocation.
+		names := make([]string, 0, len(ents))
+		for _, ent := range ents {
+			names = append(names, ent.Name())
+		}
+		sort.Strings(names)
+		path := filepath.Join(revPath, names[0])
+		if err := os.Remove(path); err != nil {
+			log.Printf("Failed to remove %s: %s", path, err)
+			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+		}
+	}
+
+	path := filepath.Join(revPath, fmt.Sprintf("%08x", *revocation.Revocation.Generation))
+	revBytes, err := proto.Marshal(revocation)
+	if err != nil {
+		log.Printf("Failed to serialise revocation: %s", err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+
+	if err := ioutil.WriteFile(path, revBytes, 0666); err != nil {
+		log.Printf("Failed to write revocation file: %s", err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+
 	return nil
 }
