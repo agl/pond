@@ -3008,7 +3008,7 @@ func (c *client) createPassphraseUI() {
 func (c *client) createAccountUI() {
 	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
 	if c.testing {
-		defaultServer = "pondserver://PXD4DDBLJD3YCC3EC3DGIYVYZYF5GVZC3T6JFHPUWU2WQ7W3CN5Q@127.0.0.1:16333"
+		defaultServer = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
 	}
 
 	ui := VBox{
