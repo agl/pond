@@ -40,9 +40,10 @@ message Outbox {
 	required string server = 3;
 	required int64 created = 4;
 	optional int64 sent = 5;
-	required bytes message = 6;
+	optional bytes message = 6;
 	optional bytes request = 7;
 	optional int64 acked = 8;
+	optional bool revocation = 9;
 };
 
 message Draft {

@@ -494,6 +494,24 @@ func (r *Revocation) Marshal() []byte {
 	return ret
 }
 
+func (r *Revocation) Unmarshal(b []byte) (*Revocation, bool) {
+	if len(b) != 7*32 {
+		return nil, false
+	}
+
+	var ok bool
+	r.a, ok = new(bn256.G1).Unmarshal(b[:2*32])
+	if !ok {
+		return nil, false
+	}
+	r.x = new(big.Int).SetBytes(b[2*32:3*32])
+	r.aStar, ok = new(bn256.G2).Unmarshal(b[3*32:7*32])
+	if !ok {
+		return nil, false
+	}
+	return r, true
+}
+
 // Update alters g to create a new Group that includes all previous members,
 // save a specifically revoked member.
 func (g *Group) Update(r *Revocation) {

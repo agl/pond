@@ -409,6 +409,17 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 		return &pond.Reply{Status: pond.Reply_NO_SUCH_ADDRESS.Enum()}
 	}
 
+	revPath := filepath.Join(account.RevocationPath(), fmt.Sprintf("%08x", *del.Generation))
+	revBytes, err := ioutil.ReadFile(revPath)
+	if err == nil {
+		var revocation pond.SignedRevocation
+		if err := proto.Unmarshal(revBytes, &revocation); err != nil {
+			log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
+			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+		}
+		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation}
+	}
+
 	sha := sha256.New()
 	sha.Write(del.Message)
 	digest := sha.Sum(nil)
@@ -421,17 +432,6 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 
 	if !group.Verify(digest, sha, del.Signature) {
 		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}
-	}
-
-	revPath := filepath.Join(account.RevocationPath(), fmt.Sprintf("%08x", *del.Generation))
-	revBytes, err := ioutil.ReadFile(revPath)
-	if err == nil {
-		var revocation pond.SignedRevocation
-		if err := proto.Unmarshal(revBytes, &revocation); err != nil {
-			log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
-			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
-		}
-		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation}
 	}
 
 	serialized, _ := proto.Marshal(del)
@@ -718,10 +718,15 @@ func (s *Server) download(conn *transport.Conn, download *pond.Download) *pond.R
 	return nil
 }
 
-func (s *Server) revocation(from *[32]byte, revocation *pond.SignedRevocation) *pond.Reply {
+func (s *Server) revocation(from *[32]byte, signedRevocation *pond.SignedRevocation) *pond.Reply {
 	account, ok := s.getAccount(from)
 	if !ok {
 		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}
+	}
+
+	revocation, ok := new(bbssig.Revocation).Unmarshal(signedRevocation.Revocation.Revocation)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_CANNOT_PARSE_REVOCATION.Enum()}
 	}
 
 	// First check that the account doesn't have too many revocations
@@ -757,8 +762,8 @@ func (s *Server) revocation(from *[32]byte, revocation *pond.SignedRevocation) *
 		}
 	}
 
-	path := filepath.Join(revPath, fmt.Sprintf("%08x", *revocation.Revocation.Generation))
-	revBytes, err := proto.Marshal(revocation)
+	path := filepath.Join(revPath, fmt.Sprintf("%08x", *signedRevocation.Revocation.Generation))
+	revBytes, err := proto.Marshal(signedRevocation)
 	if err != nil {
 		log.Printf("Failed to serialise revocation: %s", err)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
@@ -768,6 +773,21 @@ func (s *Server) revocation(from *[32]byte, revocation *pond.SignedRevocation) *
 		log.Printf("Failed to write revocation file: %s", err)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
 	}
+
+	group := account.Group()
+	log.Printf("group was %x", group.Marshal())
+	groupCopy, _ := new(bbssig.Group).Unmarshal(group.Marshal())
+	groupCopy.Update(revocation)
+
+	account.Lock()
+	defer account.Unlock()
+
+	account.group = groupCopy
+	groupPath := filepath.Join(account.Path(), "group")
+	if err := ioutil.WriteFile(groupPath, groupCopy.Marshal(), 0600); err != nil {
+		log.Printf("failed to write group file: %s", err)
+	}
+	log.Printf("updated to group %x", groupCopy.Marshal())
 
 	return nil
 }

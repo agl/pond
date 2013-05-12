@@ -132,9 +132,11 @@ func (c *client) unmarshal(state *disk.State) error {
 			server:  *m.Server,
 			created: time.Unix(*m.Created, 0),
 		}
-		msg.message = new(pond.Message)
-		if err := proto.Unmarshal(m.Message, msg.message); err != nil {
-			return errors.New("client: corrupt message in outbox: " + err.Error())
+		if len(m.Message) > 0 {
+			msg.message = new(pond.Message)
+			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
+				return errors.New("client: corrupt message in outbox: " + err.Error())
+			}
 		}
 		if m.Sent != nil {
 			msg.sent = time.Unix(*m.Sent, 0)
@@ -148,6 +150,7 @@ func (c *client) unmarshal(state *disk.State) error {
 				return errors.New("client: corrupt request in outbox: " + err.Error())
 			}
 		}
+		msg.revocation = m.GetRevocation()
 
 		c.outbox = append(c.outbox, msg)
 
@@ -233,13 +236,16 @@ func (c *client) marshal() []byte {
 			continue
 		}
 		m := &disk.Outbox{
-			Id:      proto.Uint64(msg.id),
-			To:      proto.Uint64(msg.to),
-			Server:  proto.String(msg.server),
-			Created: proto.Int64(msg.created.Unix()),
+			Id:         proto.Uint64(msg.id),
+			To:         proto.Uint64(msg.to),
+			Server:     proto.String(msg.server),
+			Created:    proto.Int64(msg.created.Unix()),
+			Revocation: proto.Bool(msg.revocation),
 		}
-		if m.Message, err = proto.Marshal(msg.message); err != nil {
-			panic(err)
+		if msg.message != nil {
+			if m.Message, err = proto.Marshal(msg.message); err != nil {
+				panic(err)
+			}
 		}
 		if !msg.sent.IsZero() {
 			m.Sent = proto.Int64(msg.sent.Unix())

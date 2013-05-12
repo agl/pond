@@ -222,9 +222,10 @@ type Outbox struct {
 	Server           *string `protobuf:"bytes,3,req,name=server" json:"server,omitempty"`
 	Created          *int64  `protobuf:"varint,4,req,name=created" json:"created,omitempty"`
 	Sent             *int64  `protobuf:"varint,5,opt,name=sent" json:"sent,omitempty"`
-	Message          []byte  `protobuf:"bytes,6,req,name=message" json:"message,omitempty"`
+	Message          []byte  `protobuf:"bytes,6,opt,name=message" json:"message,omitempty"`
 	Request          []byte  `protobuf:"bytes,7,opt,name=request" json:"request,omitempty"`
 	Acked            *int64  `protobuf:"varint,8,opt,name=acked" json:"acked,omitempty"`
+	Revocation       *bool   `protobuf:"varint,9,opt,name=revocation" json:"revocation,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -286,6 +287,13 @@ func (this *Outbox) GetAcked() int64 {
 		return *this.Acked
 	}
 	return 0
+}
+
+func (this *Outbox) GetRevocation() bool {
+	if this != nil && this.Revocation != nil {
+		return *this.Revocation
+	}
+	return false
 }
 
 type Draft struct {

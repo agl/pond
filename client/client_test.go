@@ -79,6 +79,7 @@ func NewTestServer(t *testing.T) (*TestServer, error) {
 				return
 			}
 			t.Logf("%s\n", string(line))
+			println(string(line))
 		}
 	}()
 
@@ -165,13 +166,13 @@ func (ui *TestUI) WaitForSignal() error {
 	if !ok {
 		panic("signal channel closed")
 	}
-	ui.t.Logf("Signal")
+	//ui.t.Logf("Signal")
 
 ReadActions:
 	for {
 		select {
 		case action := <-ui.actions:
-			ui.t.Logf("%#v", action)
+			//ui.t.Logf("%#v", action)
 			switch action := action.(type) {
 			case UIState:
 				ui.currentStateID = action.stateID
@@ -214,6 +215,7 @@ type TestClient struct {
 	*client
 	stateDir string
 	ui       *TestUI
+	mainUIDone bool
 }
 
 func NewTestClient(t *testing.T) (*TestClient, error) {
@@ -225,7 +227,7 @@ func NewTestClient(t *testing.T) (*TestClient, error) {
 		return nil, err
 	}
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
-	tc.client.log.toStderr = false
+	//tc.client.log.toStderr = false
 	return tc, nil
 }
 
@@ -264,7 +266,7 @@ func (tc *TestClient) Reload() {
 	tc.Shutdown()
 	tc.ui = NewTestUI(tc.ui.t)
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
-	tc.client.log.toStderr = false
+	//tc.client.log.toStderr = false
 }
 
 func TestOpenClose(t *testing.T) {
@@ -344,6 +346,10 @@ func TestAccountCreation(t *testing.T) {
 }
 
 func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
+	if client.mainUIDone {
+		return
+	}
+
 	client.AdvanceTo(uiStateCreatePassphrase)
 	client.ui.events <- Click{
 		name:    "next",
@@ -356,6 +362,7 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 		entries: map[string]string{"server": url},
 	}
 	client.AdvanceTo(uiStateMain)
+	client.mainUIDone = true
 }
 
 func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, otherName string) {
@@ -371,9 +378,9 @@ func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, 
 	client.AdvanceTo(uiStateNewContact2)
 }
 
-func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestServer) {
-	proceedToKeyExchange(t, client1, server, "client2")
-	proceedToKeyExchange(t, client2, server, "client1")
+func proceedToPairedWithNames(t *testing.T, client1, client2 *TestClient, name1, name2 string, server *TestServer) {
+	proceedToKeyExchange(t, client1, server, name2)
+	proceedToKeyExchange(t, client2, server, name1)
 
 	client1.ui.events <- Click{
 		name:      "process",
@@ -386,6 +393,10 @@ func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestSer
 		textViews: map[string]string{"kxin": client1.ui.text["kxout"]},
 	}
 	client2.AdvanceTo(uiStateShowContact)
+}
+
+func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestServer) {
+	proceedToPairedWithNames(t, client1, client2, "client1", "client2", server)
 }
 
 func TestKeyExchange(t *testing.T) {
@@ -1091,4 +1102,112 @@ func TestServerAnnounce(t *testing.T) {
 
 	client.Reload()
 	client.AdvanceTo(uiStateMain)
+}
+
+func TestRevoke(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	client3, err := NewTestClient(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client3.Close()
+
+	proceedToPaired(t, client1, client2, server)
+	proceedToPairedWithNames(t, client1, client3, "client1", "client3", server)
+
+	initialGeneration := client1.generation
+
+	var client1FromClient2 *Contact
+	for _, candidate := range client2.contacts {
+		if candidate.name == "client1" {
+			client1FromClient2 = candidate
+			break
+		}
+	}
+	if client1FromClient2.generation != initialGeneration {
+		t.Errorf("Initial generations don't match")
+	}
+
+	var client1FromClient3 *Contact
+	for _, candidate := range client3.contacts {
+		if candidate.name == "client1" {
+			client1FromClient3 = candidate
+			break
+		}
+	}
+
+	client1.ui.events <- Click{name: client1.contactsUI.entries[0].boxName}
+	client1.AdvanceTo(uiStateShowContact)
+	client1.ui.events <- Click{name: "revoke"}
+	client1.ui.WaitForSignal()
+
+	if client1.generation != initialGeneration + 1 {
+		t.Errorf("Generation did not advance")
+	}
+
+	if len(client1.outboxUI.entries) != 1 {
+		t.Errorf("No revocation entry found after click")
+	}
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+
+	if len(client1.outboxUI.entries) != 1 {
+		t.Errorf("No revocation entry found after reload")
+	}
+
+	ackChan := make(chan bool)
+	client1.fetchNowChan <- ackChan
+	<-ackChan
+
+	sendMessage(client2, "client1", "test1")
+	client2.AdvanceTo(uiStateRevocationProcessed)
+
+	if gen := client1FromClient2.generation; gen != client1.generation {
+		t.Errorf("Generation number didn't update: found %d, want %d", gen, client1.generation)
+	}
+	if !client1FromClient2.revokedUs {
+		t.Errorf("Client1 isn't marked as revoked")
+	}
+
+	sendMessage(client3, "client1", "test2")
+	client3.AdvanceTo(uiStateRevocationProcessed)
+
+	if gen := client1FromClient3.generation; gen != client1.generation {
+		t.Errorf("Generation number didn't update for non-revoked: found %d, want %d", gen, client1.generation)
+	}
+	if client1FromClient3.revokedUs {
+		t.Errorf("Client2 believes that it was revoked")
+	}
+
+	// Have client3 resend.
+	client3.fetchNowChan <- ackChan
+	<-ackChan
+
+	// Have client1 fetch the resigned message.
+	from, msg := fetchMessage(client1)
+	if from != "client3" {
+		t.Fatalf("message from %s, expected client3", from)
+	}
+	if string(msg.message.Body) != "test2" {
+		t.Fatalf("Incorrect message contents: %s", msg)
+	}
 }
