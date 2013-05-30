@@ -53,6 +53,21 @@ func (c *client) unmarshal(state *disk.State) error {
 	copy(c.pub[:], state.Public)
 	c.generation = *state.Generation
 
+	for _, prevGroupPriv := range state.PreviousGroupPrivateKeys {
+		group, ok := new(bbssig.Group).Unmarshal(prevGroupPriv.Group)
+		if !ok {
+			return errors.New("client: failed to unmarshal previous group")
+		}
+		priv, ok := new(bbssig.PrivateKey).Unmarshal(group, prevGroupPriv.GroupPrivate)
+		if !ok {
+			return errors.New("client: failed to unmarshal previous group private key")
+		}
+		c.prevGroupPrivs = append(c.prevGroupPrivs, previousGroupPrivateKey{
+			priv:    priv,
+			expired: time.Unix(*prevGroupPriv.Expired, 0),
+		})
+	}
+
 	for _, cont := range state.Contacts {
 		contact := &Contact{
 			id:       *cont.Id,
@@ -96,6 +111,13 @@ func (c *client) unmarshal(state *disk.State) error {
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
 
+		for _, prevTag := range cont.PreviousTags {
+			contact.previousTags = append(contact.previousTags, previousTag{
+				tag:     prevTag.Tag,
+				expired: time.Unix(*prevTag.Expired, 0),
+			})
+		}
+
 		// For now we'll have to do this conditionally until everyone
 		// has updated local state.
 		if cont.Generation != nil {
@@ -132,9 +154,11 @@ func (c *client) unmarshal(state *disk.State) error {
 			server:  *m.Server,
 			created: time.Unix(*m.Created, 0),
 		}
-		msg.message = new(pond.Message)
-		if err := proto.Unmarshal(m.Message, msg.message); err != nil {
-			return errors.New("client: corrupt message in outbox: " + err.Error())
+		if len(m.Message) > 0 {
+			msg.message = new(pond.Message)
+			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
+				return errors.New("client: corrupt message in outbox: " + err.Error())
+			}
 		}
 		if m.Sent != nil {
 			msg.sent = time.Unix(*m.Sent, 0)
@@ -148,6 +172,7 @@ func (c *client) unmarshal(state *disk.State) error {
 				return errors.New("client: corrupt request in outbox: " + err.Error())
 			}
 		}
+		msg.revocation = m.GetRevocation()
 
 		c.outbox = append(c.outbox, msg)
 
@@ -203,6 +228,15 @@ func (c *client) marshal() []byte {
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
 			cont.Generation = proto.Uint32(contact.generation)
 		}
+		for _, prevTag := range contact.previousTags {
+			if time.Since(prevTag.expired) > previousTagLifetime {
+				continue
+			}
+			cont.PreviousTags = append(cont.PreviousTags, &disk.Contact_PreviousTag{
+				Tag:     prevTag.tag,
+				Expired: proto.Int64(prevTag.expired.Unix()),
+			})
+		}
 		contacts = append(contacts, cont)
 	}
 
@@ -233,13 +267,16 @@ func (c *client) marshal() []byte {
 			continue
 		}
 		m := &disk.Outbox{
-			Id:      proto.Uint64(msg.id),
-			To:      proto.Uint64(msg.to),
-			Server:  proto.String(msg.server),
-			Created: proto.Int64(msg.created.Unix()),
+			Id:         proto.Uint64(msg.id),
+			To:         proto.Uint64(msg.to),
+			Server:     proto.String(msg.server),
+			Created:    proto.Int64(msg.created.Unix()),
+			Revocation: proto.Bool(msg.revocation),
 		}
-		if m.Message, err = proto.Marshal(msg.message); err != nil {
-			panic(err)
+		if msg.message != nil {
+			if m.Message, err = proto.Marshal(msg.message); err != nil {
+				panic(err)
+			}
 		}
 		if !msg.sent.IsZero() {
 			m.Sent = proto.Int64(msg.sent.Unix())
@@ -287,6 +324,17 @@ func (c *client) marshal() []byte {
 		Inbox:        inbox,
 		Outbox:       outbox,
 		Drafts:       drafts,
+	}
+	for _, prevGroupPriv := range c.prevGroupPrivs {
+		if time.Since(prevGroupPriv.expired) > previousTagLifetime {
+			continue
+		}
+
+		state.PreviousGroupPrivateKeys = append(state.PreviousGroupPrivateKeys, &disk.State_PreviousGroup{
+			Group:        prevGroupPriv.priv.Group.Marshal(),
+			GroupPrivate: prevGroupPriv.priv.Marshal(),
+			Expired:      proto.Int64(prevGroupPriv.expired.Unix()),
+		})
 	}
 	s, err := proto.Marshal(state)
 	if err != nil {

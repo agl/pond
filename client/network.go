@@ -22,6 +22,8 @@ import (
 	"code.google.com/p/go.crypto/nacl/box"
 	"code.google.com/p/go.net/proxy"
 	"code.google.com/p/goprotobuf/proto"
+	"github.com/agl/ed25519"
+	"github.com/agl/pond/bbssig"
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
 )
@@ -108,6 +110,75 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	return nil
 }
 
+// revocationSignaturePrefix is prepended to a SignedRevocation_Revocation
+// message before signing in order to give context to the signature.
+var revocationSignaturePrefix = []byte("revocation\x00")
+
+func (c *client) revoke(to *Contact) {
+	to.revoked = true
+	revocation := c.groupPriv.GenerateRevocation(to.groupKey)
+	now := time.Now()
+
+	groupCopy, _ := new(bbssig.Group).Unmarshal(c.groupPriv.Group.Marshal())
+	groupPrivCopy, _ := new(bbssig.PrivateKey).Unmarshal(groupCopy, c.groupPriv.Marshal())
+	c.prevGroupPrivs = append(c.prevGroupPrivs, previousGroupPrivateKey{
+		priv:    groupPrivCopy,
+		expired: now,
+	})
+
+	for _, contact := range c.contacts {
+		if contact == to {
+			continue
+		}
+		contact.previousTags = append(contact.previousTags, previousTag{
+			tag:     contact.groupKey.Tag(),
+			expired: now,
+		})
+		contact.groupKey.Update(revocation)
+	}
+
+	rev := &pond.SignedRevocation_Revocation{
+		Revocation: revocation.Marshal(),
+		Generation: proto.Uint32(c.generation),
+	}
+
+	c.groupPriv.Group.Update(revocation)
+	c.generation++
+
+	revBytes, err := proto.Marshal(rev)
+	if err != nil {
+		panic(err)
+	}
+
+	var signed []byte
+	signed = append(signed, revocationSignaturePrefix...)
+	signed = append(signed, revBytes...)
+
+	sig := ed25519.Sign(&c.priv, signed)
+
+	signedRev := pond.SignedRevocation{
+		Revocation: rev,
+		Signature:  sig[:],
+	}
+
+	request := &pond.Request{
+		Revocation: &signedRev,
+	}
+
+	out := &queuedMessage{
+		revocation: true,
+		request:    request,
+		id:         c.randId(),
+		to:         to.id,
+		server:     to.theirServer,
+		created:    time.Now(),
+	}
+	c.enqueue(out)
+	c.outboxUI.Add(out.id, "Revocation", out.created.Format(shortTimeFormat), indicatorRed)
+	c.outboxUI.SetInsensitive(out.id)
+	c.outbox = append(c.outbox, out)
+}
+
 func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
 	plaintext, ok := decryptMessageInner(sealed, nonce, from)
 	if ok {
@@ -191,25 +262,53 @@ func (c *client) processFetch(m NewMessage) {
 	sha.Write(f.Message)
 	digest := sha.Sum(nil)
 
-	if !c.groupPriv.Verify(digest, sha, f.Signature) {
-		c.log.Errorf("Received message with bad group signature!")
-		return
+	var tag []byte
+	var ok bool
+	if c.groupPriv.Verify(digest, sha, f.Signature) {
+		tag, ok = c.groupPriv.Open(f.Signature)
+	} else {
+		found := false
+		for _, prev := range c.prevGroupPrivs {
+			if prev.priv.Verify(digest, sha, f.Signature) {
+				found = true
+				tag, ok = c.groupPriv.Open(f.Signature)
+				break
+			}
+		}
+		if !found {
+			c.log.Errorf("Received message with bad group signature!")
+			return
+		}
 	}
-	tag, ok := c.groupPriv.Open(f.Signature)
 	if !ok {
 		c.log.Errorf("Failed to open group signature")
 		return
 	}
 
 	var from *Contact
+NextCandidate:
 	for _, candidate := range c.contacts {
 		if bytes.Equal(tag, candidate.groupKey.Tag()) {
 			from = candidate
 			break
 		}
+		for _, prevTag := range candidate.previousTags {
+			if bytes.Equal(tag, prevTag.tag) {
+				from = candidate
+				break NextCandidate
+			}
+		}
 	}
+
 	if from == nil {
 		c.log.Errorf("Message from unknown contact. Dropping. Tag: %x", tag)
+		return
+	}
+
+	if from.revoked {
+		// It's possible that there were pending messages from the
+		// contact when we revoked them.
+		c.log.Errorf("Message from revoked contact %s. Dropping", from.name)
 		return
 	}
 
@@ -338,15 +437,92 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	return true
 }
 
-func (c *client) processMessageSent(id uint64) {
-	for _, msg := range c.outbox {
-		if msg.id == id {
-			msg.sent = time.Now()
-			c.outboxUI.SetIndicator(id, indicatorYellow)
-			c.save()
+func (c *client) processMessageSent(msr messageSendResult) {
+	var msg *queuedMessage
+	for _, m := range c.outbox {
+		if m.id == msr.id {
+			msg = m
 			break
 		}
 	}
+
+	if msr.revocation != nil {
+		// We tried to deliver a message to a user but the server told
+		// us that there's a pending revocation.
+		to := c.contacts[msg.to]
+
+		if gen := *msr.revocation.Revocation.Generation; gen != to.generation {
+			c.log.Printf("Message to '%s' resulted in revocation for generation %d, but current generation is %d", to.name, gen, to.generation)
+			return
+		}
+
+		// Check the signature on the revocation.
+		revBytes, err := proto.Marshal(msr.revocation.Revocation)
+		if err != nil {
+			c.log.Printf("Failed to marshal revocation message: %s", err)
+			return
+		}
+
+		var sig [ed25519.SignatureSize]byte
+		if revSig := msr.revocation.Signature; copy(sig[:], revSig) != len(sig) {
+			c.log.Printf("Bad signature length on revocation (%d bytes) from %s", len(revSig), to.name)
+			return
+		}
+
+		var signed []byte
+		signed = append(signed, revocationSignaturePrefix...)
+		signed = append(signed, revBytes...)
+		if !ed25519.Verify(&to.theirPub, signed, &sig) {
+			c.log.Printf("Bad signature on revocation from %s", to.name)
+			return
+		}
+		rev, ok := new(bbssig.Revocation).Unmarshal(msr.revocation.Revocation.Revocation)
+		if !ok {
+			c.log.Printf("Failed to parse revocation from %s", to.name)
+			return
+		}
+		to.generation++
+		if !to.myGroupKey.Update(rev) {
+			// We were revoked.
+			to.revokedUs = true
+			c.log.Printf("Revoked by %s", to.name)
+			c.contactsUI.SetIndicator(to.id, indicatorBlack)
+			c.contactsUI.SetSubline(to.id, "has revoked")
+
+			// Mark all pending messages to this contact as
+			// undeliverable.
+			newQueue := make([]*queuedMessage, 0, len(c.queue))
+			c.queueMutex.Lock()
+			for _, m := range c.queue {
+				if m.to == msg.to {
+					c.outboxUI.SetIndicator(m.id, indicatorBlack)
+				} else {
+					newQueue = append(newQueue, m)
+				}
+			}
+			c.queue = newQueue
+			c.queueMutex.Unlock()
+		} else {
+			to.myGroupKey.Group.Update(rev)
+			// We need to update all pending messages to this
+			// contact with a new group signature. However, we
+			// can't mutate entries in c.queue here because the
+			// trasact goroutine is running concurrently.
+			dupKey, _ := new(bbssig.MemberKey).Unmarshal(to.myGroupKey.Group, to.myGroupKey.Marshal())
+			c.revocationUpdateChan <- revocationUpdate{msg.to, dupKey, to.generation}
+		}
+		c.ui.Actions() <- UIState{uiStateRevocationProcessed}
+		c.ui.Signal()
+		return
+	}
+
+	msg.sent = time.Now()
+	if msg.revocation {
+		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
+	} else {
+		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
+	}
+	c.save()
 }
 
 func decodeBase32(s string) ([]byte, error) {
@@ -521,6 +697,31 @@ func (c *client) doCreateAccount() error {
 	return nil
 }
 
+// resignQueuedMessages runs on the network goroutine and resigns all queued
+// messages to the given contact id.
+func (c *client) resignQueuedMessages(revUpdate revocationUpdate) {
+	sha := sha256.New()
+	var digest []byte
+
+	for _, m := range c.queue {
+		if m.to != revUpdate.id {
+			continue
+		}
+
+		sha.Write(m.request.Deliver.Message)
+		digest = sha.Sum(digest[:0])
+		sha.Reset()
+		groupSig, err := revUpdate.key.Sign(c.rand, digest, sha)
+		if err != nil {
+			c.log.Printf("Error while resigning after revocation: %s", err)
+		}
+		sha.Reset()
+
+		m.request.Deliver.Signature = groupSig
+		m.request.Deliver.Generation = proto.Uint32(revUpdate.generation)
+	}
+}
+
 // transactionRateSeconds is the mean of the exponential distribution that
 // we'll sample in order to distribute the time between our network
 // connections.
@@ -531,7 +732,7 @@ func (c *client) transact() {
 
 	var ackChan chan bool
 	for {
-		if !startup {
+		if !startup || !c.autoFetch {
 			if ackChan != nil {
 				ackChan <- true
 				ackChan = nil
@@ -550,16 +751,47 @@ func (c *client) transact() {
 				c.log.Printf("Next network transaction in %d seconds", int(delay))
 				timerChan = time.After(time.Duration(delay*1000) * time.Millisecond)
 			}
-			var ok bool
 
-			select {
-			case ackChan, ok = <-c.fetchNowChan:
-				if !ok {
-					return
+			// Revocation updates are always processed first.
+		NextEvent:
+			for {
+				select {
+				case revUpdate, ok := <-c.revocationUpdateChan:
+					if !ok {
+						return
+					}
+					// This signals that the contact with the given
+					// id has had their group signature key updated
+					// and all messages in c.queue to that contact
+					// need to be resigned.
+					c.resignQueuedMessages(revUpdate)
+					continue NextEvent
+				default:
+					break
 				}
-				break
-			case <-timerChan:
-				break
+
+				var ok bool
+				select {
+				case ackChan, ok = <-c.fetchNowChan:
+					if !ok {
+						return
+					}
+					c.log.Printf("Starting fetch because of fetchNow signal")
+					break NextEvent
+				case <-timerChan:
+					c.log.Printf("Starting fetch because of timer")
+					break NextEvent
+				case revUpdate, ok := <-c.revocationUpdateChan:
+					if !ok {
+						return
+					}
+					// This signals that the contact with the given
+					// id has had their group signature key updated
+					// and all messages in c.queue to that contact
+					// need to be resigned.
+					c.resignQueuedMessages(revUpdate)
+					continue NextEvent
+				}
 			}
 		}
 		startup = false
@@ -568,9 +800,11 @@ func (c *client) transact() {
 		var req *pond.Request
 		var server string
 
+		useAnonymousIdentity := true
 		isFetch := false
 		c.queueMutex.Lock()
 		if len(c.queue) == 0 {
+			useAnonymousIdentity = false
 			isFetch = true
 			req = &pond.Request{Fetch: &pond.Fetch{}}
 			server = c.server
@@ -584,10 +818,14 @@ func (c *client) transact() {
 			req = head.request
 			server = head.server
 			c.log.Printf("Starting message transmission to %s", server)
+
+			if head.revocation {
+				useAnonymousIdentity = false
+			}
 		}
 		c.queueMutex.Unlock()
 
-		conn, err := c.dialServer(server, !isFetch)
+		conn, err := c.dialServer(server, useAnonymousIdentity)
 		if err != nil {
 			c.log.Printf("Failed to connect to %s: %s", server, err)
 			continue
@@ -611,9 +849,16 @@ func (c *client) transact() {
 			} else if !isFetch {
 				c.queueMutex.Lock()
 				c.queue = c.queue[:len(c.queue)-1]
+				if len(c.queue) == 0 {
+					c.queue = nil
+				}
 				c.queueMutex.Unlock()
-				c.messageSentChan <- head.id
+				c.messageSentChan <- messageSendResult{id: head.id}
 			}
+		} else if !isFetch &&
+			*reply.Status == pond.Reply_GENERATION_REVOKED &&
+			reply.Revocation != nil {
+			c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
 		}
 
 		conn.Close()

@@ -165,13 +165,12 @@ func (ui *TestUI) WaitForSignal() error {
 	if !ok {
 		panic("signal channel closed")
 	}
-	ui.t.Logf("Signal")
 
 ReadActions:
 	for {
 		select {
 		case action := <-ui.actions:
-			ui.t.Logf("%#v", action)
+			//ui.t.Logf("%#v", action)
 			switch action := action.(type) {
 			case UIState:
 				ui.currentStateID = action.stateID
@@ -212,19 +211,23 @@ func (ui *TestUI) WaitForFileOpen() FileOpen {
 
 type TestClient struct {
 	*client
-	stateDir string
-	ui       *TestUI
+	stateDir   string
+	ui         *TestUI
+	mainUIDone bool
+	name       string
 }
 
-func NewTestClient(t *testing.T) (*TestClient, error) {
+func NewTestClient(t *testing.T, name string) (*TestClient, error) {
 	tc := &TestClient{
-		ui: NewTestUI(t),
+		ui:   NewTestUI(t),
+		name: name,
 	}
 	var err error
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
 		return nil, err
 	}
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	tc.client.log.name = name
 	tc.client.log.toStderr = false
 	return tc, nil
 }
@@ -264,13 +267,14 @@ func (tc *TestClient) Reload() {
 	tc.Shutdown()
 	tc.ui = NewTestUI(tc.ui.t)
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	tc.client.log.name = tc.name
 	tc.client.log.toStderr = false
 }
 
 func TestOpenClose(t *testing.T) {
 	t.Parallel()
 
-	client, err := NewTestClient(t)
+	client, err := NewTestClient(t, "client")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +290,7 @@ func TestAccountCreation(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t)
+	client, err := NewTestClient(t, "client")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,6 +348,10 @@ func TestAccountCreation(t *testing.T) {
 }
 
 func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
+	if client.mainUIDone {
+		return
+	}
+
 	client.AdvanceTo(uiStateCreatePassphrase)
 	client.ui.events <- Click{
 		name:    "next",
@@ -356,6 +364,7 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 		entries: map[string]string{"server": url},
 	}
 	client.AdvanceTo(uiStateMain)
+	client.mainUIDone = true
 }
 
 func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, otherName string) {
@@ -371,9 +380,9 @@ func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, 
 	client.AdvanceTo(uiStateNewContact2)
 }
 
-func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestServer) {
-	proceedToKeyExchange(t, client1, server, "client2")
-	proceedToKeyExchange(t, client2, server, "client1")
+func proceedToPairedWithNames(t *testing.T, client1, client2 *TestClient, name1, name2 string, server *TestServer) {
+	proceedToKeyExchange(t, client1, server, name2)
+	proceedToKeyExchange(t, client2, server, name1)
 
 	client1.ui.events <- Click{
 		name:      "process",
@@ -388,6 +397,10 @@ func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestSer
 	client2.AdvanceTo(uiStateShowContact)
 }
 
+func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestServer) {
+	proceedToPairedWithNames(t, client1, client2, "client1", "client2", server)
+}
+
 func TestKeyExchange(t *testing.T) {
 	t.Parallel()
 
@@ -397,13 +410,13 @@ func TestKeyExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t)
+	client2, err := NewTestClient(t, "client2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,6 +517,7 @@ func sendMessage(client *TestClient, to string, message string) {
 func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
+	initialInboxLen := len(client.inbox)
 
 WaitForAck:
 	for {
@@ -515,8 +529,8 @@ WaitForAck:
 		}
 	}
 
-	if len(client.inbox) == 0 {
-		panic("no messages")
+	if len(client.inbox) <= initialInboxLen {
+		panic("no new messages")
 	}
 	msg = client.inbox[len(client.inbox)-1]
 	if msg.from != 0 {
@@ -534,13 +548,13 @@ func TestMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t)
+	client2, err := NewTestClient(t, "client2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,13 +609,13 @@ func TestACKs(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t)
+	client2, err := NewTestClient(t, "client2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,13 +667,13 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t)
+	client2, err := NewTestClient(t, "client2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +744,7 @@ func TestDraft(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t)
+	client, err := NewTestClient(t, "client")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -859,7 +873,7 @@ func TestDraftDiscard(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t)
+	client, err := NewTestClient(t, "client")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,13 +904,13 @@ func testDetached(t *testing.T, upload bool) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t)
+	client2, err := NewTestClient(t, "client2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1030,7 +1044,7 @@ func TestLogOverflow(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t)
+	client1, err := NewTestClient(t, "client1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1066,7 @@ func TestServerAnnounce(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t)
+	client, err := NewTestClient(t, "client")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1091,4 +1105,155 @@ func TestServerAnnounce(t *testing.T) {
 
 	client.Reload()
 	client.AdvanceTo(uiStateMain)
+}
+
+func TestRevoke(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	client3, err := NewTestClient(t, "client3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client3.Close()
+
+	client4, err := NewTestClient(t, "client4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client4.Close()
+
+	proceedToPaired(t, client1, client2, server)
+	proceedToPairedWithNames(t, client1, client3, "client1", "client3", server)
+	proceedToPairedWithNames(t, client1, client4, "client1", "client4", server)
+
+	initialGeneration := client1.generation
+
+	// Have client4 send a message before the revocation.
+	const beforeRevocationMsg = "from before revocation"
+	sendMessage(client4, "client1", beforeRevocationMsg)
+
+	var client1FromClient2 *Contact
+	for _, candidate := range client2.contacts {
+		if candidate.name == "client1" {
+			client1FromClient2 = candidate
+			break
+		}
+	}
+	if client1FromClient2.generation != initialGeneration {
+		t.Errorf("Initial generations don't match")
+	}
+
+	var client1FromClient3 *Contact
+	for _, candidate := range client3.contacts {
+		if candidate.name == "client1" {
+			client1FromClient3 = candidate
+			break
+		}
+	}
+
+	client1.ui.events <- Click{name: client1.contactsUI.entries[0].boxName}
+	client1.AdvanceTo(uiStateShowContact)
+	client1.ui.events <- Click{name: "revoke"}
+	client1.ui.WaitForSignal()
+
+	if client1.generation != initialGeneration+1 {
+		t.Errorf("Generation did not advance")
+	}
+
+	if len(client1.outboxUI.entries) != 1 {
+		t.Errorf("No revocation entry found after click")
+	}
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+
+	if len(client1.outboxUI.entries) != 1 {
+		t.Errorf("No revocation entry found after reload")
+	}
+
+	ackChan := make(chan bool)
+	client1.fetchNowChan <- ackChan
+NextEvent:
+	for {
+		select {
+		case ack := <-client1.ui.signal:
+		ReadActions:
+			for {
+				select {
+				case <-client1.ui.actions:
+				default:
+					break ReadActions
+				}
+			}
+			ack <- true
+		case <-ackChan:
+			break NextEvent
+		}
+	}
+
+	sendMessage(client2, "client1", "test1")
+	client2.AdvanceTo(uiStateRevocationProcessed)
+
+	if gen := client1FromClient2.generation; gen != client1.generation {
+		t.Errorf("Generation number didn't update: found %d, want %d", gen, client1.generation)
+	}
+	if !client1FromClient2.revokedUs {
+		t.Errorf("Client1 isn't marked as revoked")
+	}
+
+	sendMessage(client3, "client1", "test2")
+	client3.AdvanceTo(uiStateRevocationProcessed)
+
+	if gen := client1FromClient3.generation; gen != client1.generation {
+		t.Errorf("Generation number didn't update for non-revoked: found %d, want %d", gen, client1.generation)
+	}
+	if client1FromClient3.revokedUs {
+		t.Errorf("Client3 believes that it was revoked")
+	}
+
+	// Have client3 resend.
+	client3.fetchNowChan <- ackChan
+	<-ackChan
+
+	// Have client1 fetch the resigned message from client3, and the
+	// message from client4 using previousTags.
+	var seenClient3, seenClient4 bool
+	for i := 0; i < 2; i++ {
+		from, msg := fetchMessage(client1)
+		switch from {
+		case "client3":
+			if seenClient3 {
+				t.Fatalf("client3 message observed twice")
+			}
+			if string(msg.message.Body) != "test2" {
+				t.Fatalf("Incorrect message contents from client3: %s", msg)
+			}
+			seenClient3 = true
+		case "client4":
+			if seenClient4 {
+				t.Fatalf("client4 message observed twice")
+			}
+			if string(msg.message.Body) != beforeRevocationMsg {
+				t.Fatalf("Incorrect message contents client4: %s", msg)
+			}
+			seenClient4 = true
+		}
+	}
 }

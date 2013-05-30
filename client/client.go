@@ -76,6 +76,7 @@ const (
 	uiStatePassphrase
 	uiStateInbox
 	uiStateLog
+	uiStateRevocationProcessed
 )
 
 const shortTimeFormat = "Jan _2 15:04"
@@ -109,6 +110,10 @@ type client struct {
 	identity, identityPublic [32]byte
 	// groupPriv is the group private key for the user's delivery group.
 	groupPriv *bbssig.PrivateKey
+	// prevGroupPrivs contains previous group private keys that have been
+	// revoked. This allows us to process messages that were inflight at
+	// the time of the revocation.
+	prevGroupPrivs []previousGroupPrivateKey
 	// generation is the generation number of the group private key and is
 	// incremented when a member of the group is revoked.
 	generation uint32
@@ -127,6 +132,12 @@ type client struct {
 	// that triggers an immediate network transaction. Mostly intended for
 	// testing.
 	fetchNowChan chan chan bool
+	// revocationUpdateChan is a channel that the network goroutine reads
+	// from. It contains contact ids and group member keys for contacts who
+	// have updated their signature group because of a revocation event.
+	// The network goroutine needs to resign all pending messages for that
+	// contact.
+	revocationUpdateChan chan revocationUpdate
 
 	log *Log
 
@@ -146,8 +157,24 @@ type client struct {
 	newMessageChan chan NewMessage
 	// messageSentChan receives the ids of messages that have been sent by
 	// the network goroutine.
-	messageSentChan chan uint64
+	messageSentChan chan messageSendResult
 	backgroundChan  chan interface{}
+}
+
+type messageSendResult struct {
+	id uint64
+	// revocation optionally contains a revocation update that resulted
+	// from attempting to send a message.
+	revocation *pond.SignedRevocation
+}
+
+type revocationUpdate struct {
+	// id contains the contact id that needs to be updated.
+	id  uint64
+	key *bbssig.MemberKey
+	// generation contains the new (i.e. post update) generation number for
+	// the contact.
+	generation uint32
 }
 
 // pendingDecryption represents a detachment decryption/download operation
@@ -198,6 +225,10 @@ type Contact struct {
 	// groupKey is the group member key that we gave to this contact.
 	// myGroupKey is the one that they gave to us.
 	groupKey, myGroupKey *bbssig.MemberKey
+	// previousTags contains bbssig tags that were previously used by this
+	// contact. The tag of a contact changes when a recovation is
+	// processed, but old messages may still be pending.
+	previousTags []previousTag
 	// generation is the current group generation number that we know for
 	// this contact.
 	generation uint32
@@ -211,12 +242,40 @@ type Contact struct {
 	// supportedVersion contains the greatest protocol version number that
 	// we have observed from this contact.
 	supportedVersion int32
+	// revoked is true if this contact has been revoked.
+	revoked bool
+	// revokedUs is true if this contact has recoved us.
+	revokedUs bool
 
 	lastDHPrivate    [32]byte
 	currentDHPrivate [32]byte
 
 	theirLastDHPublic    [32]byte
 	theirCurrentDHPublic [32]byte
+}
+
+// previousTagLifetime contains the amount of time that we'll store a previous
+// tag (or previous group private key) for.
+const previousTagLifetime = 14 * 24 * time.Hour
+
+// previousTag represents a group signature tag that was previously assigned to
+// a contact. In the event of a revocation, all the tags change but we need to
+// know the previous tags for a certain amount of time because messages may
+// have been created before the contact saw the revocation update.
+type previousTag struct {
+	tag []byte
+	// expired contains the time at which this tag was expired - i.e. the
+	// timestamp when the revocation occured.
+	expired time.Time
+}
+
+// previousGroupPrivateKey represents a group private key that has been
+// revoked. These are retained for the same reason as previous tags.
+type previousGroupPrivateKey struct {
+	priv *bbssig.PrivateKey
+	// expired contains the time at which this tag was expired - i.e. the
+	// timestamp when the revocation occured.
+	expired time.Time
 }
 
 // pendingDetachment represents a detachment conversion/upload operation that's
@@ -240,14 +299,15 @@ type Draft struct {
 }
 
 type queuedMessage struct {
-	request *pond.Request
-	id      uint64
-	to      uint64
-	server  string
-	created time.Time
-	sent    time.Time
-	acked   time.Time
-	message *pond.Message
+	request    *pond.Request
+	id         uint64
+	to         uint64
+	server     string
+	created    time.Time
+	sent       time.Time
+	acked      time.Time
+	revocation bool
+	message    *pond.Message
 }
 
 func (c *client) errorUI(errorText string, bgColor uint32) {
@@ -385,6 +445,7 @@ func (c *client) loadUI() {
 		if err != nil {
 			// Fatal error loading state. Abort.
 			c.errorUI(err.Error(), colorError)
+			select {}
 			c.ShutdownAndSuspend()
 		}
 	}
@@ -407,6 +468,7 @@ func (c *client) loadUI() {
 	c.writerChan = make(chan []byte)
 	c.writerDone = make(chan bool)
 	c.fetchNowChan = make(chan chan bool, 1)
+	c.revocationUpdateChan = make(chan revocationUpdate, 8)
 
 	// Start disk and network workers.
 	go disk.StateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)
@@ -643,6 +705,11 @@ func (c *client) mainUI() {
 	}
 
 	for _, msg := range c.outbox {
+		if msg.revocation {
+			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
+			c.outboxUI.SetInsensitive(msg.id)
+			continue
+		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
 			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
@@ -747,12 +814,16 @@ type listUI struct {
 type listItem struct {
 	id                                                           uint64
 	name, sepName, boxName, imageName, lineName, sublineTextName string
+	insensitive                                                  bool
 }
 
 func (cs *listUI) Event(event interface{}) (uint64, bool) {
 	if click, ok := event.(Click); ok {
 		for _, entry := range cs.entries {
 			if click.name == entry.boxName {
+				if entry.insensitive {
+					return 0, false
+				}
 				return entry.id, true
 			}
 		}
@@ -839,6 +910,14 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		},
 	}
 	cs.ui.Signal()
+}
+
+func (cs *listUI) SetInsensitive(id uint64) {
+	for i, entry := range cs.entries {
+		if entry.id == id {
+			cs.entries[i].insensitive = true
+		}
+	}
 }
 
 func (cs *listUI) Remove(id uint64) {
@@ -976,11 +1055,42 @@ func (c *client) showContact(id uint64) interface{} {
 		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
 	}
 
-	c.showNameValues("CONTACT", entries)
+	controls := VBox{
+		children: []Widget{
+			Button{
+				widgetBase: widgetBase{name: "revoke", insensitive: contact.revoked},
+				text:       "Revoke",
+			},
+			Button{
+				widgetBase: widgetBase{name: "delete"},
+				text:       "Delete",
+			},
+		},
+	}
+
+	ui := nameValuesUI("CONTACT", entries, controls)
+	c.ui.Actions() <- SetChild{name: "right", child: ui}
 	c.ui.Actions() <- UIState{uiStateShowContact}
 	c.ui.Signal()
 
-	return nil
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+
+		if click.name == "revoke" {
+			c.revoke(contact)
+			c.ui.Actions() <- Sensitive{name: "revoke", sensitive: false}
+			c.ui.Signal()
+			c.save()
+		}
+	}
 }
 
 func (c *client) identityUI() interface{} {
@@ -992,14 +1102,15 @@ func (c *client) identityUI() interface{} {
 		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
 	}
 
-	c.showNameValues("IDENTITY", entries)
+	ui := nameValuesUI("IDENTITY", entries, nil)
+	c.ui.Actions() <- SetChild{name: "right", child: ui}
 	c.ui.Actions() <- UIState{uiStateShowIdentity}
 	c.ui.Signal()
 
 	return nil
 }
 
-func (c *client) showNameValues(title string, entries []nvEntry) {
+func nameValuesUI(title string, entries []nvEntry, controls Widget) Widget {
 	ui := VBox{
 		children: []Widget{
 			EventBox{
@@ -1018,12 +1129,29 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 					},
 				},
 			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-			HBox{
-				widgetBase: widgetBase{padding: 2},
+			EventBox{
+				widgetBase: widgetBase{height: 1, background: colorSep},
 			},
 		},
 	}
+
+	if controls != nil {
+		ui.children = append(ui.children, HBox{
+			widgetBase: widgetBase{padding: 2},
+			children: []Widget{
+				Label{
+					widgetBase: widgetBase{expand: true, fill: true},
+				},
+				controls,
+			},
+		})
+	}
+
+	ui.children = append(ui.children, HBox{
+		widgetBase: widgetBase{padding: 2},
+	})
+
+	box := VBox{}
 
 	for _, ent := range entries {
 		var font string
@@ -1034,7 +1162,7 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 			yAlign = 0
 		}
 
-		ui.children = append(ui.children, HBox{
+		box.children = append(box.children, HBox{
 			widgetBase: widgetBase{padding: 3},
 			children: []Widget{
 				Label{
@@ -1051,7 +1179,14 @@ func (c *client) showNameValues(title string, entries []nvEntry) {
 		})
 	}
 
-	c.ui.Actions() <- SetChild{name: "right", child: ui}
+	ui.children = append(ui.children, Scrolled{
+		widgetBase: widgetBase{fill: true, expand: true},
+		viewport:   true,
+		horizontal: true,
+		child:      box,
+	})
+
+	return ui
 }
 
 // usageString returns a description of the amount of space taken up by a body
@@ -1246,7 +1381,9 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 	var contactNames []string
 	for _, contact := range c.contacts {
-		contactNames = append(contactNames, contact.name)
+		if !contact.revokedUs {
+			contactNames = append(contactNames, contact.name)
+		}
 	}
 
 	var preSelected string
@@ -1741,6 +1878,11 @@ func (qm *queuedMessage) indicator() Indicator {
 	case !qm.acked.IsZero():
 		return indicatorGreen
 	case !qm.sent.IsZero():
+		if qm.revocation {
+			// Revocations are never acked so they are green as
+			// soon as they are sent.
+			return indicatorGreen
+		}
 		return indicatorYellow
 	}
 	return indicatorRed
@@ -2289,6 +2431,12 @@ func (c *client) showOutbox(id uint64) interface{} {
 	}
 
 	contact := c.contacts[msg.to]
+	var sentTime string
+	if contact.revokedUs {
+		sentTime = "(never - contact has revoked us)"
+	} else {
+		sentTime = formatTime(msg.sent)
+	}
 
 	ui := VBox{
 		children: []Widget{
@@ -2348,7 +2496,7 @@ func (c *client) showOutbox(id uint64) interface{} {
 					},
 					Label{
 						widgetBase: widgetBase{name: "sent"},
-						text:       formatTime(msg.sent),
+						text:       sentTime,
 					},
 				},
 			},
@@ -2735,8 +2883,8 @@ func (c *client) nextEvent() (event interface{}, wanted bool) {
 	case newMessage := <-c.newMessageChan:
 		c.processNewMessage(newMessage)
 		return
-	case id := <-c.messageSentChan:
-		c.processMessageSent(id)
+	case msr := <-c.messageSentChan:
+		c.processMessageSent(msr)
 		return
 	case event = <-c.backgroundChan:
 		break
@@ -3008,7 +3156,7 @@ func (c *client) createPassphraseUI() {
 func (c *client) createAccountUI() {
 	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
 	if c.testing {
-		defaultServer = "pondserver://PXD4DDBLJD3YCC3EC3DGIYVYZYF5GVZC3T6JFHPUWU2WQ7W3CN5Q@127.0.0.1:16333"
+		defaultServer = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
 	}
 
 	ui := VBox{
@@ -3127,6 +3275,9 @@ func (c *client) Shutdown() {
 	if c.fetchNowChan != nil {
 		close(c.fetchNowChan)
 	}
+	if c.revocationUpdateChan != nil {
+		close(c.revocationUpdateChan)
+	}
 	if c.stateLock != nil {
 		c.stateLock.Close()
 	}
@@ -3143,7 +3294,7 @@ func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch b
 		contacts:        make(map[uint64]*Contact),
 		drafts:          make(map[uint64]*Draft),
 		newMessageChan:  make(chan NewMessage),
-		messageSentChan: make(chan uint64, 1),
+		messageSentChan: make(chan messageSendResult, 1),
 		backgroundChan:  make(chan interface{}, 8),
 	}
 	c.log.toStderr = true

@@ -19,6 +19,9 @@ type Log struct {
 	epoch      uint64
 	updateChan chan bool
 	toStderr   bool
+	// name is set in tests to an opaque identifer for this client. It's
+	// prepended to log messages in order to aid debugging.
+	name string
 }
 
 func NewLog() *Log {
@@ -65,7 +68,11 @@ func (l *Log) add(isError bool, format string, args ...interface{}) {
 	}
 
 	if l.toStderr {
-		fmt.Fprintf(os.Stderr, "%s: %s\n", entry.Format(logTimeFormat), entry.s)
+		var name string
+		if len(l.name) != 0 {
+			name = fmt.Sprintf("(%s) ", l.name)
+		}
+		fmt.Fprintf(os.Stderr, "%s%s: %s\n", name, entry.Format(logTimeFormat), entry.s)
 	}
 }
 

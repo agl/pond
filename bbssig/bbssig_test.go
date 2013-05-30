@@ -87,13 +87,18 @@ func TestSign(t *testing.T) {
 		t.Fatalf("failed to add second member: %s", err)
 	}
 	rev := priv.GenerateRevocation(member)
+	revBytes := rev.Marshal()
+	rev2, ok := new(Revocation).Unmarshal(revBytes)
+	if !ok {
+		t.Fatalf("failed to unmarshal revocation")
+	}
 
-	group.Update(rev)
+	group.Update(rev2)
 	if group.Verify(digest, h, sig) {
 		t.Errorf("signature still verifies after revocation")
 	}
 
-	if member.Update(rev) {
+	if member.Update(rev2) {
 		t.Errorf("revoked key successfully updated")
 	}
 
@@ -106,9 +111,9 @@ func TestSign(t *testing.T) {
 		t.Errorf("signature verified before member key updated")
 	}
 
-	member2.Group.Update(rev)
+	member2.Group.Update(rev2)
 
-	if !member2.Update(rev) {
+	if !member2.Update(rev2) {
 		t.Errorf("unrevoked member failed to update")
 	}
 

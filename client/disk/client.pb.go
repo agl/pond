@@ -15,23 +15,24 @@ var _ = &json.SyntaxError{}
 var _ = math.Inf
 
 type Contact struct {
-	Id                  *uint64 `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
-	Name                *string `protobuf:"bytes,2,req,name=name" json:"name,omitempty"`
-	GroupKey            []byte  `protobuf:"bytes,3,req,name=group_key" json:"group_key,omitempty"`
-	SupportedVersion    *int32  `protobuf:"varint,16,opt,name=supported_version" json:"supported_version,omitempty"`
-	KeyExchangeBytes    []byte  `protobuf:"bytes,4,opt,name=key_exchange_bytes" json:"key_exchange_bytes,omitempty"`
-	TheirGroup          []byte  `protobuf:"bytes,5,opt,name=their_group" json:"their_group,omitempty"`
-	MyGroupKey          []byte  `protobuf:"bytes,6,opt,name=my_group_key" json:"my_group_key,omitempty"`
-	Generation          *uint32 `protobuf:"varint,7,opt,name=generation" json:"generation,omitempty"`
-	TheirServer         *string `protobuf:"bytes,8,opt,name=their_server" json:"their_server,omitempty"`
-	TheirPub            []byte  `protobuf:"bytes,9,opt,name=their_pub" json:"their_pub,omitempty"`
-	TheirIdentityPublic []byte  `protobuf:"bytes,10,opt,name=their_identity_public" json:"their_identity_public,omitempty"`
-	LastPrivate         []byte  `protobuf:"bytes,11,opt,name=last_private" json:"last_private,omitempty"`
-	CurrentPrivate      []byte  `protobuf:"bytes,12,opt,name=current_private" json:"current_private,omitempty"`
-	TheirLastPublic     []byte  `protobuf:"bytes,13,opt,name=their_last_public" json:"their_last_public,omitempty"`
-	TheirCurrentPublic  []byte  `protobuf:"bytes,14,opt,name=their_current_public" json:"their_current_public,omitempty"`
-	IsPending           *bool   `protobuf:"varint,15,opt,name=is_pending,def=0" json:"is_pending,omitempty"`
-	XXX_unrecognized    []byte  `json:"-"`
+	Id                  *uint64                `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
+	Name                *string                `protobuf:"bytes,2,req,name=name" json:"name,omitempty"`
+	GroupKey            []byte                 `protobuf:"bytes,3,req,name=group_key" json:"group_key,omitempty"`
+	SupportedVersion    *int32                 `protobuf:"varint,16,opt,name=supported_version" json:"supported_version,omitempty"`
+	KeyExchangeBytes    []byte                 `protobuf:"bytes,4,opt,name=key_exchange_bytes" json:"key_exchange_bytes,omitempty"`
+	TheirGroup          []byte                 `protobuf:"bytes,5,opt,name=their_group" json:"their_group,omitempty"`
+	MyGroupKey          []byte                 `protobuf:"bytes,6,opt,name=my_group_key" json:"my_group_key,omitempty"`
+	Generation          *uint32                `protobuf:"varint,7,opt,name=generation" json:"generation,omitempty"`
+	TheirServer         *string                `protobuf:"bytes,8,opt,name=their_server" json:"their_server,omitempty"`
+	TheirPub            []byte                 `protobuf:"bytes,9,opt,name=their_pub" json:"their_pub,omitempty"`
+	TheirIdentityPublic []byte                 `protobuf:"bytes,10,opt,name=their_identity_public" json:"their_identity_public,omitempty"`
+	LastPrivate         []byte                 `protobuf:"bytes,11,opt,name=last_private" json:"last_private,omitempty"`
+	CurrentPrivate      []byte                 `protobuf:"bytes,12,opt,name=current_private" json:"current_private,omitempty"`
+	TheirLastPublic     []byte                 `protobuf:"bytes,13,opt,name=their_last_public" json:"their_last_public,omitempty"`
+	TheirCurrentPublic  []byte                 `protobuf:"bytes,14,opt,name=their_current_public" json:"their_current_public,omitempty"`
+	PreviousTags        []*Contact_PreviousTag `protobuf:"bytes,17,rep,name=previous_tags" json:"previous_tags,omitempty"`
+	IsPending           *bool                  `protobuf:"varint,15,opt,name=is_pending,def=0" json:"is_pending,omitempty"`
+	XXX_unrecognized    []byte                 `json:"-"`
 }
 
 func (this *Contact) Reset()         { *this = Contact{} }
@@ -145,11 +146,42 @@ func (this *Contact) GetTheirCurrentPublic() []byte {
 	return nil
 }
 
+func (this *Contact) GetPreviousTags() []*Contact_PreviousTag {
+	if this != nil {
+		return this.PreviousTags
+	}
+	return nil
+}
+
 func (this *Contact) GetIsPending() bool {
 	if this != nil && this.IsPending != nil {
 		return *this.IsPending
 	}
 	return Default_Contact_IsPending
+}
+
+type Contact_PreviousTag struct {
+	Tag              []byte `protobuf:"bytes,1,req,name=tag" json:"tag,omitempty"`
+	Expired          *int64 `protobuf:"varint,2,req,name=expired" json:"expired,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *Contact_PreviousTag) Reset()         { *this = Contact_PreviousTag{} }
+func (this *Contact_PreviousTag) String() string { return proto.CompactTextString(this) }
+func (*Contact_PreviousTag) ProtoMessage()       {}
+
+func (this *Contact_PreviousTag) GetTag() []byte {
+	if this != nil {
+		return this.Tag
+	}
+	return nil
+}
+
+func (this *Contact_PreviousTag) GetExpired() int64 {
+	if this != nil && this.Expired != nil {
+		return *this.Expired
+	}
+	return 0
 }
 
 type Inbox struct {
@@ -222,9 +254,10 @@ type Outbox struct {
 	Server           *string `protobuf:"bytes,3,req,name=server" json:"server,omitempty"`
 	Created          *int64  `protobuf:"varint,4,req,name=created" json:"created,omitempty"`
 	Sent             *int64  `protobuf:"varint,5,opt,name=sent" json:"sent,omitempty"`
-	Message          []byte  `protobuf:"bytes,6,req,name=message" json:"message,omitempty"`
+	Message          []byte  `protobuf:"bytes,6,opt,name=message" json:"message,omitempty"`
 	Request          []byte  `protobuf:"bytes,7,opt,name=request" json:"request,omitempty"`
 	Acked            *int64  `protobuf:"varint,8,opt,name=acked" json:"acked,omitempty"`
+	Revocation       *bool   `protobuf:"varint,9,opt,name=revocation" json:"revocation,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -286,6 +319,13 @@ func (this *Outbox) GetAcked() int64 {
 		return *this.Acked
 	}
 	return 0
+}
+
+func (this *Outbox) GetRevocation() bool {
+	if this != nil && this.Revocation != nil {
+		return *this.Revocation
+	}
+	return false
 }
 
 type Draft struct {
@@ -353,18 +393,19 @@ func (this *Draft) GetDetachments() []*protos.Message_Detachment {
 }
 
 type State struct {
-	Identity         []byte     `protobuf:"bytes,1,req,name=identity" json:"identity,omitempty"`
-	Public           []byte     `protobuf:"bytes,2,req,name=public" json:"public,omitempty"`
-	Private          []byte     `protobuf:"bytes,3,req,name=private" json:"private,omitempty"`
-	Server           *string    `protobuf:"bytes,4,req,name=server" json:"server,omitempty"`
-	Group            []byte     `protobuf:"bytes,5,req,name=group" json:"group,omitempty"`
-	GroupPrivate     []byte     `protobuf:"bytes,6,req,name=group_private" json:"group_private,omitempty"`
-	Generation       *uint32    `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
-	Contacts         []*Contact `protobuf:"bytes,8,rep,name=contacts" json:"contacts,omitempty"`
-	Inbox            []*Inbox   `protobuf:"bytes,9,rep,name=inbox" json:"inbox,omitempty"`
-	Outbox           []*Outbox  `protobuf:"bytes,10,rep,name=outbox" json:"outbox,omitempty"`
-	Drafts           []*Draft   `protobuf:"bytes,11,rep,name=drafts" json:"drafts,omitempty"`
-	XXX_unrecognized []byte     `json:"-"`
+	Identity                 []byte                 `protobuf:"bytes,1,req,name=identity" json:"identity,omitempty"`
+	Public                   []byte                 `protobuf:"bytes,2,req,name=public" json:"public,omitempty"`
+	Private                  []byte                 `protobuf:"bytes,3,req,name=private" json:"private,omitempty"`
+	Server                   *string                `protobuf:"bytes,4,req,name=server" json:"server,omitempty"`
+	Group                    []byte                 `protobuf:"bytes,5,req,name=group" json:"group,omitempty"`
+	GroupPrivate             []byte                 `protobuf:"bytes,6,req,name=group_private" json:"group_private,omitempty"`
+	PreviousGroupPrivateKeys []*State_PreviousGroup `protobuf:"bytes,12,rep,name=previous_group_private_keys" json:"previous_group_private_keys,omitempty"`
+	Generation               *uint32                `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
+	Contacts                 []*Contact             `protobuf:"bytes,8,rep,name=contacts" json:"contacts,omitempty"`
+	Inbox                    []*Inbox               `protobuf:"bytes,9,rep,name=inbox" json:"inbox,omitempty"`
+	Outbox                   []*Outbox              `protobuf:"bytes,10,rep,name=outbox" json:"outbox,omitempty"`
+	Drafts                   []*Draft               `protobuf:"bytes,11,rep,name=drafts" json:"drafts,omitempty"`
+	XXX_unrecognized         []byte                 `json:"-"`
 }
 
 func (this *State) Reset()         { *this = State{} }
@@ -413,6 +454,13 @@ func (this *State) GetGroupPrivate() []byte {
 	return nil
 }
 
+func (this *State) GetPreviousGroupPrivateKeys() []*State_PreviousGroup {
+	if this != nil {
+		return this.PreviousGroupPrivateKeys
+	}
+	return nil
+}
+
 func (this *State) GetGeneration() uint32 {
 	if this != nil && this.Generation != nil {
 		return *this.Generation
@@ -446,6 +494,38 @@ func (this *State) GetDrafts() []*Draft {
 		return this.Drafts
 	}
 	return nil
+}
+
+type State_PreviousGroup struct {
+	Group            []byte `protobuf:"bytes,1,req,name=group" json:"group,omitempty"`
+	GroupPrivate     []byte `protobuf:"bytes,2,req,name=group_private" json:"group_private,omitempty"`
+	Expired          *int64 `protobuf:"varint,3,req,name=expired" json:"expired,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *State_PreviousGroup) Reset()         { *this = State_PreviousGroup{} }
+func (this *State_PreviousGroup) String() string { return proto.CompactTextString(this) }
+func (*State_PreviousGroup) ProtoMessage()       {}
+
+func (this *State_PreviousGroup) GetGroup() []byte {
+	if this != nil {
+		return this.Group
+	}
+	return nil
+}
+
+func (this *State_PreviousGroup) GetGroupPrivate() []byte {
+	if this != nil {
+		return this.GroupPrivate
+	}
+	return nil
+}
+
+func (this *State_PreviousGroup) GetExpired() int64 {
+	if this != nil && this.Expired != nil {
+		return *this.Expired
+	}
+	return 0
 }
 
 func init() {
