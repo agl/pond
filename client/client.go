@@ -110,6 +110,10 @@ type client struct {
 	identity, identityPublic [32]byte
 	// groupPriv is the group private key for the user's delivery group.
 	groupPriv *bbssig.PrivateKey
+	// prevGroupPrivs contains previous group private keys that have been
+	// revoked so that we can still process messages that were inflight at
+	// the time of the revocation.
+	prevGroupPrivs []previousGroupPrivateKey
 	// generation is the generation number of the group private key and is
 	// incremented when a member of the group is revoked.
 	generation uint32
@@ -219,6 +223,10 @@ type Contact struct {
 	// groupKey is the group member key that we gave to this contact.
 	// myGroupKey is the one that they gave to us.
 	groupKey, myGroupKey *bbssig.MemberKey
+	// previousTags contains bbssig tags that were previously used by this
+	// contact. The tag of a contact changes when a recovation is
+	// processed, but old messages may still be pending.
+	previousTags []previousTag
 	// generation is the current group generation number that we know for
 	// this contact.
 	generation uint32
@@ -242,6 +250,30 @@ type Contact struct {
 
 	theirLastDHPublic    [32]byte
 	theirCurrentDHPublic [32]byte
+}
+
+// previousTagLifetime contains the amount of time that we'll store a previous
+// tag for.
+const previousTagLifetime = 14 * 24 * time.Hour
+
+// previousTag represents a group signature tag that was previously assigned to
+// a contact. In the event of a revocation, all the tags change but we need to
+// know the previous tags for a certain amount of time because messages may
+// have been created before the contact saw the revocation update.
+type previousTag struct {
+	tag []byte
+	// expired contains the time at which this tag was expired - i.e. the
+	// timestamp when the revocation occured.
+	expired time.Time
+}
+
+// previousGroupPrivateKey represents a group private key that has been
+// revoked. These are retained for the same reason as previous tags.
+type previousGroupPrivateKey struct {
+	priv *bbssig.PrivateKey
+	// expired contains the time at which this tag was expired - i.e. the
+	// timestamp when the revocation occured.
+	expired time.Time
 }
 
 // pendingDetachment represents a detachment conversion/upload operation that's
@@ -1347,7 +1379,9 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 
 	var contactNames []string
 	for _, contact := range c.contacts {
-		contactNames = append(contactNames, contact.name)
+		if !contact.revokedUs {
+			contactNames = append(contactNames, contact.name)
+		}
 	}
 
 	var preSelected string
@@ -2395,6 +2429,12 @@ func (c *client) showOutbox(id uint64) interface{} {
 	}
 
 	contact := c.contacts[msg.to]
+	var sentTime string
+	if contact.revokedUs {
+		sentTime = "(never - contact has revoked us)"
+	} else {
+		sentTime = formatTime(msg.sent)
+	}
 
 	ui := VBox{
 		children: []Widget{
@@ -2454,7 +2494,7 @@ func (c *client) showOutbox(id uint64) interface{} {
 					},
 					Label{
 						widgetBase: widgetBase{name: "sent"},
-						text:       formatTime(msg.sent),
+						text:       sentTime,
 					},
 				},
 			},

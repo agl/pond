@@ -21,6 +21,12 @@ message Contact {
 	optional bytes their_last_public = 13;
 	optional bytes their_current_public = 14;
 
+	message PreviousTag {
+		required bytes tag = 1;
+		required int64 expired = 2;
+	}
+	repeated PreviousTag previous_tags = 17;
+
 	optional bool is_pending = 15 [ default = false ];
 }
 
@@ -63,6 +69,13 @@ message State {
 	required string server = 4;
 	required bytes group = 5;
 	required bytes group_private = 6;
+	message PreviousGroup {
+		required bytes group = 1;
+		required bytes group_private = 2;
+		required int64 expired = 3;
+	}
+	repeated PreviousGroup previous_group_private_keys = 12;
+
 	required uint32 generation = 7;
 
 	repeated Contact contacts = 8;

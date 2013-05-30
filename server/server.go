@@ -775,7 +775,6 @@ func (s *Server) revocation(from *[32]byte, signedRevocation *pond.SignedRevocat
 	}
 
 	group := account.Group()
-	log.Printf("group was %x", group.Marshal())
 	groupCopy, _ := new(bbssig.Group).Unmarshal(group.Marshal())
 	groupCopy.Update(revocation)
 
@@ -787,7 +786,6 @@ func (s *Server) revocation(from *[32]byte, signedRevocation *pond.SignedRevocat
 	if err := ioutil.WriteFile(groupPath, groupCopy.Marshal(), 0600); err != nil {
 		log.Printf("failed to write group file: %s", err)
 	}
-	log.Printf("updated to group %x", groupCopy.Marshal())
 
 	return nil
 }

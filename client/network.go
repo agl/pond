@@ -84,7 +84,6 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Initially signed with %x\n", to.myGroupKey.Group.Marshal())
 
 	request := &pond.Request{
 		Deliver: &pond.Delivery{
@@ -118,17 +117,31 @@ var revocationSignaturePrefix = []byte("revocation\x00")
 func (c *client) revoke(to *Contact) {
 	to.revoked = true
 	revocation := c.groupPriv.GenerateRevocation(to.groupKey)
+	now := time.Now()
+
+	groupCopy, _ := new(bbssig.Group).Unmarshal(c.groupPriv.Group.Marshal())
+	groupPrivCopy, _ := new(bbssig.PrivateKey).Unmarshal(groupCopy, c.groupPriv.Marshal())
+	c.prevGroupPrivs = append(c.prevGroupPrivs, previousGroupPrivateKey{
+		priv: groupPrivCopy,
+		expired: now,
+	})
 
 	for _, contact := range c.contacts {
 		if contact == to {
 			continue
 		}
+		contact.previousTags = append(contact.previousTags, previousTag{
+			tag: contact.groupKey.Tag(),
+			expired: now,
+		})
+		contact.groupKey.Update(revocation)
 	}
 
 	rev := &pond.SignedRevocation_Revocation{
 		Revocation: revocation.Marshal(),
 		Generation: proto.Uint32(c.generation),
 	}
+
 	c.groupPriv.Group.Update(revocation)
 	c.generation++
 
@@ -249,25 +262,53 @@ func (c *client) processFetch(m NewMessage) {
 	sha.Write(f.Message)
 	digest := sha.Sum(nil)
 
-	if !c.groupPriv.Verify(digest, sha, f.Signature) {
-		c.log.Errorf("Received message with bad group signature!")
-		return
+	var tag []byte
+	var ok bool
+	if c.groupPriv.Verify(digest, sha, f.Signature) {
+		tag, ok = c.groupPriv.Open(f.Signature)
+	} else {
+		found := false
+		for _, prev := range c.prevGroupPrivs {
+			if prev.priv.Verify(digest, sha, f.Signature) {
+				found = true
+				tag, ok = c.groupPriv.Open(f.Signature)
+				break
+			}
+		}
+		if !found {
+			c.log.Errorf("Received message with bad group signature!")
+			return
+		}
 	}
-	tag, ok := c.groupPriv.Open(f.Signature)
 	if !ok {
 		c.log.Errorf("Failed to open group signature")
 		return
 	}
 
 	var from *Contact
+	NextCandidate:
 	for _, candidate := range c.contacts {
 		if bytes.Equal(tag, candidate.groupKey.Tag()) {
 			from = candidate
 			break
 		}
+		for _, prevTag := range candidate.previousTags {
+			if bytes.Equal(tag, prevTag.tag) {
+				from = candidate
+				break NextCandidate
+			}
+		}
 	}
+
 	if from == nil {
 		c.log.Errorf("Message from unknown contact. Dropping. Tag: %x", tag)
+		return
+	}
+
+	if from.revoked {
+		// It's possible that there were pending messages from the
+		// contact when we revoked them.
+		c.log.Errorf("Message from revoked contact %s. Dropping", from.name)
 		return
 	}
 
@@ -446,6 +487,7 @@ func (c *client) processMessageSent(msr messageSendResult) {
 			to.revokedUs = true
 			c.log.Printf("Revoked by %s", to.name)
 			c.contactsUI.SetIndicator(to.id, indicatorBlack)
+			c.contactsUI.SetSubline(to.id, "has revoked")
 
 			// Mark all pending messages to this contact as
 			// undeliverable.
@@ -475,7 +517,11 @@ func (c *client) processMessageSent(msr messageSendResult) {
 	}
 
 	msg.sent = time.Now()
-	c.outboxUI.SetIndicator(msg.id, indicatorYellow)
+	if msg.revocation {
+		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
+	} else {
+		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
+	}
 	c.save()
 }
 
@@ -671,7 +717,6 @@ func (c *client) resignQueuedMessages(revUpdate revocationUpdate) {
 		}
 		sha.Reset()
 
-		fmt.Printf("Resigned with %x\n", revUpdate.key.Group.Marshal())
 		m.request.Deliver.Signature = groupSig
 		m.request.Deliver.Generation = proto.Uint32(revUpdate.generation)
 	}
@@ -687,7 +732,7 @@ func (c *client) transact() {
 
 	var ackChan chan bool
 	for {
-		if !startup {
+		if !startup || !c.autoFetch {
 			if ackChan != nil {
 				ackChan <- true
 				ackChan = nil
@@ -731,8 +776,10 @@ func (c *client) transact() {
 					if !ok {
 						return
 					}
+					c.log.Printf("Starting fetch because of fetchNow signal")
 					break NextEvent
 				case <-timerChan:
+					c.log.Printf("Starting fetch because of timer")
 					break NextEvent
 				case revUpdate, ok := <-c.revocationUpdateChan:
 					if !ok {
