@@ -122,7 +122,7 @@ func (c *client) revoke(to *Contact) {
 	groupCopy, _ := new(bbssig.Group).Unmarshal(c.groupPriv.Group.Marshal())
 	groupPrivCopy, _ := new(bbssig.PrivateKey).Unmarshal(groupCopy, c.groupPriv.Marshal())
 	c.prevGroupPrivs = append(c.prevGroupPrivs, previousGroupPrivateKey{
-		priv: groupPrivCopy,
+		priv:    groupPrivCopy,
 		expired: now,
 	})
 
@@ -131,7 +131,7 @@ func (c *client) revoke(to *Contact) {
 			continue
 		}
 		contact.previousTags = append(contact.previousTags, previousTag{
-			tag: contact.groupKey.Tag(),
+			tag:     contact.groupKey.Tag(),
 			expired: now,
 		})
 		contact.groupKey.Update(revocation)
@@ -286,7 +286,7 @@ func (c *client) processFetch(m NewMessage) {
 	}
 
 	var from *Contact
-	NextCandidate:
+NextCandidate:
 	for _, candidate := range c.contacts {
 		if bytes.Equal(tag, candidate.groupKey.Tag()) {
 			from = candidate
@@ -753,7 +753,7 @@ func (c *client) transact() {
 			}
 
 			// Revocation updates are always processed first.
-			NextEvent:
+		NextEvent:
 			for {
 				select {
 				case revUpdate, ok := <-c.revocationUpdateChan:
@@ -856,8 +856,8 @@ func (c *client) transact() {
 				c.messageSentChan <- messageSendResult{id: head.id}
 			}
 		} else if !isFetch &&
-			  *reply.Status == pond.Reply_GENERATION_REVOKED &&
-			  reply.Revocation != nil {
+			*reply.Status == pond.Reply_GENERATION_REVOKED &&
+			reply.Revocation != nil {
 			c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
 		}
 

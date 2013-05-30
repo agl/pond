@@ -111,7 +111,7 @@ type client struct {
 	// groupPriv is the group private key for the user's delivery group.
 	groupPriv *bbssig.PrivateKey
 	// prevGroupPrivs contains previous group private keys that have been
-	// revoked so that we can still process messages that were inflight at
+	// revoked. This allows us to process messages that were inflight at
 	// the time of the revocation.
 	prevGroupPrivs []previousGroupPrivateKey
 	// generation is the generation number of the group private key and is
@@ -163,12 +163,14 @@ type client struct {
 
 type messageSendResult struct {
 	id uint64
+	// revocation optionally contains a revocation update that resulted
+	// from attempting to send a message.
 	revocation *pond.SignedRevocation
 }
 
 type revocationUpdate struct {
 	// id contains the contact id that needs to be updated.
-	id uint64
+	id  uint64
 	key *bbssig.MemberKey
 	// generation contains the new (i.e. post update) generation number for
 	// the contact.
@@ -253,7 +255,7 @@ type Contact struct {
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
-// tag for.
+// tag (or previous group private key) for.
 const previousTagLifetime = 14 * 24 * time.Hour
 
 // previousTag represents a group signature tag that was previously assigned to
@@ -443,7 +445,7 @@ func (c *client) loadUI() {
 		if err != nil {
 			// Fatal error loading state. Abort.
 			c.errorUI(err.Error(), colorError)
-			select{}
+			select {}
 			c.ShutdownAndSuspend()
 		}
 	}

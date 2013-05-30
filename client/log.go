@@ -21,7 +21,7 @@ type Log struct {
 	toStderr   bool
 	// name is set in tests to an opaque identifer for this client. It's
 	// prepended to log messages in order to aid debugging.
-	name    string
+	name string
 }
 
 func NewLog() *Log {

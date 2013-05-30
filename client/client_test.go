@@ -79,7 +79,6 @@ func NewTestServer(t *testing.T) (*TestServer, error) {
 				return
 			}
 			t.Logf("%s\n", string(line))
-			println(string(line))
 		}
 	}()
 
@@ -212,15 +211,15 @@ func (ui *TestUI) WaitForFileOpen() FileOpen {
 
 type TestClient struct {
 	*client
-	stateDir string
-	ui       *TestUI
+	stateDir   string
+	ui         *TestUI
 	mainUIDone bool
-	name string
+	name       string
 }
 
 func NewTestClient(t *testing.T, name string) (*TestClient, error) {
 	tc := &TestClient{
-		ui: NewTestUI(t),
+		ui:   NewTestUI(t),
 		name: name,
 	}
 	var err error
@@ -1175,7 +1174,7 @@ func TestRevoke(t *testing.T) {
 	client1.ui.events <- Click{name: "revoke"}
 	client1.ui.WaitForSignal()
 
-	if client1.generation != initialGeneration + 1 {
+	if client1.generation != initialGeneration+1 {
 		t.Errorf("Generation did not advance")
 	}
 
@@ -1191,11 +1190,11 @@ func TestRevoke(t *testing.T) {
 
 	ackChan := make(chan bool)
 	client1.fetchNowChan <- ackChan
-	NextEvent:
+NextEvent:
 	for {
 		select {
 		case ack := <-client1.ui.signal:
-			ReadActions:
+		ReadActions:
 			for {
 				select {
 				case <-client1.ui.actions:

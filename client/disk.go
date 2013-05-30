@@ -63,7 +63,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			return errors.New("client: failed to unmarshal previous group private key")
 		}
 		c.prevGroupPrivs = append(c.prevGroupPrivs, previousGroupPrivateKey{
-			priv: priv,
+			priv:    priv,
 			expired: time.Unix(*prevGroupPriv.Expired, 0),
 		})
 	}
@@ -113,7 +113,7 @@ func (c *client) unmarshal(state *disk.State) error {
 
 		for _, prevTag := range cont.PreviousTags {
 			contact.previousTags = append(contact.previousTags, previousTag{
-				tag: prevTag.Tag,
+				tag:     prevTag.Tag,
 				expired: time.Unix(*prevTag.Expired, 0),
 			})
 		}
@@ -233,7 +233,7 @@ func (c *client) marshal() []byte {
 				continue
 			}
 			cont.PreviousTags = append(cont.PreviousTags, &disk.Contact_PreviousTag{
-				Tag: prevTag.tag,
+				Tag:     prevTag.tag,
 				Expired: proto.Int64(prevTag.expired.Unix()),
 			})
 		}
@@ -331,9 +331,9 @@ func (c *client) marshal() []byte {
 		}
 
 		state.PreviousGroupPrivateKeys = append(state.PreviousGroupPrivateKeys, &disk.State_PreviousGroup{
-			Group: prevGroupPriv.priv.Group.Marshal(),
+			Group:        prevGroupPriv.priv.Group.Marshal(),
 			GroupPrivate: prevGroupPriv.priv.Marshal(),
-			Expired: proto.Int64(prevGroupPriv.expired.Unix()),
+			Expired:      proto.Int64(prevGroupPriv.expired.Unix()),
 		})
 	}
 	s, err := proto.Marshal(state)
