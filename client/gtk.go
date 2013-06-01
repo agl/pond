@@ -135,6 +135,21 @@ func (ui *GTKUI) newWidget(v Widget) gtk.WidgetLike {
 	return widget
 }
 
+func alignToGTK(align int) gtk.GtkAlign {
+	switch align {
+	case AlignStart:
+		return gtk.GTK_ALIGN_START
+	case AlignEnd:
+		return gtk.GTK_ALIGN_END
+	case AlignFill:
+		return gtk.GTK_ALIGN_FILL
+	case AlignCenter:
+		return gtk.GTK_ALIGN_CENTER
+	}
+
+	panic("bad alignment value")
+}
+
 func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 	width := -1
 	if b.width != 0 {
@@ -160,6 +175,27 @@ func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 	}
 	if len(b.font) != 0 {
 		w.ModifyFontEasy(b.font)
+	}
+	if b.hExpand {
+		w.SetHExpand(true)
+	}
+	if b.vExpand {
+		w.SetVExpand(true)
+	}
+	if b.margin > 0 {
+		w.SetMargin(b.margin)
+	}
+	if b.marginBottom > 0 {
+		w.SetMarginBottom(b.marginBottom)
+	}
+	if b.marginLeft > 0 {
+		w.SetMarginLeft(b.marginLeft)
+	}
+	if b.vAlign != AlignNone {
+		w.SetVAlign(alignToGTK(b.vAlign))
+	}
+	if b.hAlign != AlignNone {
+		w.SetHAlign(alignToGTK(b.hAlign))
 	}
 }
 
@@ -337,6 +373,23 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		pro := gtk.ProgressBar()
 		configureWidget(&pro.GtkWidget, v.widgetBase)
 		return pro
+	case Grid:
+		grid := gtk.Grid()
+		configureWidget(&grid.GtkWidget, v.widgetBase)
+		for y, row := range v.rows {
+			x := 0
+			for _, elem := range row {
+				grid.Attach(ui.newWidget(elem.widget), x, y, elem.width, elem.height)
+				x += elem.width
+			}
+		}
+		if v.rowSpacing > 0 {
+			grid.SetRowSpacing(v.rowSpacing)
+		}
+		if v.colSpacing > 0 {
+			grid.SetColSpacing(v.colSpacing)
+		}
+		return grid
 	default:
 		panic("unknown widget: " + fmt.Sprintf("%#v", v))
 	}
@@ -456,6 +509,14 @@ func (ui *GTKUI) handle(action interface{}) {
 		widget.SetText(action.s)
 	case SetTitle:
 		ui.window.SetTitle(action.title)
+	case InsertRow:
+		grid := gtk.GtkGrid{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
+		x := 0
+		for _, elem := range action.row {
+			grid.Attach(ui.newWidget(elem.widget), x, action.pos, elem.width, elem.height)
+			x += elem.width
+		}
+		ui.window.ShowAll()
 
 	case UIError:
 	case UIState:

@@ -146,6 +146,12 @@ func (ui *TestUI) processWidget(widget interface{}) {
 		for _, child := range v.children {
 			ui.processWidget(child)
 		}
+	case Grid:
+		for _, row := range v.rows {
+			for _, elem := range row {
+				ui.processWidget(elem.widget)
+			}
+		}
 	case EventBox:
 		ui.processWidget(v.child)
 	case Scrolled:
@@ -185,6 +191,10 @@ ReadActions:
 			case Append:
 				for _, child := range action.children {
 					ui.processWidget(child)
+				}
+			case InsertRow:
+				for _, gride := range action.row {
+					ui.processWidget(gride.widget)
 				}
 			case FileOpen:
 				ui.fileOpen = action
