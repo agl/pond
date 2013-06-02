@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"encoding/pem"
 	"io/ioutil"
 	"strconv"
 	"strings"
@@ -532,4 +534,129 @@ func rightPane(title string, left, right, main Widget) Grid {
 	}
 
 	return grid
+}
+
+type nvEntry struct {
+	name, value string
+}
+
+func nameValuesLHS(entries []nvEntry) Widget {
+	grid := Grid{
+		widgetBase: widgetBase{margin: 6, name: "lhs"},
+		rowSpacing: 3,
+		colSpacing: 3,
+	}
+	for _, ent := range entries {
+		var font string
+		vAlign := AlignCenter
+		if strings.HasPrefix(ent.value, "-----") {
+			// PEM block
+			font = fontMainMono
+			vAlign = AlignStart
+		}
+
+		grid.rows = append(grid.rows, []GridE{
+			GridE{1, 1, Label{
+				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: vAlign},
+				text:       ent.name,
+			}},
+			GridE{1, 1, Label{
+				widgetBase: widgetBase{font: font},
+				text:       ent.value,
+				selectable: true,
+			}},
+		})
+	}
+
+	return grid
+}
+
+func (c *client) identityUI() interface{} {
+	left := nameValuesLHS([]nvEntry{
+		{"SERVER", c.server},
+		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
+		{"PUBLIC KEY", fmt.Sprintf("%x", c.pub[:])},
+		{"STATE FILE", c.stateFilename},
+		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
+	})
+
+	c.ui.Actions() <- SetChild{name: "right", child: rightPane("IDENTITY", left, nil, nil)}
+	c.ui.Actions() <- UIState{uiStateShowIdentity}
+	c.ui.Signal()
+
+	return nil
+}
+
+func (c *client) showContact(id uint64) interface{} {
+	contact := c.contacts[id]
+	if contact.isPending {
+		return c.newContactUI(contact)
+	}
+
+	entries := []nvEntry{
+		{"NAME", contact.name},
+		{"SERVER", contact.theirServer},
+		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+		{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+		{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
+		{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+		{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
+	}
+
+	if len(contact.kxsBytes) > 0 {
+		var out bytes.Buffer
+		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
+		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
+	}
+
+	right := Grid{
+		widgetBase: widgetBase{margin: 6},
+		rowSpacing: 3,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        "revoke",
+						insensitive: contact.revoked,
+					},
+					text: "Revoke",
+				}},
+			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        "delete",
+						insensitive: true,
+					},
+					text: "Delete",
+				}},
+			},
+		},
+	}
+
+	left := nameValuesLHS(entries)
+	c.ui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+	c.ui.Actions() <- UIState{uiStateShowContact}
+	c.ui.Signal()
+
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+
+		if click.name == "revoke" {
+			c.revoke(contact)
+			c.ui.Actions() <- Sensitive{name: "revoke", sensitive: false}
+			c.ui.Signal()
+			c.save()
+		}
+	}
 }
