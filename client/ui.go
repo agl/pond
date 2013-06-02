@@ -2,8 +2,9 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"strconv"
 	"strings"
@@ -659,4 +660,301 @@ func (c *client) showContact(id uint64) interface{} {
 			c.save()
 		}
 	}
+}
+
+func (c *client) newContactUI(contact *Contact) interface{} {
+	var name string
+	existing := contact != nil
+	if existing {
+		name = contact.name
+	}
+
+	grid := Grid{
+		widgetBase: widgetBase{name: "grid", margin: 5},
+		rowSpacing: 8,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, Label{text: "1."}},
+				{1, 1, Label{text: "Choose a name for this contact."}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Label{text: "You can choose any name for this contact. It will be used to identify the contact to you and must be unique amongst all your contacts. However, it will not be revealed to anyone else nor used automatically in messages.", wrap: 400}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Entry{
+					widgetBase: widgetBase{name: "name", insensitive: existing},
+					width:      20,
+					text:       name,
+				}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Label{
+					widgetBase: widgetBase{name: "error1", foreground: colorRed},
+				}},
+			},
+			{
+				{1, 1, Label{text: "2."}},
+				{1, 1, Label{text: "Choose a key agreement method."}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Label{text: `Manual keying involves exchanging key material with your contact in a secure and authentic manner, i.e. by using PGP. The security of Pond is moot if you actually exchange keys with an attacker: they can masquerade the intended contact or could simply do the same to them and pass messages between you, reading everything in the process. Note that the key material is also secret - it's not a public key and so must be encrypted as well as signed.
+
+Shared secret keying involves anonymously contacting a global, shared service and performing key agreement with another party who holds the same shared secret and shared time as you. For example, if you met your contact in real life, you could agree on a shared secret and the time (to the minute). Later you can both use this function to bootstrap Pond communication. The security of this scheme rests on the secret being unguessable, which is very hard for humans to manage. So there is also a scheme whereby a deck of cards can be shuffled and split between you.`, wrap: 400}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Grid{
+					widgetBase: widgetBase{marginTop: 20},
+					rows: [][]GridE{
+						{
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+							{1, 1, Button{
+								widgetBase: widgetBase{
+									name:        "manual",
+									insensitive: true,
+								},
+								text: "Manual Keying",
+							}},
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+							{1, 1, Button{
+								widgetBase: widgetBase{
+									name:        "shared",
+									insensitive: true,
+								},
+								text: "Shared secret",
+							}},
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	nextRow := len(grid.rows)
+
+	c.ui.Actions() <- SetChild{name: "right", child: rightPane("CREATE CONTACT", nil, nil, grid)}
+	c.ui.Actions() <- UIState{uiStateNewContact}
+	c.ui.Signal()
+
+	if existing {
+		return c.newContactManual(contact, existing, nextRow)
+	}
+
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		if click.name != "name" {
+			continue
+		}
+
+		name = click.entries["name"]
+
+		nameIsUnique := true
+		for _, contact := range c.contacts {
+			if contact.name == name {
+				const errText = "A contact by that name already exists!"
+				c.ui.Actions() <- SetText{name: "error1", text: errText}
+				c.ui.Actions() <- UIError{errors.New(errText)}
+				c.ui.Signal()
+				nameIsUnique = false
+				break
+			}
+		}
+
+		if nameIsUnique {
+			break
+		}
+	}
+
+	contact = &Contact{
+		name:      name,
+		isPending: true,
+		id:        c.randId(),
+	}
+
+	c.contactsUI.Add(contact.id, name, "pending", indicatorNone)
+	c.contactsUI.Select(contact.id)
+
+	c.ui.Actions() <- SetText{name: "error1", text: ""}
+	c.ui.Actions() <- Sensitive{name: "name", sensitive: false}
+	c.ui.Actions() <- Sensitive{name: "manual", sensitive: true}
+	c.ui.Actions() <- Sensitive{name: "shared", sensitive: true}
+	c.ui.Signal()
+
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+
+		var nextFunc func(*Contact, bool, int) interface{}
+
+		switch click.name {
+		case "manual":
+			nextFunc = c.newContactManual
+		case "shared":
+		}
+
+		if nextFunc == nil {
+			continue
+		}
+
+		c.ui.Actions() <- Sensitive{name: "manual", sensitive: false}
+		c.ui.Actions() <- Sensitive{name: "shared", sensitive: false}
+		return nextFunc(contact, existing, nextRow)
+	}
+}
+
+func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) interface{} {
+	if !existing {
+		c.newKeyExchange(contact)
+		c.contacts[contact.id] = contact
+		c.save()
+	}
+
+	var out bytes.Buffer
+	pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
+	handshake := string(out.Bytes())
+
+	rows := [][]GridE{
+		{
+			{1, 1, Label{text: "3."}},
+			{1, 1, Label{text: "Give them a handshake message."}},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, Label{text: "A handshake is for a single person. Don't give it to anyone else and ensure that it came from the person you intended! For example, you could send it in a PGP signed and encrypted email, or exchange it over an OTR chat.", wrap: 400}},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, TextView{
+				widgetBase: widgetBase{
+					height: 150,
+					name:   "kxout",
+					font:   fontMainMono,
+				},
+				editable: false,
+				text:     handshake,
+			},
+			},
+		},
+		{
+			{1, 1, Label{text: "4."}},
+			{1, 1, Label{text: "Enter the handshake message from them."}},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, Label{text: "You won't be able to exchange messages with them until they complete the handshake.", wrap: 400}},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, TextView{
+				widgetBase: widgetBase{
+					height: 150,
+					name:   "kxin",
+					font:   fontMainMono,
+				},
+				editable: true,
+			},
+			},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, Grid{
+				widgetBase: widgetBase{marginTop: 20},
+				rows: [][]GridE{
+					{
+						{1, 1, Button{
+							widgetBase: widgetBase{name: "process"},
+							text:       "Process",
+						}},
+						{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+					},
+				},
+			}},
+		},
+		{
+			{1, 1, nil},
+			{1, 1, Label{
+				widgetBase: widgetBase{name: "error2", foreground: colorRed},
+			}},
+		},
+	}
+
+	for _, row := range rows {
+		c.ui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
+		nextRow++
+	}
+	c.ui.Actions() <- UIState{uiStateNewContact2}
+	c.ui.Signal()
+
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		if click.name != "process" {
+			continue
+		}
+
+		block, _ := pem.Decode([]byte(click.textViews["kxin"]))
+		if block == nil || block.Type != keyExchangePEM {
+			const errText = "No key exchange message found!"
+			c.ui.Actions() <- SetText{name: "error2", text: errText}
+			c.ui.Actions() <- UIError{errors.New(errText)}
+			c.ui.Signal()
+			continue
+		}
+		if err := contact.processKeyExchange(block.Bytes, c.testing); err != nil {
+			c.ui.Actions() <- SetText{name: "error2", text: err.Error()}
+			c.ui.Actions() <- UIError{err}
+			c.ui.Signal()
+			continue
+		} else {
+			break
+		}
+	}
+
+	contact.isPending = false
+
+	// Unseal all pending messages from this new contact.
+	for _, msg := range c.inbox {
+		if msg.message == nil && msg.from == contact.id {
+			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
+				c.inboxUI.Remove(msg.id)
+				continue
+			}
+			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.SetSubline(msg.id, subline)
+			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
+			c.updateWindowTitle()
+		}
+	}
+
+	c.contactsUI.SetSubline(contact.id, "")
+	c.save()
+	return c.showContact(contact.id)
 }

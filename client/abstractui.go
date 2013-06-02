@@ -40,6 +40,7 @@ type widgetBase struct {
 	font                   string
 	hExpand, vExpand       bool
 	margin                 int
+	marginTop              int
 	marginBottom           int
 	marginLeft             int
 	vAlign, hAlign         int

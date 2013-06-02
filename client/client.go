@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -1858,274 +1856,6 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error 
 	return nil
 }
 
-func (c *client) newContactUI(contact *Contact) interface{} {
-	var name, handshake string
-	var out bytes.Buffer
-
-	existing := contact != nil
-	if existing {
-		name = contact.name
-		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
-		handshake = string(out.Bytes())
-	}
-
-	ui := VBox{
-		widgetBase: widgetBase{padding: 8, expand: true, fill: true},
-		children: []Widget{
-			EventBox{
-				widgetBase: widgetBase{background: colorHeaderBackground},
-				child: VBox{
-					children: []Widget{
-						HBox{
-							widgetBase: widgetBase{padding: 10},
-							children: []Widget{
-								Label{
-									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
-									text:       "CREATE CONTACT",
-								},
-							},
-						},
-					},
-				},
-			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-			HBox{
-				widgetBase: widgetBase{padding: 2},
-			},
-			HBox{
-				children: []Widget{
-					VBox{
-						widgetBase: widgetBase{padding: 8},
-						children: []Widget{
-							Label{
-								widgetBase: widgetBase{
-									padding: 16,
-									font:    fontMainTitle,
-								},
-								text: "1. Set a name",
-							},
-							HBox{
-								children: []Widget{
-									Label{
-										widgetBase: widgetBase{font: fontMainBody},
-										text:       "Your name for this contact: ",
-										yAlign:     0.5,
-									},
-									Entry{
-										widgetBase: widgetBase{name: "name", insensitive: existing},
-										width:      20,
-										text:       name,
-									},
-								},
-							},
-							HBox{
-								widgetBase: widgetBase{padding: 8},
-								children: []Widget{
-									Button{
-										widgetBase: widgetBase{name: "create", insensitive: existing},
-										text:       "Create",
-									},
-								},
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding:    16,
-									foreground: colorRed,
-									name:       "error1",
-								},
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding: 16,
-									font:    fontMainTitle,
-								},
-								text: "2. Give them a handshake message",
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding: 4,
-									font:    fontMainBody,
-								},
-								text: "A handshake is for a single person. Don't give it to anyone else and ensure that it came from the person you intended! For example, you could send it in a PGP signed and encrypted email, or exchange it over an OTR chat.",
-								wrap: 400,
-							},
-							TextView{
-								widgetBase: widgetBase{
-									height:      150,
-									insensitive: !existing,
-									name:        "kxout",
-									font:        fontMainMono,
-								},
-								editable: false,
-								text:     handshake,
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding: 16,
-									font:    fontMainTitle,
-								},
-								text: "3. Enter the handshake message from them",
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding: 4,
-									font:    fontMainBody,
-								},
-								text: "You won't be able to exchange messages with them until they complete the handshake.",
-								wrap: 400,
-							},
-							TextView{
-								widgetBase: widgetBase{
-									height:      150,
-									insensitive: !existing,
-									name:        "kxin",
-									font:        fontMainMono,
-								},
-								editable: true,
-							},
-							HBox{
-								widgetBase: widgetBase{padding: 8},
-								children: []Widget{
-									Button{
-										widgetBase: widgetBase{name: "process", insensitive: !existing},
-										text:       "Process",
-									},
-								},
-							},
-							Label{
-								widgetBase: widgetBase{
-									padding:    16,
-									foreground: colorRed,
-									name:       "error2",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetChild{name: "right", child: ui}
-	c.ui.Actions() <- SetFocus{name: "name"}
-	c.ui.Actions() <- UIState{uiStateNewContact}
-	c.ui.Signal()
-
-	if !existing {
-		for {
-			event, wanted := c.nextEvent()
-			if wanted {
-				return event
-			}
-
-			click, ok := event.(Click)
-			if !ok {
-				continue
-			}
-			if click.name != "create" && click.name != "name" {
-				continue
-			}
-
-			name = click.entries["name"]
-
-			nameIsUnique := true
-			for _, contact := range c.contacts {
-				if contact.name == name {
-					const errText = "A contact by that name already exists!"
-					c.ui.Actions() <- SetText{name: "error1", text: errText}
-					c.ui.Actions() <- UIError{errors.New(errText)}
-					c.ui.Signal()
-					nameIsUnique = false
-					break
-				}
-			}
-
-			if nameIsUnique {
-				break
-			}
-		}
-
-		contact = &Contact{
-			name:      name,
-			isPending: true,
-			id:        c.randId(),
-		}
-		c.contacts[contact.id] = contact
-
-		c.contactsUI.Add(contact.id, name, "pending", indicatorNone)
-		c.contactsUI.Select(contact.id)
-
-		kx := c.newKeyExchange(contact)
-
-		pem.Encode(&out, &pem.Block{Bytes: kx, Type: keyExchangePEM})
-		handshake = string(out.Bytes())
-
-		c.save()
-		c.ui.Actions() <- SetText{name: "error1", text: ""}
-		c.ui.Actions() <- SetTextView{name: "kxout", text: handshake}
-		c.ui.Actions() <- Sensitive{name: "name", sensitive: false}
-		c.ui.Actions() <- Sensitive{name: "create", sensitive: false}
-		c.ui.Actions() <- Sensitive{name: "kxout", sensitive: true}
-		c.ui.Actions() <- Sensitive{name: "kxin", sensitive: true}
-		c.ui.Actions() <- Sensitive{name: "process", sensitive: true}
-		c.ui.Actions() <- UIState{uiStateNewContact2}
-		c.ui.Signal()
-		c.save()
-	}
-
-	for {
-		event, wanted := c.nextEvent()
-		if wanted {
-			return event
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		if click.name != "process" {
-			continue
-		}
-
-		block, _ := pem.Decode([]byte(click.textViews["kxin"]))
-		if block == nil || block.Type != keyExchangePEM {
-			const errText = "No key exchange message found!"
-			c.ui.Actions() <- SetText{name: "error2", text: errText}
-			c.ui.Actions() <- UIError{errors.New(errText)}
-			c.ui.Signal()
-			continue
-		}
-		if err := contact.processKeyExchange(block.Bytes, c.testing); err != nil {
-			c.ui.Actions() <- SetText{name: "error2", text: err.Error()}
-			c.ui.Actions() <- UIError{err}
-			c.ui.Signal()
-			continue
-		} else {
-			break
-		}
-	}
-
-	contact.isPending = false
-
-	// Unseal all pending messages from this new contact.
-	for _, msg := range c.inbox {
-		if msg.message == nil && msg.from == contact.id {
-			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
-				c.inboxUI.Remove(msg.id)
-				continue
-			}
-			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.SetSubline(msg.id, subline)
-			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
-			c.updateWindowTitle()
-		}
-	}
-
-	c.contactsUI.SetSubline(contact.id, "")
-	c.save()
-	return c.showContact(contact.id)
-}
-
 func (c *client) nextEvent() (event interface{}, wanted bool) {
 	var ok bool
 	select {
@@ -2184,7 +1914,7 @@ func (c *client) randId() uint64 {
 	panic("unreachable")
 }
 
-func (c *client) newKeyExchange(contact *Contact) []byte {
+func (c *client) newKeyExchange(contact *Contact) {
 	var err error
 	c.randBytes(contact.lastDHPrivate[:])
 	c.randBytes(contact.currentDHPrivate[:])
@@ -2220,7 +1950,6 @@ func (c *client) newKeyExchange(contact *Contact) []byte {
 	if contact.kxsBytes, err = proto.Marshal(kxs); err != nil {
 		panic(err)
 	}
-	return contact.kxsBytes
 }
 
 func (c *client) keyPromptUI(state []byte) error {

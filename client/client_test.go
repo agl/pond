@@ -384,9 +384,10 @@ func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, 
 	client.AdvanceTo(uiStateNewContact)
 
 	client.ui.events <- Click{
-		name:    "create",
+		name:    "name",
 		entries: map[string]string{"name": otherName},
 	}
+	client.ui.events <- Click{name:    "manual" }
 	client.AdvanceTo(uiStateNewContact2)
 }
 
@@ -440,13 +441,13 @@ func TestKeyExchange(t *testing.T) {
 	client1.ui.events <- Click{
 		name: client1.contactsUI.entries[0].boxName,
 	}
-	client1.AdvanceTo(uiStateNewContact)
+	client1.AdvanceTo(uiStateNewContact2)
 	client2.Reload()
 	client2.AdvanceTo(uiStateMain)
 	client2.ui.events <- Click{
 		name: client2.contactsUI.entries[0].boxName,
 	}
-	client2.AdvanceTo(uiStateNewContact)
+	client2.AdvanceTo(uiStateNewContact2)
 
 	client1.ui.events <- Click{
 		name:      "process",

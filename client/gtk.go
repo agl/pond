@@ -185,6 +185,9 @@ func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 	if b.margin > 0 {
 		w.SetMargin(b.margin)
 	}
+	if b.marginTop > 0 {
+		w.SetMarginTop(b.marginTop)
+	}
 	if b.marginBottom > 0 {
 		w.SetMarginBottom(b.marginBottom)
 	}
@@ -379,7 +382,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		for y, row := range v.rows {
 			x := 0
 			for _, elem := range row {
-				grid.Attach(ui.newWidget(elem.widget), x, y, elem.width, elem.height)
+				if elem.widget != nil {
+					grid.Attach(ui.newWidget(elem.widget), x, y, elem.width, elem.height)
+				}
 				x += elem.width
 			}
 		}
@@ -513,7 +518,9 @@ func (ui *GTKUI) handle(action interface{}) {
 		grid := gtk.GtkGrid{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
 		x := 0
 		for _, elem := range action.row {
-			grid.Attach(ui.newWidget(elem.widget), x, action.pos, elem.width, elem.height)
+			if elem.widget != nil {
+				grid.Attach(ui.newWidget(elem.widget), x, action.pos, elem.width, elem.height)
+			}
 			x += elem.width
 		}
 		ui.window.ShowAll()
