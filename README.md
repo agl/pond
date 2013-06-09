@@ -89,7 +89,7 @@ Implementation
 
 Currently very threadbare, although all of the above works in a basic fashion save for revocation.
 
-![Pond UI](/agl/pond/blob/master/pond.png?raw=true)
+![Pond UI](https://raw.github.com/agl/pond/master/pond.png)
 
 
 Transport Details
