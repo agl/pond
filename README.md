@@ -16,7 +16,7 @@ For secure, synchronous communication we have OTR and, when run over Tor, this i
 
 Additionally, email is used predominately for insecure communications (mailing lists, etc) and is useful because it allows previously unconnected people to communicate as long as a (public) email address is known to one party. But the flip side to this is that volume and spam is driving people to use centralised email services. These provide such huge benefits to the majority of email communication, it's unlikely that this trend is going to reverse. But, even with PGP, these services are trusted with hugely valuable traffic information if any party uses them.
 
-So Pond is not email. Pond is forward secure, asynchronous messaging for the discerning gentleman. Pond messages are asynchronous, but are not a record; they expire automatically a week after they are received. Pond seeks to prevent leaking traffic information against everyone except a global passive attacker.
+So Pond is not email. Pond is forward secure, asynchronous messaging for the discerning connoisseur. Pond messages are asynchronous, but are not a record; they expire automatically a week after they are received. Pond seeks to prevent leaking traffic information against everyone except a global passive attacker.
 
 Overview
 --------
