@@ -98,6 +98,7 @@ type EventBox struct {
 type Label struct {
 	widgetBase
 	text           string
+	markup         string
 	size           int
 	xAlign, yAlign float32
 	wrap           int
@@ -106,15 +107,17 @@ type Label struct {
 
 type Entry struct {
 	widgetBase
-	text     string
-	width    int
-	password bool
+	text           string
+	width          int
+	password       bool
+	updateOnChange bool
 }
 
 type Button struct {
 	widgetBase
-	text  string
-	image Indicator
+	text   string
+	markup string
+	image  Indicator
 }
 
 type Spinner struct {
@@ -151,9 +154,11 @@ type Combo struct {
 
 type Grid struct {
 	widgetBase
-	rows       [][]GridE
-	rowSpacing int
-	colSpacing int
+	rows           [][]GridE
+	rowSpacing     int
+	colSpacing     int
+	rowHomogeneous bool
+	colHomogeneous bool
 }
 
 type GridE struct {
@@ -162,10 +167,35 @@ type GridE struct {
 	widget Widget
 }
 
+type RadioGroup struct {
+	widgetBase
+	labels []string
+}
+
+type Calendar struct {
+	widgetBase
+}
+
+type SpinButton struct {
+	widgetBase
+	min, max, step float64
+}
+
+type CheckButton struct {
+	widgetBase
+	text string
+}
+
 type InsertRow struct {
 	name string
 	pos  int
 	row  []GridE
+}
+
+type GridSet struct {
+	name     string
+	col, row int
+	widget   Widget
 }
 
 type Image struct {
@@ -192,6 +222,7 @@ type Click struct {
 	entries   map[string]string
 	textViews map[string]string
 	combos    map[string]string
+	checks    map[string]bool
 }
 
 type Update struct {

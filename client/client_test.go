@@ -387,7 +387,7 @@ func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, 
 		name:    "name",
 		entries: map[string]string{"name": otherName},
 	}
-	client.ui.events <- Click{name:    "manual" }
+	client.ui.events <- Click{name: "manual"}
 	client.AdvanceTo(uiStateNewContact2)
 }
 

@@ -12,15 +12,17 @@ import (
 )
 
 type GTKUI struct {
-	window    *gtk.GtkWindow
-	actions   chan interface{}
-	events    chan interface{}
-	pipe      [2]int
-	topWidget gtk.WidgetLike
-	widgets   map[string]gtk.WidgetLike
-	entries   map[string]*gtk.GtkEntry
-	textViews map[string]*gtk.GtkTextView
-	combos    map[string]*gtk.GtkComboBoxText
+	window      *gtk.GtkWindow
+	actions     chan interface{}
+	events      chan interface{}
+	pipe        [2]int
+	topWidget   gtk.WidgetLike
+	widgets     map[string]gtk.WidgetLike
+	entries     map[string]*gtk.GtkEntry
+	textViews   map[string]*gtk.GtkTextView
+	combos      map[string]*gtk.GtkComboBoxText
+	checks      map[string]*gtk.GtkCheckButton
+	radioGroups map[string]int
 }
 
 func NewGTKUI() *GTKUI {
@@ -28,7 +30,7 @@ func NewGTKUI() *GTKUI {
 	window := gtk.Window(gtk.GTK_WINDOW_TOPLEVEL)
 	window.SetPosition(gtk.GTK_WIN_POS_CENTER)
 	window.SetTitle("Pond")
-	window.SetDefaultSize(640, 480)
+	window.SetDefaultSize(1000, 800)
 
 	ui := &GTKUI{
 		window:  window,
@@ -105,10 +107,15 @@ func (ui *GTKUI) updated(name string) {
 	ui.events <- Update{name, contents}
 }
 
+func (ui *GTKUI) updatedEntry(name string) {
+	ui.events <- Update{name, ui.entries[name].GetText()}
+}
+
 func (ui *GTKUI) clicked(name string) {
 	entries := make(map[string]string)
 	textViews := make(map[string]string)
 	combos := make(map[string]string)
+	checks := make(map[string]bool)
 
 	for ename, entry := range ui.entries {
 		entries[ename] = entry.GetText()
@@ -123,8 +130,11 @@ func (ui *GTKUI) clicked(name string) {
 	for comboName, combo := range ui.combos {
 		combos[comboName] = combo.GetActiveText()
 	}
+	for checkName, check := range ui.checks {
+		checks[checkName] = check.GetActive()
+	}
 
-	ui.events <- Click{name, entries, textViews, combos}
+	ui.events <- Click{name, entries, textViews, combos, checks}
 }
 
 func (ui *GTKUI) newWidget(v Widget) gtk.WidgetLike {
@@ -237,6 +247,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		return box
 	case Label:
 		label := gtk.Label(v.text)
+		if len(v.markup) > 0 {
+			label.SetMarkup(v.markup)
+		}
 		label.SetAlignment(v.xAlign, v.yAlign)
 		configureWidget(&label.GtkWidget, v.widgetBase)
 		if v.wrap != 0 {
@@ -259,6 +272,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			entry.Connect("activate", func() {
 				ui.clicked(v.name)
 			})
+			if v.updateOnChange {
+				entry.Connect("changed", func() {
+					ui.updatedEntry(v.name)
+				})
+			}
 		}
 		if v.password {
 			entry.SetVisibility(false)
@@ -271,6 +289,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			button = gtk.ButtonWithLabel(v.text)
 		} else {
 			button = gtk.Button()
+			if len(v.markup) > 0 {
+				label := gtk.Label("")
+				label.SetMarkup(v.markup)
+				button.Add(label)
+			}
 		}
 		if v.image != indicatorNone {
 			image := gtk.ImageFromPixbuf(v.image.Image())
@@ -394,7 +417,51 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		if v.colSpacing > 0 {
 			grid.SetColSpacing(v.colSpacing)
 		}
+		if v.rowHomogeneous {
+			grid.SetRowHomogeneous(true)
+		}
+		if v.colHomogeneous {
+			grid.SetColumnHomogeneous(true)
+		}
 		return grid
+	case RadioGroup:
+		hbox := gtk.Box(gtk.GTK_ORIENTATION_HORIZONTAL, 2)
+		var last *gtk.GtkRadioButton
+		for i, labelText := range v.labels {
+			last = gtk.RadioButtonWithLabelFromWidget(last, labelText)
+			i := i
+			last.Connect("toggled", func() {
+				ui.radioGroups[v.name] = i
+			})
+			last.Connect("destroy", func() {
+				delete(ui.radioGroups, v.name)
+			})
+			hbox.PackStart(last, false, true, 2)
+		}
+		return hbox
+	case Calendar:
+		cal := gtk.Calendar()
+		configureWidget(&cal.GtkWidget, v.widgetBase)
+		return cal
+	case SpinButton:
+		spin := gtk.SpinButtonWithRange(v.min, v.max, v.step)
+		configureWidget(&spin.GtkWidget, v.widgetBase)
+		return spin
+	case CheckButton:
+		check := gtk.CheckButtonWithLabel(v.text)
+		configureWidget(&check.GtkWidget, v.widgetBase)
+		if len(v.name) > 0 {
+			check.Connect("toggled", func() {
+				ui.clicked(v.name)
+			})
+			check.Connect("destroy", func() {
+				delete(ui.checks, v.name)
+			})
+			ui.checks[v.name] = check
+		}
+
+		return check
+
 	default:
 		panic("unknown widget: " + fmt.Sprintf("%#v", v))
 	}
@@ -417,6 +484,8 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.entries = make(map[string]*gtk.GtkEntry)
 		ui.textViews = make(map[string]*gtk.GtkTextView)
 		ui.combos = make(map[string]*gtk.GtkComboBoxText)
+		ui.radioGroups = make(map[string]int)
+		ui.checks = make(map[string]*gtk.GtkCheckButton)
 		if ui.topWidget != nil {
 			ui.window.Remove(ui.topWidget)
 			ui.topWidget = nil
@@ -523,6 +592,10 @@ func (ui *GTKUI) handle(action interface{}) {
 			}
 			x += elem.width
 		}
+		ui.window.ShowAll()
+	case GridSet:
+		grid := gtk.GtkGrid{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
+		grid.Attach(ui.newWidget(action.widget), action.col, action.row, 1, 1)
 		ui.window.ShowAll()
 
 	case UIError:
