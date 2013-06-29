@@ -12,6 +12,7 @@ import (
 
 	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	"github.com/agl/pond/panda"
 )
 
 func (c *client) showInbox(id uint64) interface{} {
@@ -590,7 +591,7 @@ func (c *client) identityUI() interface{} {
 
 func (c *client) showContact(id uint64) interface{} {
 	contact := c.contacts[id]
-	if contact.isPending {
+	if contact.isPending && len(contact.pandaKeyExchange) == 0 {
 		return c.newContactUI(contact)
 	}
 
@@ -605,7 +606,17 @@ func (c *client) showContact(id uint64) interface{} {
 		{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
 	}
 
-	if len(contact.kxsBytes) > 0 {
+	var pandaMessage string
+
+	if len(contact.pandaResult) > 0 {
+		pandaMessage = contact.pandaResult
+	} else if len(contact.pandaKeyExchange) > 0 {
+		pandaMessage = "in progress"
+	}
+
+	if len(pandaMessage) > 0 {
+		entries = append(entries, nvEntry{ "PANDA KEY EXCHANGE", pandaMessage })
+	} else if len(contact.kxsBytes) > 0 {
 		var out bytes.Buffer
 		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
 		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
@@ -812,9 +823,7 @@ Shared secret keying involves anonymously contacting a global, shared service an
 			nextFunc = c.newContactManual
 		case "shared":
 			nextFunc = c.newContactPanda
-		}
-
-		if nextFunc == nil {
+		default:
 			continue
 		}
 
@@ -939,114 +948,17 @@ func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) 
 		}
 	}
 
-	contact.isPending = false
-
 	// Unseal all pending messages from this new contact.
-	for _, msg := range c.inbox {
-		if msg.message == nil && msg.from == contact.id {
-			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
-				c.inboxUI.Remove(msg.id)
-				continue
-			}
-			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.SetSubline(msg.id, subline)
-			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
-			c.updateWindowTitle()
-		}
-	}
-
+	c.unsealPendingMessages(contact)
 	c.contactsUI.SetSubline(contact.id, "")
 	c.save()
 	return c.showContact(contact.id)
 }
 
-type Suite int
-
-const (
-	SuiteSpades Suite = iota
-	SuiteHearts
-	SuiteDimonds
-	SuiteClubs
-)
-
-type Card struct {
-	face  int
-	suite Suite
-}
-
-func (c Card) String() string {
-	var ret string
-
-	switch c.face {
-	case 1, 2, 3, 4, 5, 6, 7, 8, 9:
-		ret = strconv.Itoa(c.face)
-	case 10:
-		ret = "J"
-	case 11:
-		ret = "Q"
-	case 12:
-		ret = "K"
-	case 13:
-		ret = "A"
-	default:
-		ret = "?"
-	}
-
-	switch c.suite {
-	case SuiteSpades:
-		ret += "♠"
-	case SuiteHearts:
-		ret += "♥"
-	case SuiteDimonds:
-		ret += "♦"
-	case SuiteClubs:
-		ret += "♣"
-	}
-
-	return ret
-}
-
-func (c Card) IsRed() bool {
-	return c.suite == SuiteDimonds || c.suite == SuiteHearts
-}
-
-func parseCard(s string) (card Card, ok bool) {
-	if len(s) != 2 {
-		return
-	}
-
-	switch s[0] {
-	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		card.face, _ = strconv.Atoi(s[:1])
-	case 'j', 'J':
-		card.face = 10
-	case 'q', 'Q':
-		card.face = 11
-	case 'k', 'K':
-		card.face = 12
-	case 'a', 'A':
-		card.face = 13
-	default:
-		return
-	}
-
-	switch s[1] {
-	case 's', 'S':
-		card.suite = SuiteSpades
-	case 'h', 'H':
-		card.suite = SuiteHearts
-	case 'd', 'D':
-		card.suite = SuiteDimonds
-	case 'c', 'C':
-		card.suite = SuiteClubs
-	default:
-		return
-	}
-
-	return card, true
-}
-
 func (c *client) newContactPanda(contact *Contact, existing bool, nextRow int) interface{} {
+	c.newKeyExchange(contact)
+	c.contacts[contact.id] = contact
+
 	controls := Grid{
 		widgetBase: widgetBase{name: "controls", margin: 5},
 		rowSpacing: 5,
@@ -1108,6 +1020,9 @@ func (c *client) newContactPanda(contact *Contact, existing bool, nextRow int) i
 					},
 				}},
 			},
+			{
+				{1, 1, Button{widgetBase: widgetBase{name: "begin"}, text: "Begin"}},
+			},
 		},
 	}
 
@@ -1144,13 +1059,14 @@ When entering the cards enter the number or face of the card first, and then the
 	var freeList []gridPoint
 	// nextPoint contains the next location to insert into the grid of cards.
 	var nextPoint gridPoint
-	cards := make(map[Card]gridPoint)
-
-	cardUnknown := func(c Card) bool {
-		_, ok := cards[c]
-		return !ok
+	stack := &panda.CardStack{
+		NumDecks: 1,
 	}
+	cardAtLocation := make(map[gridPoint]panda.Card)
+	minDecks := 1
+	timeEnabled := false
 
+	SharedSecretEvent:
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
@@ -1158,7 +1074,7 @@ When entering the cards enter the number or face of the card first, and then the
 		}
 
 		if update, ok := event.(Update); ok && update.name == "cardentry" && len(update.text) >= 2 {
-			if card, ok := parseCard(update.text[:2]); ok && cardUnknown(card) {
+			if card, ok := panda.ParseCard(update.text[:2]); ok && stack.Add(card) {
 				point := nextPoint
 				if l := len(freeList); l > 0 {
 					point = freeList[l-1]
@@ -1170,15 +1086,22 @@ When entering the cards enter the number or face of the card first, and then the
 						nextPoint.col = 0
 					}
 				}
-				cards[card] = point
 				markup := card.String()
 				if card.IsRed() {
 					markup = markup[:1] + "<span color=\"red\">" + markup[1:] + "</span>"
 				}
+				name := fmt.Sprintf("card-%d,%d", point.col, point.row)
 				c.ui.Actions() <- GridSet{"cards", point.col, point.row, Button{
-					widgetBase: widgetBase{name: "card-" + update.text[:2]},
+					widgetBase: widgetBase{name: name},
 					markup:     markup,
 				}}
+				cardAtLocation[point] = card
+				if min := stack.MinimumDecks(); min > minDecks {
+					minDecks = min
+					if min > 1 {
+						c.ui.Actions() <- Sensitive{name: "numdecks", sensitive: false}
+					}
+				}
 			}
 			c.ui.Actions() <- SetEntry{name: "cardentry", text: update.text[2:]}
 			c.ui.Signal()
@@ -1186,24 +1109,61 @@ When entering the cards enter the number or face of the card first, and then the
 		}
 
 		if click, ok := event.(Click); ok {
-			if strings.HasPrefix(click.name, "card-") {
-				card, _ := parseCard(click.name[5:])
-				point := cards[card]
+			switch {
+			case strings.HasPrefix(click.name, "card-"):
+				var point gridPoint
+				fmt.Sscanf(click.name[5:], "%d,%d", &point.col, &point.row)
+				card := cardAtLocation[point]
 				freeList = append(freeList, point)
-				delete(cards, card)
+				delete(cardAtLocation, point)
+				stack.Remove(card)
+				if min := stack.MinimumDecks(); min < minDecks {
+					minDecks = min
+					if min < 2 {
+						c.ui.Actions() <- Sensitive{name: "numdecks", sensitive: true}
+					}
+				}
 				c.ui.Actions() <- Destroy{name: click.name}
 				c.ui.Signal()
-			}
-			if click.name == "hastime" {
-				enabled := click.checks["hastime"]
-				println(enabled)
-				c.ui.Actions() <- Sensitive{name: "cal", sensitive: enabled}
-				c.ui.Actions() <- Sensitive{name: "hour", sensitive: enabled}
-				c.ui.Actions() <- Sensitive{name: "minute", sensitive: enabled}
+			case click.name == "hastime":
+				timeEnabled = click.checks["hastime"]
+				c.ui.Actions() <- Sensitive{name: "cal", sensitive: timeEnabled}
+				c.ui.Actions() <- Sensitive{name: "hour", sensitive: timeEnabled}
+				c.ui.Actions() <- Sensitive{name: "minute", sensitive: timeEnabled}
 				c.ui.Signal()
+			case click.name == "numdecks":
+				numDecks := click.radios["numdecks"] + 1
+				if numDecks >= minDecks {
+					stack.NumDecks = numDecks
+				}
+			case click.name == "begin":
+				secret := panda.SharedSecret{
+					Secret: click.entries["shared"],
+					Cards: *stack,
+				}
+				if timeEnabled {
+					date := click.calendars["cal"]
+					secret.Year = date.year
+					secret.Month = date.month
+					secret.Day = date.day
+					secret.Hours = click.spinButtons["hour"]
+					secret.Minutes = click.spinButtons["minute"]
+				}
+				mp := c.newMeetingPlace()
+				kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+				if err != nil {
+					panic(err)
+				}
+				kx.Testing = c.testing
+				contact.pandaKeyExchange = kx.Marshal()
+				contact.kxsBytes = nil
+				break SharedSecretEvent
 			}
 		}
 	}
 
-	return nil
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
+	return c.showContact(contact.id)
 }

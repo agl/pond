@@ -73,6 +73,8 @@ func (c *client) unmarshal(state *disk.State) error {
 			id:       *cont.Id,
 			name:     *cont.Name,
 			kxsBytes: cont.KeyExchangeBytes,
+			pandaKeyExchange: cont.PandaKeyExchange,
+			pandaResult: cont.GetPandaError(),
 		}
 		c.contacts[contact.id] = contact
 		if contact.groupKey, ok = new(bbssig.MemberKey).Unmarshal(c.groupPriv.Group, cont.GroupKey); !ok {
@@ -217,6 +219,8 @@ func (c *client) marshal() []byte {
 			LastPrivate:      contact.lastDHPrivate[:],
 			CurrentPrivate:   contact.currentDHPrivate[:],
 			SupportedVersion: proto.Int32(contact.supportedVersion),
+			PandaKeyExchange: contact.pandaKeyExchange,
+			PandaError: proto.String(contact.pandaResult),
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()

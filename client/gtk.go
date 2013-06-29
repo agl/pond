@@ -23,6 +23,8 @@ type GTKUI struct {
 	combos      map[string]*gtk.GtkComboBoxText
 	checks      map[string]*gtk.GtkCheckButton
 	radioGroups map[string]int
+	calendars   map[string]*gtk.GtkCalendar
+	spinButtons map[string]*gtk.GtkSpinButton
 }
 
 func NewGTKUI() *GTKUI {
@@ -114,8 +116,27 @@ func (ui *GTKUI) updatedEntry(name string) {
 func (ui *GTKUI) clicked(name string) {
 	entries := make(map[string]string)
 	textViews := make(map[string]string)
-	combos := make(map[string]string)
-	checks := make(map[string]bool)
+	var combos map[string]string
+	var checks map[string]bool
+	var radios map[string]int
+	var calendars map[string]CalendarDate
+	var spins map[string]int
+
+	if len(ui.combos) > 0 {
+		combos = make(map[string]string)
+	}
+	if len(ui.checks) > 0 {
+		checks = make(map[string]bool)
+	}
+	if len(ui.radioGroups) > 0 {
+		radios = make(map[string]int)
+	}
+	if len(ui.calendars) > 0 {
+		calendars = make(map[string]CalendarDate)
+	}
+	if len(ui.spinButtons) > 0 {
+		spins = make(map[string]int)
+	}
 
 	for ename, entry := range ui.entries {
 		entries[ename] = entry.GetText()
@@ -133,8 +154,18 @@ func (ui *GTKUI) clicked(name string) {
 	for checkName, check := range ui.checks {
 		checks[checkName] = check.GetActive()
 	}
+	for radioName, val := range ui.radioGroups {
+		radios[radioName] = val
+	}
+	for calName, cal := range ui.calendars {
+		year, month, day := cal.GetDate()
+		calendars[calName] = CalendarDate{year, month, day}
+	}
+	for spinName, spin := range ui.spinButtons {
+		spins[spinName] = spin.GetInt()
+	}
 
-	ui.events <- Click{name, entries, textViews, combos, checks}
+	ui.events <- Click{name, entries, textViews, combos, checks, radios, calendars, spins}
 }
 
 func (ui *GTKUI) newWidget(v Widget) gtk.WidgetLike {
@@ -432,6 +463,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			i := i
 			last.Connect("toggled", func() {
 				ui.radioGroups[v.name] = i
+				ui.clicked(v.name)
 			})
 			last.Connect("destroy", func() {
 				delete(ui.radioGroups, v.name)
@@ -442,10 +474,22 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 	case Calendar:
 		cal := gtk.Calendar()
 		configureWidget(&cal.GtkWidget, v.widgetBase)
+		if len(v.name) > 0 {
+			ui.calendars[v.name] = cal
+			cal.Connect("destroy", func() {
+				delete(ui.calendars, v.name)
+			})
+		}
 		return cal
 	case SpinButton:
 		spin := gtk.SpinButtonWithRange(v.min, v.max, v.step)
 		configureWidget(&spin.GtkWidget, v.widgetBase)
+		if len(v.name) > 0 {
+			ui.spinButtons[v.name] = spin
+			spin.Connect("destroy", func() {
+				delete(ui.spinButtons, v.name)
+			})
+		}
 		return spin
 	case CheckButton:
 		check := gtk.CheckButtonWithLabel(v.text)
@@ -486,6 +530,10 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.combos = make(map[string]*gtk.GtkComboBoxText)
 		ui.radioGroups = make(map[string]int)
 		ui.checks = make(map[string]*gtk.GtkCheckButton)
+		ui.radioGroups = make(map[string]int)
+		ui.calendars = make(map[string]*gtk.GtkCalendar)
+		ui.spinButtons = make(map[string]*gtk.GtkSpinButton)
+
 		if ui.topWidget != nil {
 			ui.window.Remove(ui.topWidget)
 			ui.topWidget = nil

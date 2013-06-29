@@ -25,6 +25,7 @@ func main() {
 	flag.Parse()
 
 	ui := NewGTKUI()
-	NewClient(*stateFile, ui, rand.Reader, testing, true /* autoFetch */)
+	client := NewClient(*stateFile, ui, rand.Reader, testing, true /* autoFetch */)
+	client.Start()
 	ui.Run()
 }

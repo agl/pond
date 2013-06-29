@@ -1,0 +1,35 @@
+package panda;
+
+// These protobufs are used for serialising a pending key exchange.
+
+message KeyExchange {
+	enum Status {
+		INIT = 0;
+		EXCHANGE1 = 1;
+		EXCHANGE2 = 2;
+	}
+	required Status status = 1;
+	required bytes key_exchange_bytes = 2;
+
+	message SharedSecret {
+		optional string secret = 1;
+		optional int32 num_decks = 2;
+		repeated int32 card_count = 3;
+		message Time {
+			required int32 day = 1;
+			required int32 month = 2;
+			required int32 year = 3;
+			required int32 hours = 4;
+			required int32 minutes = 5;
+		}
+		optional Time time = 4;
+	}
+	optional SharedSecret shared_secret = 3;
+	optional bytes dh_private = 4;
+	optional bytes key = 5;
+	optional bytes meeting1 = 6;
+	optional bytes meeting2 = 7;
+	optional bytes message1 = 8;
+	optional bytes message2 = 9;
+	optional bytes shared_key = 10;
+}

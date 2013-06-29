@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"sync"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +19,13 @@ import (
 
 	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	panda "github.com/agl/pond/panda"
 )
+
+// clientLogToStderr controls whether the TestClients will log to stderr during
+// the test. This produces too much noise to be enabled all the time, but it
+// can be helpful when debugging.
+const clientLogToStderr = false
 
 type TestServer struct {
 	cmd      *exec.Cmd
@@ -176,7 +183,8 @@ ReadActions:
 	for {
 		select {
 		case action := <-ui.actions:
-			//ui.t.Logf("%#v", action)
+			ui.t.Logf("%#v", action)
+			// fmt.Printf("%#v\n", action)
 			switch action := action.(type) {
 			case UIState:
 				ui.currentStateID = action.stateID
@@ -238,7 +246,8 @@ func NewTestClient(t *testing.T, name string) (*TestClient, error) {
 	}
 	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
 	tc.client.log.name = name
-	tc.client.log.toStderr = false
+	tc.client.log.toStderr = clientLogToStderr
+	tc.client.Start()
 	return tc, nil
 }
 
@@ -274,11 +283,21 @@ func (tc *TestClient) AdvanceTo(state int) {
 }
 
 func (tc *TestClient) Reload() {
+	tc.ReloadWithMeetingPlace(nil)
+}
+
+func (tc *TestClient) ReloadWithMeetingPlace(mp panda.MeetingPlace) {
 	tc.Shutdown()
 	tc.ui = NewTestUI(tc.ui.t)
-	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true /* testing */, false /* autoFetch */)
 	tc.client.log.name = tc.name
-	tc.client.log.toStderr = false
+	tc.client.log.toStderr = clientLogToStderr
+	if mp != nil {
+		tc.client.newMeetingPlace = func() panda.MeetingPlace {
+			return mp
+		}
+	}
+	tc.client.Start()
 }
 
 func TestOpenClose(t *testing.T) {
@@ -1266,5 +1285,93 @@ NextEvent:
 			}
 			seenClient4 = true
 		}
+	}
+}
+
+func startPANDAKeyExchange(t *testing.T, client *TestClient, server *TestServer, otherName, sharedSecret string) {
+	proceedToMainUI(t, client, server)
+
+	client.ui.events <- Click{name: "newcontact"}
+	client.AdvanceTo(uiStateNewContact)
+
+	client.ui.events <- Click{
+		name:    "name",
+		entries: map[string]string{"name": otherName},
+	}
+	client.ui.events <- Click{name: "shared"}
+	client.AdvanceTo(uiStateNewContact2)
+
+	client.ui.events <- Click{
+		name:    "begin",
+		entries: map[string]string{"shared": sharedSecret},
+	}
+}
+
+func TestPANDA(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	mpShutdownChan := make(chan bool)
+	mp := panda.NewSimpleMeetingPlace(mpShutdownChan)
+	newMeetingPlace := func() panda.MeetingPlace {
+		return mp
+	}
+	client1.newMeetingPlace = newMeetingPlace
+	client2.newMeetingPlace = newMeetingPlace
+
+	startPANDAKeyExchange(t, client1, server, "client2", "shared secret")
+
+	mpShutdownChan <- true
+	client1.ReloadWithMeetingPlace(mp)
+
+	startPANDAKeyExchange(t, client2, server, "client1", "shared secret")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		client1.AdvanceTo(uiStatePANDAComplete)
+		wg.Done()
+	}()
+	go func() {
+		client2.AdvanceTo(uiStatePANDAComplete)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	var client2FromClient1 *Contact
+	for _, contact := range client1.contacts {
+		client2FromClient1 = contact
+		break
+	}
+
+	var client1FromClient2 *Contact
+	for _, contact := range client2.contacts {
+		client1FromClient2 = contact
+		break
+	}
+
+	if g := client2FromClient1.generation; g != client2.generation {
+		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
+	}
+
+	if g := client1FromClient2.generation; g != client1.generation {
+		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
 	}
 }

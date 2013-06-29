@@ -223,6 +223,13 @@ type Click struct {
 	textViews map[string]string
 	combos    map[string]string
 	checks    map[string]bool
+	radios    map[string]int
+	calendars map[string]CalendarDate
+	spinButtons map[string]int
+}
+
+type CalendarDate struct {
+	year, month, day int
 }
 
 type Update struct {

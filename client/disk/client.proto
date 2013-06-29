@@ -10,6 +10,8 @@ message Contact {
 	required bytes group_key = 3;
 	optional int32 supported_version = 16;
 	optional bytes key_exchange_bytes = 4;
+	optional bytes panda_key_exchange = 18;
+	optional string panda_error = 19;
 	optional bytes their_group = 5;
 	optional bytes my_group_key = 6;
 	optional uint32 generation = 7;

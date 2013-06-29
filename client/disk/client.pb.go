@@ -20,6 +20,8 @@ type Contact struct {
 	GroupKey            []byte                 `protobuf:"bytes,3,req,name=group_key" json:"group_key,omitempty"`
 	SupportedVersion    *int32                 `protobuf:"varint,16,opt,name=supported_version" json:"supported_version,omitempty"`
 	KeyExchangeBytes    []byte                 `protobuf:"bytes,4,opt,name=key_exchange_bytes" json:"key_exchange_bytes,omitempty"`
+	PandaKeyExchange    []byte                 `protobuf:"bytes,18,opt,name=panda_key_exchange" json:"panda_key_exchange,omitempty"`
+	PandaError          *string                `protobuf:"bytes,19,opt,name=panda_error" json:"panda_error,omitempty"`
 	TheirGroup          []byte                 `protobuf:"bytes,5,opt,name=their_group" json:"their_group,omitempty"`
 	MyGroupKey          []byte                 `protobuf:"bytes,6,opt,name=my_group_key" json:"my_group_key,omitempty"`
 	Generation          *uint32                `protobuf:"varint,7,opt,name=generation" json:"generation,omitempty"`
@@ -74,6 +76,20 @@ func (this *Contact) GetKeyExchangeBytes() []byte {
 		return this.KeyExchangeBytes
 	}
 	return nil
+}
+
+func (this *Contact) GetPandaKeyExchange() []byte {
+	if this != nil {
+		return this.PandaKeyExchange
+	}
+	return nil
+}
+
+func (this *Contact) GetPandaError() string {
+	if this != nil && this.PandaError != nil {
+		return *this.PandaError
+	}
+	return ""
 }
 
 func (this *Contact) GetTheirGroup() []byte {

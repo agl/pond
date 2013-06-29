@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
+	"github.com/agl/pond/panda"
 	"github.com/agl/pond/client/disk"
 	pond "github.com/agl/pond/protos"
 )
@@ -75,6 +77,7 @@ const (
 	uiStateInbox
 	uiStateLog
 	uiStateRevocationProcessed
+	uiStatePANDAComplete
 )
 
 const shortTimeFormat = "Jan _2 15:04"
@@ -89,6 +92,9 @@ type client struct {
 	// autoFetch controls whether the network goroutine performs periodic
 	// transactions or waits for outside prompting.
 	autoFetch bool
+	// newMeetingPlace is a function that returns a PANDA MeetingPlace. In
+	// tests, this can be overridden to return a testing meeting place.
+	newMeetingPlace func() panda.MeetingPlace
 
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
@@ -157,6 +163,14 @@ type client struct {
 	// the network goroutine.
 	messageSentChan chan messageSendResult
 	backgroundChan  chan interface{}
+	// pandaChan receives messages from goroutines in runPANDA about
+	// changes to PANDA key exchange state.
+	pandaChan chan pandaUpdate
+	// pandaShutdownChan is used to signal to the PANDA goroutines that the
+	// client is stopping and that they should save state.
+	pandaShutdownChan chan bool
+	// pandaWaitGroup is incremented for each running PANDA goroutine.
+	pandaWaitGroup sync.WaitGroup
 }
 
 type messageSendResult struct {
@@ -244,6 +258,12 @@ type Contact struct {
 	revoked bool
 	// revokedUs is true if this contact has recoved us.
 	revokedUs bool
+	// pandaKeyExchange contains the serialised PANDA state if a key
+	// exchange is ongoing.
+	pandaKeyExchange []byte
+	// pandaResult contains an error message in the event that a PANDA key
+	// exchange failed.
+	pandaResult string
 
 	lastDHPrivate    [32]byte
 	currentDHPrivate [32]byte
@@ -473,6 +493,15 @@ func (c *client) loadUI() {
 	go c.transact()
 	if newAccount {
 		c.save()
+	}
+
+	// Start any pending key exchanges.
+	for _, contact := range c.contacts {
+		if len(contact.pandaKeyExchange) == 0 {
+			continue
+		}
+		c.pandaWaitGroup.Add(1)
+		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
 	}
 
 	c.mainUI()
@@ -1869,6 +1898,9 @@ func (c *client) nextEvent() (event interface{}, wanted bool) {
 	case msr := <-c.messageSentChan:
 		c.processMessageSent(msr)
 		return
+	case update := <-c.pandaChan:
+		c.processPANDAUpdate(update)
+		return
 	case event = <-c.backgroundChan:
 		break
 	case <-c.log.updateChan:
@@ -2250,6 +2282,20 @@ func (c *client) ShutdownAndSuspend() {
 }
 
 func (c *client) Shutdown() {
+	close(c.pandaShutdownChan)
+	if c.testing {
+		c.pandaWaitGroup.Wait()
+
+		ProcessPANDAUpdates:
+		for {
+			select {
+			case update := <-c.pandaChan:
+				c.processPANDAUpdate(update)
+			default:
+				break ProcessPANDAUpdates
+			}
+		}
+	}
 	if c.writerChan != nil {
 		close(c.writerChan)
 		<-c.writerDone
@@ -2265,10 +2311,114 @@ func (c *client) Shutdown() {
 	}
 }
 
+// RunPANDA runs in its own goroutine and runs a PANDA key exchange.
+func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) {
+	var result []byte
+	defer c.pandaWaitGroup.Done()
+
+	c.log.Printf("Starting PANDA key exchange with %s", name)
+
+	kx, err := panda.UnmarshalKeyExchange(c.rand, c.newMeetingPlace(), serialisedKeyExchange)
+	kx.Testing = c.testing
+	kx.Log = func(format string, args ...interface{}) {
+		serialised := kx.Marshal()
+		c.pandaChan <- pandaUpdate{
+			id: id,
+			serialised: serialised,
+		}
+		format = "Key exchange with " + name + ": " + format
+		c.log.Printf(format, args...)
+	}
+
+	if err == nil {
+		result, err = kx.Run()
+	}
+
+	if err == panda.ShutdownErr {
+		return
+	}
+
+	c.pandaChan <- pandaUpdate{
+		id: id,
+		err: err,
+		result: result,
+	}
+}
+
+// processPANDAUpdate runs on the main client goroutine and handles messages
+// from a runPANDA goroutine.
+func (c *client) processPANDAUpdate(update pandaUpdate) {
+	contact, ok := c.contacts[update.id]
+	if !ok {
+		return
+	}
+
+	switch {
+	case update.err != nil:
+		contact.pandaResult = update.err.Error()
+		contact.pandaKeyExchange = nil
+		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
+		c.contactsUI.SetSubline(contact.id, "failed")
+	case update.serialised != nil:
+		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
+			return
+		}
+		contact.pandaKeyExchange = update.serialised
+	case update.result != nil:
+		if err := contact.processKeyExchange(update.result, c.testing); err != nil {
+			contact.pandaResult = err.Error()
+			c.contactsUI.SetSubline(contact.id, "failed")
+			contact.pandaKeyExchange = nil
+			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
+		} else {
+			c.unsealPendingMessages(contact)
+			c.contactsUI.SetSubline(contact.id, "")
+			contact.pandaKeyExchange = nil
+			c.log.Printf("Key exchange with %s complete", contact.name)
+			c.ui.Actions() <- UIState{uiStatePANDAComplete}
+			c.ui.Signal()
+		}
+	}
+
+	c.save()
+}
+
+// unsealPendingMessages is run once a key exchange with a contact has
+// completed and unseals any previously unreadable messages from that contact.
+func (c *client) unsealPendingMessages(contact *Contact) {
+	contact.isPending = false
+
+	for _, msg := range c.inbox {
+		if msg.message == nil && msg.from == contact.id {
+			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
+				c.inboxUI.Remove(msg.id)
+				continue
+			}
+			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.SetSubline(msg.id, subline)
+			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
+			c.updateWindowTitle()
+		}
+	}
+
+}
+
+type pandaUpdate struct {
+	id uint64
+	err error
+	result []byte
+	serialised []byte
+}
+
 func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
 	c := &client{
 		testing:         testing,
 		autoFetch:       autoFetch,
+		newMeetingPlace: func() panda.MeetingPlace {
+			return &panda.HTTPMeetingPlace{
+				URL: "https://panda-key-exchange.appspot.com/exchange",
+			}
+		},
 		stateFilename:   stateFilename,
 		log:             NewLog(),
 		ui:              ui,
@@ -2278,9 +2428,13 @@ func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch b
 		newMessageChan:  make(chan NewMessage),
 		messageSentChan: make(chan messageSendResult, 1),
 		backgroundChan:  make(chan interface{}, 8),
+		pandaChan:       make(chan pandaUpdate, 1),
+		pandaShutdownChan: make(chan bool),
 	}
 	c.log.toStderr = true
-
-	go c.loadUI()
 	return c
+}
+
+func (c *client) Start() {
+	go c.loadUI()
 }
