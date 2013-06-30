@@ -31,16 +31,16 @@ func (c Card) String() string {
 	var ret string
 
 	switch c.face {
-	case 1, 2, 3, 4, 5, 6, 7, 8, 9:
-		ret = strconv.Itoa(c.face)
-	case 10:
-		ret = "J"
-	case 11:
-		ret = "Q"
-	case 12:
-		ret = "K"
-	case 13:
+	case 1:
 		ret = "A"
+	case 2, 3, 4, 5, 6, 7, 8, 9, 10:
+		ret = strconv.Itoa(c.face)
+	case 11:
+		ret = "J"
+	case 12:
+		ret = "Q"
+	case 13:
+		ret = "K"
 	default:
 		ret = "?"
 	}
@@ -67,30 +67,41 @@ func (c Card) Number() int {
 	return maxFace*int(c.suite) + (c.face - 1)
 }
 
-// ParseCard parses a card from a simple, two character string representation
-// where the first character specifies the face value as one of "123456789jqka"
-// and the second the suite as one of "shdc". Case is ignored.
+// ParseCard parses a card from a simple, two or three character string
+// representation where the first character specifies the face value as one of
+// "a23456789jqk" and the second the suite as one of "shdc". Case is ignored.
+// The 10 is the exception and takes three charactors.
 func ParseCard(s string) (card Card, ok bool) {
-	if len(s) != 2 {
-		return
-	}
+	var suiteRune uint8
 
-	switch s[0] {
-	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		card.face, _ = strconv.Atoi(s[:1])
-	case 'j', 'J':
+	switch len(s) {
+	case 2:
+		switch s[0] {
+		case 'a', 'A':
+			card.face = 1
+		case '2', '3', '4', '5', '6', '7', '8', '9':
+			card.face, _ = strconv.Atoi(s[:1])
+		case 'j', 'J':
+			card.face = 11
+		case 'q', 'Q':
+			card.face = 12
+		case 'k', 'K':
+			card.face = 13
+		default:
+			return
+		}
+		suiteRune = s[1]
+	case 3:
+		if s[:2] != "10" {
+			return
+		}
 		card.face = 10
-	case 'q', 'Q':
-		card.face = 11
-	case 'k', 'K':
-		card.face = 12
-	case 'a', 'A':
-		card.face = 13
+		suiteRune = s[2]
 	default:
 		return
 	}
 
-	switch s[1] {
+	switch suiteRune {
 	case 's', 'S':
 		card.suite = SuiteSpades
 	case 'h', 'H':

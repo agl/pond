@@ -1074,7 +1074,15 @@ When entering the cards enter the number or face of the card first, and then the
 		}
 
 		if update, ok := event.(Update); ok && update.name == "cardentry" && len(update.text) >= 2 {
-			if card, ok := panda.ParseCard(update.text[:2]); ok && stack.Add(card) {
+			cardText := update.text[:2]
+			if cardText == "10" {
+				if len(update.text) >= 3 {
+					cardText = update.text[:3]
+				} else {
+					continue SharedSecretEvent
+				}
+			}
+			if card, ok := panda.ParseCard(cardText); ok && stack.Add(card) {
 				point := nextPoint
 				if l := len(freeList); l > 0 {
 					point = freeList[l-1]
@@ -1088,7 +1096,11 @@ When entering the cards enter the number or face of the card first, and then the
 				}
 				markup := card.String()
 				if card.IsRed() {
-					markup = markup[:1] + "<span color=\"red\">" + markup[1:] + "</span>"
+					numLen := 1
+					if markup[0] == '1' {
+						numLen = 2
+					}
+					markup = markup[:numLen] + "<span color=\"red\">" + markup[numLen:] + "</span>"
 				}
 				name := fmt.Sprintf("card-%d,%d", point.col, point.row)
 				c.ui.Actions() <- GridSet{"cards", point.col, point.row, Button{
@@ -1103,7 +1115,7 @@ When entering the cards enter the number or face of the card first, and then the
 					}
 				}
 			}
-			c.ui.Actions() <- SetEntry{name: "cardentry", text: update.text[2:]}
+			c.ui.Actions() <- SetEntry{name: "cardentry", text: update.text[len(cardText):]}
 			c.ui.Signal()
 			continue
 		}

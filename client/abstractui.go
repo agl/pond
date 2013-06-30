@@ -1,6 +1,6 @@
 package main
 
-const uiActionsQueueLen = 8
+const uiActionsQueueLen = 256
 
 type UI interface {
 	Actions() chan<- interface{}
