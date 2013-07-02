@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>Pond - {{page.title}}</title>
+
+    <link href='https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz:extralight&text=Pond' rel='stylesheet' type='text/css'>
+    <link href='https://fonts.googleapis.com/css?family=Marcellus+SC' rel='stylesheet' type='text/css'>
+
+    <style>
+      @font-face {
+        font-family: Elena;
+        src: url('/fonts/ElenaWebBasicRegular.woff');
+      }
+      @font-face {
+        font-family: Elena;
+        src: url('/fonts/ElenaWebBasicRegularItalic.woff');
+        font-style: italic;
+      }
+      @font-face {
+        font-family: Elena;
+        src: url('/fonts/ElenaWebBasicBold.woff');
+        font-weight: bold;
+      }
+      @font-face {
+        font-family: Elena;
+        src: url('/fonts/ElenaWebBasicBoldItalic.woff');
+        font-weight: bold;
+        font-style: italic;
+      }
+
+      body {
+        font-family: Elena; serif;
+        text-align: justify;
+        max-width: 50em;
+        line-height: 1.8;
+        margin-left: auto;
+        margin-right: auto;
+        background-color: #fbfbfc;
+      }
+
+      h1, h2 {
+        font-family: 'Yanone Kaffeesatz', arial, serif;
+        font-weight: normal;
+      }
+
+      h1 a {
+        text-decoration: none;
+        color: black;
+      }
+
+      h1 {
+        font-size: 4.5em;
+        margin-bottom: 0;
+        padding-bottom: 0;
+        margin-top: 0;
+        padding-top: 0;
+      }
+
+      h2 {
+        margin-top: 0;
+        padding-top: 0;
+        margin-bottom: 2em;
+      }
+
+      h3 {
+        color: #222;
+        text-decoration: none;
+        margin-left: -2em;
+        font-weight: normal;
+	font-family: 'Marcellus SC', serif;
+      }
+
+    </style>
+  </head>
+
+  <body>
+    <h1>Pond</h1>
+    {{content}}
+  </body>
+</html>

@@ -1,0 +1,80 @@
+---
+layout: default
+title: User guide
+---
+
+<h3>User Guide</h3>
+
+<p>Before running Pond, you need to have <a href="https://torproject.org">Tor</a> running. Pond makes all connections over Tor. Simply having the <a href="https://www.torproject.org/projects/torbrowser.html.en">browser bundle</a> running should be sufficient. There's no danger to having Pond running without Tor, it'll simply not work.</p>
+
+<p>When first starting Pond, you'll be prompted to set a passphrase for Pond's <i>state file</i>, which should look like this:</p>
+
+<img src="images/set-passphrase.svg" style="width: 50em;">
+
+<p>The state file contains all of Pond's persistent state and may be encrypted with a passphrase if you wish. If you set a passphrase and then forget it, there is no recovery mechanism. If you believe that the security of your home directory is sufficiently good then you may omit the passphrase completely.</p>
+
+<p><b>The state file should not be copied.</b> Pond depends on the ability to delete past information and making copies of the state file may allow information that should have been deleted, to be recovered. Additionally, Pond is not designed to operate concurrently on multiple computers.</p>
+
+<p><i>Warning</i>: it is not currently clear how well modern computers, using SSDs, are able to delete anything. Deleted messages may be recoverable with current versions of Pond.</p>
+
+<p>&nbsp;</p>
+
+<p>Once the passphrase has been configured, you'll be prompted to create an account on a Pond server.</p>
+
+<img src="images/create-account.svg" style="width: 50em;">
+
+<p>A Pond server accepts and stores messages for you since most computers are not constantly connected to the Internet. Anyone can run a Pond server, and you can even run your own if you wish, but there is a default Pond server that is already filled out should you wish to use that one.</p>
+
+<p>Note that one doesn't provide a name, email or any other identifing information when creating a Pond account. A Pond server knows almost nothing about you. For details, see the threat model document.</p>
+
+<p>In order to prevent abuse, the Pond server may ask your computer to perform a certain amount of work before allowing an account to be created. Please be patient, esp on slower computers.</p>
+
+<p>Creating the account will be the first time that Pond tries to connect through Tor and so any errors at this point are likely caused by a problem with network. Ensure that Tor is running and listening for SOCKS5 connections on port 9050 or 9150.</p>
+
+<p>&nbsp;</p>
+
+<p>Once your account has been created, and every time you subsequently start Pond, you'll see the main screen.</p>
+
+<img src="images/main.svg" style="width: 50em;">
+
+<p><b>Unlike regular email, Pond is a closed system.</b> This means that you cannot send messages to another Pond user without establishing a relationship with them first. (This also means that nobody unwelcome can send messages to you - i.e. there is no spam.)</p>
+
+<p>So the first order to business is to add a contact by clicking on the &ldquo;Add&rdquo; button. (If you don't know anyone else using Pond then I'm afraid that you're rather stuck - such is the nature of network effects.)</p>
+
+<img src="images/add-contact1.svg" style="width: 50em;">
+
+<p>Feel free when chosing a name for the contact. The name must be locally unique, but will only be used to refer to the contact. The name that you choose for a contact will not be shared with anyone else.</p>
+
+<p>There are two methods of establishing a new contact - manual keying and shared secrets. Manual keying is suitable if you already have an existing secure channel to the contact, i.e. you have each other's PGP keys, or have OTR setup. Shared secrets are suitable for establishing a Pond contact from a physical meeting.</p>
+
+<p>&nbsp;</p>
+
+<p>If you select manual keying, then you'll see a key exchange message like this:</p>
+
+<img src="images/manual-keying.svg" style="width: 50em;">
+
+<p><b>The key exchange message must be confidential as well as authentic.</b> The key exchange message contains an authorisation key that allows the contact to send messages to you as well as public key material. Thus you must exchange it in a confidential as well as authentic manner. Don't put it on pastebin.</p>
+
+<p>Once you paste in the key exchange message from your contact and click &ldquo;Process&rdquo;, then the process is complete.</p>
+
+<p>&nbsp;</p>
+
+<p>Shared secret keying allows one to bootstrap secure communication from a physical meeting or perhaps a secure, but low capacity, channel.</p>
+
+<img src="images/shared-secret.svg" style="width: 50em;">
+
+<p>Shared secret keying involves contacting a central server (using Tor) and performing a key exchange based on the shared secret. In the screen shot above, the shared secret is a combination of a password, cards and a time. The key exchange only ensures that you end up connected to someone else who knows the same shared secret. You have to ensure that the only such person is who you intend it to be.</p>
+
+<p>The use of a password is hopefully obvious. However, since humans are bad at generating and remembering complex passwords, a method using one or two decks of playing cards is also supported. In order to do this, one party must bring a fresh deck of playing cards to the meeting. Then they must be shuffled (<a href="http://www-stat.stanford.edu/~cgates/PERSI/papers/bayer92.pdf">7 riffle shuffles is recommended</a>), cut into rough halves and then one person takes each half. Although the two halves will be different, either is sufficient to determine the contents of the other assuming that the deck was complete to start off with.</p>
+
+<p>(Using one deck is approximately 49 bits of entropy, two decks is about 100.)</p>
+
+<p>Agreeing on a common time (to the minute) for the meeting is recommended, even though it may be public information, because it serves as a salt.</p>
+
+<p>Once the shared secret has been entered, clicking &ldquo;Begin&rdquo; starts the process, which may take hours because the process cannot complete until both parties have started it. It is fine to close Pond while a shared secret keying is in progress: the state of the process will be saved and it's not neccessary for both parties to be online at the same time.</p>
+
+<p>&nbsp;</p>
+
+<p>Once a contact has been setup, messages can be exchanged. <b>Messages are ephemeral.</b> Pond is only software and cannot force the recipient of a message not to retain it, but <b>it is the social norm, and the default in the software, that messages are permanently erased a week from receipt</b>.</p>
+
+<img src="images/compose.svg" style="width: 50em;">
