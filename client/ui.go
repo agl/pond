@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"code.google.com/p/goprotobuf/proto"
-	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/panda"
+	pond "github.com/agl/pond/protos"
 )
 
 func (c *client) showInbox(id uint64) interface{} {
@@ -615,7 +615,7 @@ func (c *client) showContact(id uint64) interface{} {
 	}
 
 	if len(pandaMessage) > 0 {
-		entries = append(entries, nvEntry{ "PANDA KEY EXCHANGE", pandaMessage })
+		entries = append(entries, nvEntry{"PANDA KEY EXCHANGE", pandaMessage})
 	} else if len(contact.kxsBytes) > 0 {
 		var out bytes.Buffer
 		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
@@ -1070,7 +1070,7 @@ When entering the cards enter the number or face of the card first, and then the
 	minDecks := 1
 	timeEnabled := false
 
-	SharedSecretEvent:
+SharedSecretEvent:
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
@@ -1155,7 +1155,7 @@ When entering the cards enter the number or face of the card first, and then the
 			case click.name == "begin":
 				secret := panda.SharedSecret{
 					Secret: click.entries["shared"],
-					Cards: *stack,
+					Cards:  *stack,
 				}
 				if timeEnabled {
 					date := click.calendars["cal"]

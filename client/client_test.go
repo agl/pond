@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
-	"sync"
 	"errors"
 	"fmt"
 	"io"
@@ -14,12 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"code.google.com/p/goprotobuf/proto"
-	pond "github.com/agl/pond/protos"
 	panda "github.com/agl/pond/panda"
+	pond "github.com/agl/pond/protos"
 )
 
 // clientLogToStderr controls whether the TestClients will log to stderr during

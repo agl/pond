@@ -19,8 +19,8 @@ import (
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
-	"github.com/agl/pond/panda"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
 
@@ -2286,7 +2286,7 @@ func (c *client) Shutdown() {
 	if c.testing {
 		c.pandaWaitGroup.Wait()
 
-		ProcessPANDAUpdates:
+	ProcessPANDAUpdates:
 		for {
 			select {
 			case update := <-c.pandaChan:
@@ -2323,7 +2323,7 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) 
 	kx.Log = func(format string, args ...interface{}) {
 		serialised := kx.Marshal()
 		c.pandaChan <- pandaUpdate{
-			id: id,
+			id:         id,
 			serialised: serialised,
 		}
 		format = "Key exchange with " + name + ": " + format
@@ -2339,8 +2339,8 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) 
 	}
 
 	c.pandaChan <- pandaUpdate{
-		id: id,
-		err: err,
+		id:     id,
+		err:    err,
 		result: result,
 	}
 }
@@ -2404,31 +2404,31 @@ func (c *client) unsealPendingMessages(contact *Contact) {
 }
 
 type pandaUpdate struct {
-	id uint64
-	err error
-	result []byte
+	id         uint64
+	err        error
+	result     []byte
 	serialised []byte
 }
 
 func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
 	c := &client{
-		testing:         testing,
-		autoFetch:       autoFetch,
+		testing:   testing,
+		autoFetch: autoFetch,
 		newMeetingPlace: func() panda.MeetingPlace {
 			return &panda.HTTPMeetingPlace{
 				URL: "https://panda-key-exchange.appspot.com/exchange",
 			}
 		},
-		stateFilename:   stateFilename,
-		log:             NewLog(),
-		ui:              ui,
-		rand:            rand,
-		contacts:        make(map[uint64]*Contact),
-		drafts:          make(map[uint64]*Draft),
-		newMessageChan:  make(chan NewMessage),
-		messageSentChan: make(chan messageSendResult, 1),
-		backgroundChan:  make(chan interface{}, 8),
-		pandaChan:       make(chan pandaUpdate, 1),
+		stateFilename:     stateFilename,
+		log:               NewLog(),
+		ui:                ui,
+		rand:              rand,
+		contacts:          make(map[uint64]*Contact),
+		drafts:            make(map[uint64]*Draft),
+		newMessageChan:    make(chan NewMessage),
+		messageSentChan:   make(chan messageSendResult, 1),
+		backgroundChan:    make(chan interface{}, 8),
+		pandaChan:         make(chan pandaUpdate, 1),
 		pandaShutdownChan: make(chan bool),
 	}
 	c.log.toStderr = true

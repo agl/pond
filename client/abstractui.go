@@ -218,13 +218,13 @@ type Reset struct {
 }
 
 type Click struct {
-	name      string
-	entries   map[string]string
-	textViews map[string]string
-	combos    map[string]string
-	checks    map[string]bool
-	radios    map[string]int
-	calendars map[string]CalendarDate
+	name        string
+	entries     map[string]string
+	textViews   map[string]string
+	combos      map[string]string
+	checks      map[string]bool
+	radios      map[string]int
+	calendars   map[string]CalendarDate
 	spinButtons map[string]int
 }
 

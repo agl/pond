@@ -1,20 +1,20 @@
 package panda
 
 import (
+	"bufio"
 	"bytes"
+	"code.google.com/p/go.net/proxy"
+	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
-	"encoding/hex"
-	"bufio"
-	"time"
-	"io/ioutil"
 	"io"
+	"io/ioutil"
 	"net"
-	"crypto/tls"
 	"net/http"
 	"net/url"
-	"code.google.com/p/go.net/proxy"
+	"strings"
+	"time"
 )
 
 type HTTPMeetingPlace struct {
@@ -74,7 +74,7 @@ func (hmp *HTTPMeetingPlace) attemptExchange(log func(string, ...interface{}), i
 	defer conn.Close()
 
 	body := bytes.NewReader(message)
-	request, err := http.NewRequest("POST", hmp.URL + "/" + hex.EncodeToString(id), body)
+	request, err := http.NewRequest("POST", hmp.URL+"/"+hex.EncodeToString(id), body)
 	if err != nil {
 		return nil, nil, err
 	}

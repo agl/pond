@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const paddingSize = 1<<16
+const paddingSize = 1 << 16
 
 type pair struct {
 	messages [2][]byte
@@ -14,7 +14,7 @@ type pair struct {
 
 type SimpleMeetingPlace struct {
 	sync.Mutex
-	values map[string]*pair
+	values                 map[string]*pair
 	wakeChan, shutdownChan chan bool
 }
 
@@ -39,8 +39,8 @@ func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, me
 			if len(p.messages[i]) == 0 {
 				p.messages[i] = message
 				select {
-					case smp.wakeChan <- true:
-					default:
+				case smp.wakeChan <- true:
+				default:
 				}
 			}
 			for {
@@ -65,8 +65,8 @@ func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, me
 
 func NewSimpleMeetingPlace(shutdownChan chan bool) *SimpleMeetingPlace {
 	s := &SimpleMeetingPlace{
-		values: make(map[string]*pair),
-		wakeChan: make(chan bool),
+		values:       make(map[string]*pair),
+		wakeChan:     make(chan bool),
 		shutdownChan: shutdownChan,
 	}
 	return s

@@ -79,8 +79,8 @@ type MeetingPlace interface {
 type KeyExchange struct {
 	sync.Mutex
 
-	Log     func(string, ...interface{})
-	Testing bool
+	Log          func(string, ...interface{})
+	Testing      bool
 	ShutdownChan chan bool
 
 	rand         io.Reader
@@ -186,10 +186,10 @@ func (kx *KeyExchange) updateSerialised() {
 
 func (kx *KeyExchange) shouldStop() bool {
 	select {
-		case <-kx.ShutdownChan:
-			return true
-		default:
-			return false
+	case <-kx.ShutdownChan:
+		return true
+	default:
+		return false
 	}
 
 	panic("unreachable")
