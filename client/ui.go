@@ -671,6 +671,8 @@ func (c *client) showContact(id uint64) interface{} {
 			c.save()
 		}
 	}
+
+	panic("unreachable")
 }
 
 func (c *client) newContactUI(contact *Contact) interface{} {
@@ -835,6 +837,8 @@ Shared secret keying involves anonymously contacting a global, shared service an
 		c.ui.Actions() <- Sensitive{name: "shared", sensitive: false}
 		return nextFunc(contact, existing, nextRow)
 	}
+
+	panic("unreachable")
 }
 
 func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) interface{} {
