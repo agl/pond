@@ -128,4 +128,6 @@ func (hmp *HTTPMeetingPlace) Exchange(log func(string, ...interface{}), id, mess
 			delay = time.Hour
 		}
 	}
+
+	panic("unreachable")
 }

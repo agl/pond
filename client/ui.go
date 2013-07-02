@@ -820,9 +820,13 @@ Shared secret keying involves anonymously contacting a global, shared service an
 
 		switch click.name {
 		case "manual":
-			nextFunc = c.newContactManual
+			nextFunc = func(contact *Contact, existing bool, nextRow int) interface{} {
+				return c.newContactManual(contact, existing, nextRow)
+			}
 		case "shared":
-			nextFunc = c.newContactPanda
+			nextFunc = func(contact *Contact, existing bool, nextRow int) interface{} {
+				return c.newContactPanda(contact, existing, nextRow)
+			}
 		default:
 			continue
 		}

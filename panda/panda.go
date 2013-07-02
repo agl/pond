@@ -191,6 +191,8 @@ func (kx *KeyExchange) shouldStop() bool {
 		default:
 			return false
 	}
+
+	panic("unreachable")
 }
 
 func (kx *KeyExchange) Run() ([]byte, error) {
@@ -226,6 +228,8 @@ func (kx *KeyExchange) Run() ([]byte, error) {
 	default:
 		panic("unknown state")
 	}
+
+	panic("unreachable")
 }
 
 func (kx *KeyExchange) derivePassword() error {
