@@ -25,7 +25,7 @@ title: User guide
 
 <p>A Pond server accepts and stores messages for you since most computers are not constantly connected to the Internet. Anyone can run a Pond server, and you can even run your own if you wish, but there is a default Pond server that is already filled out should you wish to use that one.</p>
 
-<p>Note that one doesn't provide a name, email or any other identifing information when creating a Pond account. A Pond server knows almost nothing about you. For details, see the threat model document.</p>
+<p>Note that one doesn't provide a name, email or any other identifying information when creating a Pond account. A Pond server knows almost nothing about you. For details, see the threat model document.</p>
 
 <p>In order to prevent abuse, the Pond server may ask your computer to perform a certain amount of work before allowing an account to be created. Please be patient, esp on slower computers.</p>
 
@@ -43,7 +43,7 @@ title: User guide
 
 <img src="images/add-contact1.svg" style="width: 50em;">
 
-<p>Feel free when chosing a name for the contact. The name must be locally unique, but will only be used to refer to the contact. The name that you choose for a contact will not be shared with anyone else.</p>
+<p>Feel free when choosing a name for the contact. The name must be locally unique, but will only be used to refer to the contact. The name that you choose for a contact will not be shared with anyone else.</p>
 
 <p>There are two methods of establishing a new contact - manual keying and shared secrets. Manual keying is suitable if you already have an existing secure channel to the contact, i.e. you have each other's PGP keys, or have OTR setup. Shared secrets are suitable for establishing a Pond contact from a physical meeting.</p>
 
@@ -71,10 +71,28 @@ title: User guide
 
 <p>Agreeing on a common time (to the minute) for the meeting is recommended, even though it may be public information, because it serves as a salt.</p>
 
-<p>Once the shared secret has been entered, clicking &ldquo;Begin&rdquo; starts the process, which may take hours because the process cannot complete until both parties have started it. It is fine to close Pond while a shared secret keying is in progress: the state of the process will be saved and it's not neccessary for both parties to be online at the same time.</p>
+<p>Once the shared secret has been entered, clicking &ldquo;Begin&rdquo; starts the process, which may take hours because the process cannot complete until both parties have started it. It is fine to close Pond while a shared secret keying is in progress: the state of the process will be saved and it's not necessary for both parties to be online at the same time.</p>
 
 <p>&nbsp;</p>
 
 <p>Once a contact has been setup, messages can be exchanged. <b>Messages are ephemeral.</b> Pond is only software and cannot force the recipient of a message not to retain it, but <b>it is the social norm, and the default in the software, that messages are permanently erased a week from receipt</b>.</p>
 
 <img src="images/compose.svg" style="width: 50em;">
+
+<p>When typing and attaching files, you'll see that the size counter changes. Pond messages are always a fixed size in order to make them indistinguishable. But while a short message can always be padded out to the correct size, a long message cannot always be compressed down to fit. While it's unlikely that you'll hit the limit while typing, attachments can quickly balloon the size of a message.</p>
+
+<p>In order to attach a file to a message, click the plus. You'll be prompted to select a file. If the file is small enough then it'll be included in the message directly. Otherwise you'll be prompted to either save an encrypted version of the file, or to upload the file. These are both methods where encryption is used to separate the bulk transfer of the file from from the security of that transfer. By encrypting the file, the problem of securing the transfer is reduced to the problem of securing the encryption key, and the encryption key is small enough to fit in the Pond message. The bulk transfer is called a &ldquo;detachment&rdquo;.</p>
+
+<p>By opting to save an encrypted version of the file, you are taking on the job of getting the encrypted file to the recipient yourself. For huge files, this may be the only method. Perhaps you'll put the file on a USB stick and physically hand it to them.</p>
+
+<p>For modest sized detachments (up to a few megabytes - i.e. something that you might attach to an email), you can upload it to your Pond server. The advantage of this is that the upload will occur over Tor and that it's convenient. Your Pond server will have a limit on the amount that it'll store for you however and be aware that the upload is visible to anyone watching your network connection. The contents of the upload are hidden, of course, but the rough size of the file can be observed during the transfer. Likewise, the rough size of the file can be observed when the recipient downloads it.</p>
+
+<p>&nbsp;</p>
+
+<p>When you send a message, it'll appear in your outbox with a red dot.</p>
+
+<img src="images/outbox.svg" style="width: 50em;">
+
+<p>The red dot means that the message hasn't been transmitted yet. Pond doesn't transmit messages as needed because that would disclose when messages were being sent. Instead it transmits messages at random, whether there's anything to be sent or not. When there's a real message pending, it has to wait until the next randomly timed slot, which could be many minutes.</p>
+
+<p>Once the message has been transmitted, the dot will turn yellow. The dot will turn green when the message has been &ldquo;acknowledged&rdquo;. An acknowledgment occurs either when a reply to the message is received, or a special acknowledgment message is received (which is actually just an empty reply). Acknowledgments exist because it's often difficult to know whether a message has been read and replying to every one can be awkward. An acknowledgment is never sent automatically, but you should expect to acknowledge (or reply to) every message that you receive.</p>
