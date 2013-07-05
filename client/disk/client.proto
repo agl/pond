@@ -85,3 +85,23 @@ message State {
 	repeated Outbox outbox = 10;
 	repeated Draft drafts = 11;
 }
+
+message Header {
+	optional int32 nonce_smear_copies = 1 [ default = 1365 ];
+	required bytes kdf_salt = 2;
+
+	message SCrypt {
+		optional int32 N = 2 [ default = 32768 ];
+		optional int32 r = 3 [ default = 16 ];
+		optional int32 p = 4 [ default = 1 ];
+	}
+	optional SCrypt scrypt = 3;
+
+	message TPM {
+		required uint32 index = 1;
+		required bytes salt = 2;
+	}
+	optional TPM tpm_nvram = 4;
+
+	optional bool no_erasure_storage = 5;
+}
