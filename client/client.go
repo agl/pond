@@ -60,6 +60,7 @@ const (
 	fontMainMono    = "Liberation Mono 10"
 )
 
+// uiState values are used for synchronisation with tests.
 const (
 	uiStateInvalid = iota
 	uiStateLoading
@@ -99,7 +100,9 @@ type client struct {
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
 	stateFilename string
-	stateLock     *disk.Lock
+	// stateLock protects the state against concurrent access by another
+	// program.
+	stateLock *disk.Lock
 	// diskSalt contains the scrypt salt used to derive the state
 	// encryption key.
 	diskSalt [disk.SCryptSaltLen]byte
@@ -131,7 +134,7 @@ type client struct {
 	writerChan chan []byte
 	// writerDone is a channel that is closed by the disk goroutine when it
 	// has finished all pending updates.
-	writerDone chan bool
+	writerDone chan struct{}
 	// fetchNowChan is the channel that the network goroutine reads from
 	// that triggers an immediate network transaction. Mostly intended for
 	// testing.
@@ -147,6 +150,7 @@ type client struct {
 
 	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
 
+	// outbox contains all outgoing messages.
 	outbox   []*queuedMessage
 	drafts   map[uint64]*Draft
 	contacts map[uint64]*Contact
@@ -162,7 +166,9 @@ type client struct {
 	// messageSentChan receives the ids of messages that have been sent by
 	// the network goroutine.
 	messageSentChan chan messageSendResult
-	backgroundChan  chan interface{}
+	// backgroundChan is used for signals from background processes - e.g.
+	// detachment uploads.
+	backgroundChan chan interface{}
 	// pandaChan receives messages from goroutines in runPANDA about
 	// changes to PANDA key exchange state.
 	pandaChan chan pandaUpdate
@@ -192,12 +198,16 @@ type revocationUpdate struct {
 // pendingDecryption represents a detachment decryption/download operation
 // that's in progress. These are not saved to disk.
 type pendingDecryption struct {
-	index  int
+	// index is used by the UI code and indexes the list of detachments in
+	// a message.
+	index int
+	// cancel is a thunk that causes the task to be canceled at some point
+	// in the future.
 	cancel func()
 }
 
-// InboxMessage represents a message in the client's inbox. (Although acks also
-// appear as InboxMessages, but their message.Body is empty.)
+// InboxMessage represents a message in the client's inbox. (Acks also appear
+// as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
 	id           uint64
 	read         bool
@@ -226,7 +236,8 @@ type NewMessage struct {
 type Contact struct {
 	// id is only locally valid.
 	id uint64
-	// name is the friendly name that the user chose for this contact.
+	// name is the friendly name that the user chose for this contact. It
+	// is unique for all contacts.
 	name string
 	// isPending is true if we haven't received a key exchange message from
 	// this contact.
@@ -239,7 +250,7 @@ type Contact struct {
 	groupKey, myGroupKey *bbssig.MemberKey
 	// previousTags contains bbssig tags that were previously used by this
 	// contact. The tag of a contact changes when a recovation is
-	// processed, but old messages may still be pending.
+	// processed, but old messages may still be queued.
 	previousTags []previousTag
 	// generation is the current group generation number that we know for
 	// this contact.
@@ -469,7 +480,7 @@ func (c *client) loadUI() {
 	}
 
 	if newAccount {
-		file, err := os.Create(c.stateFilename)
+		file, err := os.OpenFile(c.stateFilename, os.O_CREATE|os.O_WRONLY, 0600)
 		if err == nil {
 			c.stateLock, ok = disk.LockStateFile(file)
 			if !ok {
@@ -484,7 +495,7 @@ func (c *client) loadUI() {
 	}
 
 	c.writerChan = make(chan []byte)
-	c.writerDone = make(chan bool)
+	c.writerDone = make(chan struct{})
 	c.fetchNowChan = make(chan chan bool, 1)
 	c.revocationUpdateChan = make(chan revocationUpdate, 8)
 
@@ -1167,6 +1178,8 @@ func (i ComposeDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detac
 	i.draft.detachments = append(i.draft.detachments, detachment)
 }
 
+// maybeProcessDetachmentMsg is called to process a possible message from a
+// background, detachment task. It returns true if event was handled.
 func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
 	if derr, ok := event.(DetachmentError); ok {
 		id := derr.id

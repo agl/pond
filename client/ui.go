@@ -118,8 +118,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			{
 				{1, 1, Button{
 					widgetBase: widgetBase{
-						name:        "delete",
-						insensitive: true,
+						name: "delete",
 					},
 					text: "Delete Now",
 				}},
@@ -136,6 +135,16 @@ func (c *client) showInbox(id uint64) interface{} {
 
 	c.ui.Actions() <- SetChild{name: "right", child: rightPane("RECEIVED MESSAGE", left, right, main)}
 
+	// The UI names widgets with strings so these prefixes are used to
+	// generate names for the dynamic parts of the UI.
+	const (
+		detachmentDecryptPrefix  = "detachment-decrypt-"
+		detachmentProgressPrefix = "detachment-progress-"
+		detachmentDownloadPrefix = "detachment-download-"
+		detachmentSavePrefix     = "detachment-save-"
+		attachmentPrefix         = "attachment-"
+	)
+
 	if msg.message != nil && len(msg.message.Files) != 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
 
@@ -147,7 +156,7 @@ func (c *client) showInbox(id uint64) interface{} {
 					text:       filename,
 				}},
 				{1, 1, Button{
-					widgetBase: widgetBase{name: fmt.Sprintf("attachment-%d", i)},
+					widgetBase: widgetBase{name: fmt.Sprintf("%s%d", attachmentPrefix, i)},
 					text:       "Save",
 				}},
 			})
@@ -183,25 +192,25 @@ func (c *client) showInbox(id uint64) interface{} {
 				}},
 				{1, 1, Button{
 					widgetBase: widgetBase{
-						name:        fmt.Sprintf("detachment-decrypt-%d", i),
+						name:        fmt.Sprintf("%s%d", detachmentDecryptPrefix, i),
 						padding:     3,
 						insensitive: pending != nil,
 					},
-					text: "Decrypt file",
+					text: "Decrypt local file with key",
 				}},
 				{1, 1, Button{
 					widgetBase: widgetBase{
-						name:    fmt.Sprintf("detachment-save-%d", i),
+						name:    fmt.Sprintf("%s%d", detachmentSavePrefix, i),
 						padding: 3,
 					},
-					text: "Save",
+					text: "Save key to disk",
 				}},
 			}
 			if detachment.Url != nil && len(*detachment.Url) > 0 {
 				row = append(row, GridE{1, 1,
 					Button{
 						widgetBase: widgetBase{
-							name:        fmt.Sprintf("detachment-download-%d", i),
+							name:        fmt.Sprintf("%s%d", detachmentDownloadPrefix, i),
 							padding:     3,
 							insensitive: pending != nil,
 						},
@@ -214,7 +223,7 @@ func (c *client) showInbox(id uint64) interface{} {
 				progressRow = append(progressRow, GridE{4, 1,
 					Progress{
 						widgetBase: widgetBase{
-							name: fmt.Sprintf("detachment-progress-%d", i),
+							name: fmt.Sprintf("%s%d", detachmentProgressPrefix, i),
 						},
 					},
 				})
@@ -232,6 +241,7 @@ func (c *client) showInbox(id uint64) interface{} {
 		lhsNextRow++
 		c.ui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
 		lhsNextRow++
+		c.ui.Signal()
 	}
 
 	c.ui.Actions() <- UIState{uiStateInbox}
@@ -239,40 +249,45 @@ func (c *client) showInbox(id uint64) interface{} {
 
 	detachmentUI := InboxDetachmentUI{msg, c.ui}
 
-	const detachmentDecryptPrefix = "detachment-decrypt-"
-	const detachmentProgressPrefix = "detachment-progress-"
-	const detachmentDownloadPrefix = "detachment-download-"
-
 	if msg.decryptions == nil {
 		msg.decryptions = make(map[uint64]*pendingDecryption)
 	}
 
+NextEvent:
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
 			return event
 		}
 
-		type attachmentSaveIndex int
-		type detachmentSaveIndex int
-		type detachmentDecryptIndex int
-		type detachmentDecryptInput struct {
-			index  int
-			inPath string
-		}
-		type detachmentDownloadIndex int
+		// These types are returned by the UI from a file dialog and
+		// serve to identify the actions that should be taken with the
+		// resulting filename.
+		type (
+			attachmentSaveIndex    int
+			detachmentSaveIndex    int
+			detachmentDecryptIndex int
+			detachmentDecryptInput struct {
+				index  int
+				inPath string
+			}
+			detachmentDownloadIndex int
+		)
 
 		if open, ok := event.(OpenResult); ok && open.ok {
 			switch i := open.arg.(type) {
 			case attachmentSaveIndex:
+				// Save an attachment to disk.
 				ioutil.WriteFile(open.path, msg.message.Files[i].Contents, 0600)
 			case detachmentSaveIndex:
+				// Save a detachment key to disk.
 				bytes, err := proto.Marshal(msg.message.DetachedFiles[i])
 				if err != nil {
 					panic(err)
 				}
 				ioutil.WriteFile(open.path, bytes, 0600)
 			case detachmentDecryptIndex:
+				// Decrypt a local file with a detachment key.
 				c.ui.Actions() <- FileOpen{
 					save:  true,
 					title: "Save decrypted file",
@@ -283,6 +298,14 @@ func (c *client) showInbox(id uint64) interface{} {
 				}
 				c.ui.Signal()
 			case detachmentDecryptInput:
+				// Decrypt a local file with a detachment key,
+				// after the second save dialog - which prompts
+				// for where to write the new key.
+				for _, decryption := range msg.decryptions {
+					if decryption.index == i.index {
+						continue NextEvent
+					}
+				}
 				c.ui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i.index),
 					sensitive: false,
@@ -297,7 +320,7 @@ func (c *client) showInbox(id uint64) interface{} {
 					row: []GridE{
 						{4, 1, Progress{
 							widgetBase: widgetBase{
-								name: fmt.Sprintf("detachment-progress-%d", i.index),
+								name: fmt.Sprintf("%s%d", detachmentProgressPrefix, i.index),
 							},
 						}},
 					},
@@ -309,6 +332,12 @@ func (c *client) showInbox(id uint64) interface{} {
 				}
 				c.ui.Signal()
 			case detachmentDownloadIndex:
+				// Download a detachment.
+				for _, decryption := range msg.decryptions {
+					if decryption.index == int(i) {
+						continue NextEvent
+					}
+				}
 				c.ui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i),
 					sensitive: false,
@@ -319,11 +348,11 @@ func (c *client) showInbox(id uint64) interface{} {
 				}
 				c.ui.Actions() <- InsertRow{
 					name: "detachment-grid",
-					pos:  int(i) + 1,
+					pos:  int(i)*2 + 1,
 					row: []GridE{
 						{4, 1, Progress{
 							widgetBase: widgetBase{
-								name: fmt.Sprintf("detachment-progress-%d", int(i)),
+								name: fmt.Sprintf("%s%d", detachmentProgressPrefix, int(i)),
 							},
 						}},
 					},
@@ -348,8 +377,8 @@ func (c *client) showInbox(id uint64) interface{} {
 		if !ok {
 			continue
 		}
-		const attachmentPrefix = "attachment-"
-		if strings.HasPrefix(click.name, attachmentPrefix) {
+		switch {
+		case strings.HasPrefix(click.name, attachmentPrefix):
 			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
 			c.ui.Actions() <- FileOpen{
 				save:  true,
@@ -358,9 +387,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			}
 			c.ui.Signal()
 			continue
-		}
-		const detachmentSavePrefix = "detachment-save-"
-		if strings.HasPrefix(click.name, detachmentSavePrefix) {
+		case strings.HasPrefix(click.name, detachmentSavePrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentSavePrefix):])
 			c.ui.Actions() <- FileOpen{
 				save:  true,
@@ -369,8 +396,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			}
 			c.ui.Signal()
 			continue
-		}
-		if strings.HasPrefix(click.name, detachmentDecryptPrefix) {
+		case strings.HasPrefix(click.name, detachmentDecryptPrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentDecryptPrefix):])
 			c.ui.Actions() <- FileOpen{
 				title: "Select encrypted file",
@@ -378,8 +404,7 @@ func (c *client) showInbox(id uint64) interface{} {
 			}
 			c.ui.Signal()
 			continue
-		}
-		if strings.HasPrefix(click.name, detachmentDownloadPrefix) {
+		case strings.HasPrefix(click.name, detachmentDownloadPrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentDownloadPrefix):])
 			c.ui.Actions() <- FileOpen{
 				title: "Save to",
@@ -387,18 +412,31 @@ func (c *client) showInbox(id uint64) interface{} {
 			}
 			c.ui.Signal()
 			continue
-		}
-		switch click.name {
-		case "ack":
+		case click.name == "ack":
 			c.ui.Actions() <- Sensitive{name: "ack", sensitive: false}
 			c.ui.Signal()
 			msg.acked = true
 			c.sendAck(msg)
 			c.ui.Actions() <- UIState{uiStateInbox}
 			c.ui.Signal()
-		case "reply":
+		case click.name == "reply":
 			c.inboxUI.Deselect()
 			return c.composeUI(nil, msg)
+		case click.name == "delete":
+			c.inboxUI.Remove(msg.id)
+			newInbox := make([]*InboxMessage, 0, len(c.inbox))
+			for _, inboxMsg := range c.inbox {
+				if inboxMsg == msg {
+					continue
+				}
+				newInbox = append(newInbox, inboxMsg)
+			}
+			c.inbox = newInbox
+			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.ui.Actions() <- UIState{uiStateMain}
+			c.ui.Signal()
+			c.save()
+			return nil
 		}
 	}
 
