@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	crypto_rand "crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -416,37 +417,29 @@ func do() bool {
 		return false
 	}
 
-	stateFile, err := os.Open(*stateFileName)
+	stateFile := &disk.StateFile{
+		Path: *stateFileName,
+		Rand: crypto_rand.Reader,
+		Log: func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		},
+	}
+
+	stateLock, err := stateFile.Lock(false /* don't create */)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open state file: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Cannot open state file: %s\n", err)
 		return false
 	}
-	defer stateFile.Close()
-
-	stateLock, ok := disk.LockStateFile(stateFile)
-	if !ok {
+	if stateLock == nil {
 		fmt.Fprintf(os.Stderr, "Cannot obtain lock on state file\n")
 		return false
 	}
 	defer stateLock.Close()
 
-	encrypted, err := ioutil.ReadAll(stateFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read state file: %s\n", err)
-		return false
-	}
-
-	salt, ok := disk.GetSCryptSaltFromState(encrypted)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "State file is too short to be valid\n")
-		return false
-	}
-
 	var state *disk.State
-	var key [32]byte
-
+	var passphrase string
 	for {
-		state, err = disk.LoadState(encrypted, &key)
+		state, err = stateFile.Read(passphrase)
 		if err == nil {
 			break
 		}
@@ -456,14 +449,13 @@ func do() bool {
 		}
 
 		fmt.Fprintf(os.Stderr, "Passphrase: ")
-		password, err := terminal.ReadPassword(0)
+		passphraseBytes, err := terminal.ReadPassword(0)
 		fmt.Fprintf(os.Stderr, "\n")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to read password\n")
 			return false
 		}
-		keySlice, err := disk.DeriveKey(string(password), &salt)
-		copy(key[:], keySlice)
+		passphrase = string(passphraseBytes)
 	}
 
 	tempDir, err := system.SafeTempDir()
@@ -527,10 +519,10 @@ func do() bool {
 		os.Stdin.Read(buf[:])
 	}
 
-	states := make(chan []byte)
-	done := make(chan bool)
-	go disk.StateWriter(*stateFileName, &key, &salt, states, done)
-	states <- newStateSerialized
+	states := make(chan disk.NewState)
+	done := make(chan struct{})
+	go stateFile.StartWriter(states, done)
+	states <- disk.NewState{newStateSerialized, false}
 	close(states)
 	<-done
 

@@ -14,6 +14,108 @@ var _ = proto.Marshal
 var _ = &json.SyntaxError{}
 var _ = math.Inf
 
+type Header struct {
+	NonceSmearCopies *int32         `protobuf:"varint,1,opt,name=nonce_smear_copies,def=1365" json:"nonce_smear_copies,omitempty"`
+	KdfSalt          []byte         `protobuf:"bytes,2,opt,name=kdf_salt" json:"kdf_salt,omitempty"`
+	Scrypt           *Header_SCrypt `protobuf:"bytes,3,opt,name=scrypt" json:"scrypt,omitempty"`
+	TpmNvram         *Header_TPM    `protobuf:"bytes,4,opt,name=tpm_nvram" json:"tpm_nvram,omitempty"`
+	NoErasureStorage *bool          `protobuf:"varint,5,opt,name=no_erasure_storage" json:"no_erasure_storage,omitempty"`
+	XXX_unrecognized []byte         `json:"-"`
+}
+
+func (this *Header) Reset()         { *this = Header{} }
+func (this *Header) String() string { return proto.CompactTextString(this) }
+func (*Header) ProtoMessage()       {}
+
+const Default_Header_NonceSmearCopies int32 = 1365
+
+func (this *Header) GetNonceSmearCopies() int32 {
+	if this != nil && this.NonceSmearCopies != nil {
+		return *this.NonceSmearCopies
+	}
+	return Default_Header_NonceSmearCopies
+}
+
+func (this *Header) GetKdfSalt() []byte {
+	if this != nil {
+		return this.KdfSalt
+	}
+	return nil
+}
+
+func (this *Header) GetScrypt() *Header_SCrypt {
+	if this != nil {
+		return this.Scrypt
+	}
+	return nil
+}
+
+func (this *Header) GetTpmNvram() *Header_TPM {
+	if this != nil {
+		return this.TpmNvram
+	}
+	return nil
+}
+
+func (this *Header) GetNoErasureStorage() bool {
+	if this != nil && this.NoErasureStorage != nil {
+		return *this.NoErasureStorage
+	}
+	return false
+}
+
+type Header_SCrypt struct {
+	N                *int32 `protobuf:"varint,2,opt,def=32768" json:"N,omitempty"`
+	R                *int32 `protobuf:"varint,3,opt,name=r,def=16" json:"r,omitempty"`
+	P                *int32 `protobuf:"varint,4,opt,name=p,def=1" json:"p,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *Header_SCrypt) Reset()         { *this = Header_SCrypt{} }
+func (this *Header_SCrypt) String() string { return proto.CompactTextString(this) }
+func (*Header_SCrypt) ProtoMessage()       {}
+
+const Default_Header_SCrypt_N int32 = 32768
+const Default_Header_SCrypt_R int32 = 16
+const Default_Header_SCrypt_P int32 = 1
+
+func (this *Header_SCrypt) GetN() int32 {
+	if this != nil && this.N != nil {
+		return *this.N
+	}
+	return Default_Header_SCrypt_N
+}
+
+func (this *Header_SCrypt) GetR() int32 {
+	if this != nil && this.R != nil {
+		return *this.R
+	}
+	return Default_Header_SCrypt_R
+}
+
+func (this *Header_SCrypt) GetP() int32 {
+	if this != nil && this.P != nil {
+		return *this.P
+	}
+	return Default_Header_SCrypt_P
+}
+
+type Header_TPM struct {
+	Index            *uint32 `protobuf:"varint,1,req,name=index" json:"index,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Header_TPM) Reset()         { *this = Header_TPM{} }
+func (this *Header_TPM) String() string { return proto.CompactTextString(this) }
+func (*Header_TPM) ProtoMessage()       {}
+
+func (this *Header_TPM) GetIndex() uint32 {
+	if this != nil && this.Index != nil {
+		return *this.Index
+	}
+	return 0
+}
+
 type Contact struct {
 	Id                  *uint64                `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
 	Name                *string                `protobuf:"bytes,2,req,name=name" json:"name,omitempty"`
@@ -417,6 +519,7 @@ type State struct {
 	GroupPrivate             []byte                 `protobuf:"bytes,6,req,name=group_private" json:"group_private,omitempty"`
 	PreviousGroupPrivateKeys []*State_PreviousGroup `protobuf:"bytes,12,rep,name=previous_group_private_keys" json:"previous_group_private_keys,omitempty"`
 	Generation               *uint32                `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
+	LastErasureStorageTime   *int64                 `protobuf:"varint,13,opt,name=last_erasure_storage_time" json:"last_erasure_storage_time,omitempty"`
 	Contacts                 []*Contact             `protobuf:"bytes,8,rep,name=contacts" json:"contacts,omitempty"`
 	Inbox                    []*Inbox               `protobuf:"bytes,9,rep,name=inbox" json:"inbox,omitempty"`
 	Outbox                   []*Outbox              `protobuf:"bytes,10,rep,name=outbox" json:"outbox,omitempty"`
@@ -484,6 +587,13 @@ func (this *State) GetGeneration() uint32 {
 	return 0
 }
 
+func (this *State) GetLastErasureStorageTime() int64 {
+	if this != nil && this.LastErasureStorageTime != nil {
+		return *this.LastErasureStorageTime
+	}
+	return 0
+}
+
 func (this *State) GetContacts() []*Contact {
 	if this != nil {
 		return this.Contacts
@@ -542,116 +652,6 @@ func (this *State_PreviousGroup) GetExpired() int64 {
 		return *this.Expired
 	}
 	return 0
-}
-
-type Header struct {
-	NonceSmearCopies *int32         `protobuf:"varint,1,opt,name=nonce_smear_copies,def=1365" json:"nonce_smear_copies,omitempty"`
-	KdfSalt          []byte         `protobuf:"bytes,2,req,name=kdf_salt" json:"kdf_salt,omitempty"`
-	Scrypt           *Header_SCrypt `protobuf:"bytes,3,opt,name=scrypt" json:"scrypt,omitempty"`
-	TpmNvram         *Header_TPM    `protobuf:"bytes,4,opt,name=tpm_nvram" json:"tpm_nvram,omitempty"`
-	NoErasureStorage *bool          `protobuf:"varint,5,opt,name=no_erasure_storage" json:"no_erasure_storage,omitempty"`
-	XXX_unrecognized []byte         `json:"-"`
-}
-
-func (this *Header) Reset()         { *this = Header{} }
-func (this *Header) String() string { return proto.CompactTextString(this) }
-func (*Header) ProtoMessage()       {}
-
-const Default_Header_NonceSmearCopies int32 = 1365
-
-func (this *Header) GetNonceSmearCopies() int32 {
-	if this != nil && this.NonceSmearCopies != nil {
-		return *this.NonceSmearCopies
-	}
-	return Default_Header_NonceSmearCopies
-}
-
-func (this *Header) GetKdfSalt() []byte {
-	if this != nil {
-		return this.KdfSalt
-	}
-	return nil
-}
-
-func (this *Header) GetScrypt() *Header_SCrypt {
-	if this != nil {
-		return this.Scrypt
-	}
-	return nil
-}
-
-func (this *Header) GetTpmNvram() *Header_TPM {
-	if this != nil {
-		return this.TpmNvram
-	}
-	return nil
-}
-
-func (this *Header) GetNoErasureStorage() bool {
-	if this != nil && this.NoErasureStorage != nil {
-		return *this.NoErasureStorage
-	}
-	return false
-}
-
-type Header_SCrypt struct {
-	N                *int32 `protobuf:"varint,2,opt,def=32768" json:"N,omitempty"`
-	R                *int32 `protobuf:"varint,3,opt,name=r,def=16" json:"r,omitempty"`
-	P                *int32 `protobuf:"varint,4,opt,name=p,def=1" json:"p,omitempty"`
-	XXX_unrecognized []byte `json:"-"`
-}
-
-func (this *Header_SCrypt) Reset()         { *this = Header_SCrypt{} }
-func (this *Header_SCrypt) String() string { return proto.CompactTextString(this) }
-func (*Header_SCrypt) ProtoMessage()       {}
-
-const Default_Header_SCrypt_N int32 = 32768
-const Default_Header_SCrypt_R int32 = 16
-const Default_Header_SCrypt_P int32 = 1
-
-func (this *Header_SCrypt) GetN() int32 {
-	if this != nil && this.N != nil {
-		return *this.N
-	}
-	return Default_Header_SCrypt_N
-}
-
-func (this *Header_SCrypt) GetR() int32 {
-	if this != nil && this.R != nil {
-		return *this.R
-	}
-	return Default_Header_SCrypt_R
-}
-
-func (this *Header_SCrypt) GetP() int32 {
-	if this != nil && this.P != nil {
-		return *this.P
-	}
-	return Default_Header_SCrypt_P
-}
-
-type Header_TPM struct {
-	Index            *uint32 `protobuf:"varint,1,req,name=index" json:"index,omitempty"`
-	Salt             []byte  `protobuf:"bytes,2,req,name=salt" json:"salt,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
-}
-
-func (this *Header_TPM) Reset()         { *this = Header_TPM{} }
-func (this *Header_TPM) String() string { return proto.CompactTextString(this) }
-func (*Header_TPM) ProtoMessage()       {}
-
-func (this *Header_TPM) GetIndex() uint32 {
-	if this != nil && this.Index != nil {
-		return *this.Index
-	}
-	return 0
-}
-
-func (this *Header_TPM) GetSalt() []byte {
-	if this != nil {
-		return this.Salt
-	}
-	return nil
 }
 
 func init() {

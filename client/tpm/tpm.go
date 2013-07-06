@@ -11,8 +11,14 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 )
+
+func Present() bool {
+	_, err := os.Stat("/sys/class/misc/tpm0")
+	return err == nil
+}
 
 func isError(result C.TSS_RESULT) bool {
 	return result != C.TSS_SUCCESS
@@ -44,7 +50,7 @@ const (
 	// The NVRAM index already exists.
 	ErrCodeNVRAMAlreadyExists = 0x13b
 	// The password is incorrect.
-	ErrCodeAuthorisation = 0x3b
+	ErrCodeAuthentication = 1
 )
 
 type Object struct {

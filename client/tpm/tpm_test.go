@@ -4,7 +4,6 @@ import (
 	"testing"
 )
 
-
 func TestConnect(t *testing.T) {
 	ctx, err := NewContext()
 	if err != nil {
@@ -35,11 +34,11 @@ func TestConnect(t *testing.T) {
 	policy.AssignTo(&nvram.Object)
 
 	/*
-	nvram.Index = 43
-	nvram.Size = 32
-	nvram.Permissions = PermWriteAllAtOnce | PermAuthWrite | PermAuthRead
-	if err := nvram.Create(); err != nil {
-		t.Fatalf("error creating NVRAM: %s", err)
-	}
+		nvram.Index = 43
+		nvram.Size = 32
+		nvram.Permissions = PermWriteAllAtOnce | PermAuthWrite | PermAuthRead
+		if err := nvram.Create(); err != nil {
+			t.Fatalf("error creating NVRAM: %s", err)
+		}
 	*/
 }

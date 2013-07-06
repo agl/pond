@@ -169,6 +169,9 @@ func (t *TPM) Read(key *[kdfKeyLen]byte) (*[erasureKeyLen]byte, error) {
 	var buf [erasureKeyLen]byte
 	n, err := nvram.Read(buf[:])
 	if err != nil {
+		if tpmErr, ok := err.(tpm.Error); ok && tpmErr.Code() == tpm.ErrCodeAuthentication {
+			return nil, BadPasswordError
+		}
 		return nil, err
 	}
 	if n != erasureKeyLen {

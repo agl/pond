@@ -4,6 +4,37 @@ import "github.com/agl/pond/protos/pond.proto";
 
 // These protobufs are used for serialising the client's state to disk.
 
+// Header is placed at the beginning of the state file and is *unencrypted and
+// unauthenticated*. Its purpose is only to describe how to decrypt the
+// remainder of the file.
+message Header {
+	// nonce_smear_copies contains the number of copies of the nonce that
+	// follow the header. Each copy of the nonce is different and, XORed
+	// together, they result in the real nonce. The intent is that this may
+	// make recovery of old state files more difficult on HDDs.
+	optional int32 nonce_smear_copies = 1 [ default = 1365 ];
+	// kdf_salt contains the salt for the KDF function.
+	optional bytes kdf_salt = 2;
+
+	message SCrypt {
+		optional int32 N = 2 [ default = 32768 ];
+		optional int32 r = 3 [ default = 16 ];
+		optional int32 p = 4 [ default = 1 ];
+	}
+	optional SCrypt scrypt = 3;
+
+	// TPM contains information about an erasure key stored in TPM NVRAM.
+	message TPM {
+		required uint32 index = 1;
+	}
+	optional TPM tpm_nvram = 4;
+
+	// no_erasure_storage exists to signal that there is no erasure storage
+	// for this state file, as opposed to the state file using a method
+	// that isn't recognised by the client.
+	optional bool no_erasure_storage = 5;
+}
+
 message Contact {
 	required fixed64 id = 1;
 	required string name = 2;
@@ -79,29 +110,10 @@ message State {
 	repeated PreviousGroup previous_group_private_keys = 12;
 
 	required uint32 generation = 7;
+	optional int64 last_erasure_storage_time = 13;
 
 	repeated Contact contacts = 8;
 	repeated Inbox inbox = 9;
 	repeated Outbox outbox = 10;
 	repeated Draft drafts = 11;
-}
-
-message Header {
-	optional int32 nonce_smear_copies = 1 [ default = 1365 ];
-	required bytes kdf_salt = 2;
-
-	message SCrypt {
-		optional int32 N = 2 [ default = 32768 ];
-		optional int32 r = 3 [ default = 16 ];
-		optional int32 p = 4 [ default = 1 ];
-	}
-	optional SCrypt scrypt = 3;
-
-	message TPM {
-		required uint32 index = 1;
-		required bytes salt = 2;
-	}
-	optional TPM tpm_nvram = 4;
-
-	optional bool no_erasure_storage = 5;
 }

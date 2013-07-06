@@ -20,6 +20,7 @@ import (
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/tpm"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
@@ -79,6 +80,7 @@ const (
 	uiStateLog
 	uiStateRevocationProcessed
 	uiStatePANDAComplete
+	uiStateErasureStorage
 )
 
 const shortTimeFormat = "Jan _2 15:04"
@@ -94,7 +96,7 @@ type client struct {
 	// transactions or waits for outside prompting.
 	autoFetch bool
 	// newMeetingPlace is a function that returns a PANDA MeetingPlace. In
-	// tests, this can be overridden to return a testing meeting place.
+	// tests this can be overridden to return a testing meeting place.
 	newMeetingPlace func() panda.MeetingPlace
 
 	// stateFilename is the filename of the file on disk in which we
@@ -103,11 +105,6 @@ type client struct {
 	// stateLock protects the state against concurrent access by another
 	// program.
 	stateLock *disk.Lock
-	// diskSalt contains the scrypt salt used to derive the state
-	// encryption key.
-	diskSalt [disk.SCryptSaltLen]byte
-	// diskKey is the XSalsa20 key used to encrypt the disk state.
-	diskKey [32]byte
 
 	ui UI
 	// server is the URL of the user's home server.
@@ -129,9 +126,12 @@ type client struct {
 	// pub is the public key corresponding to |priv|.
 	pub  [32]byte
 	rand io.Reader
+	// lastErasureStorageTime is the time at which we last rotated the
+	// erasure storage value.
+	lastErasureStorageTime time.Time
 	// writerChan is a channel that the disk goroutine reads from to
 	// receive updated, serialised states.
-	writerChan chan []byte
+	writerChan chan disk.NewState
 	// writerDone is a channel that is closed by the disk goroutine when it
 	// has finished all pending updates.
 	writerDone chan struct{}
@@ -352,6 +352,7 @@ func (c *client) errorUI(errorText string, bgColor uint32) {
 			yAlign: 0.5,
 		},
 	}
+	c.log.Printf("Fatal error: %s", errorText)
 	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
 	c.ui.Actions() <- UIState{uiStateError}
 	c.ui.Signal()
@@ -417,17 +418,20 @@ func (c *client) loadUI() {
 	c.ui.Actions() <- UIState{uiStateLoading}
 	c.ui.Signal()
 
-	stateFile, err := os.Open(c.stateFilename)
+	stateFile := &disk.StateFile{
+		Path: c.stateFilename,
+		Rand: c.rand,
+		Log:  c.log.Printf,
+	}
 
-	ok := true
-	var state []byte
-	if err == nil {
-		if c.stateLock, ok = disk.LockStateFile(stateFile); !ok {
-			c.errorUI("State file locked by another process. Waiting for lock.", colorDefault)
-			c.log.Errorf("Waiting for locked state file")
-		}
+	var newAccount bool
+	var err error
+	if c.stateLock, err = stateFile.Lock(false /* don't create */); err == nil && c.stateLock == nil {
+		c.errorUI("State file locked by another process. Waiting for lock.", colorDefault)
+		c.log.Errorf("Waiting for locked state file")
+
 		for {
-			if c.stateLock, ok = disk.LockStateFile(stateFile); ok {
+			if c.stateLock, err = stateFile.Lock(false /* don't create */); c.stateLock != nil {
 				break
 			}
 			select {
@@ -441,15 +445,15 @@ func (c *client) loadUI() {
 				break
 			}
 		}
-
-		state, err = ioutil.ReadAll(stateFile)
-		stateFile.Close()
-		c.diskSalt, ok = disk.GetSCryptSaltFromState(state)
+	} else if err == nil {
+	} else if os.IsNotExist(err) {
+		newAccount = true
+	} else {
+		c.errorUI(err.Error(), colorError)
+		c.ShutdownAndSuspend()
 	}
 
-	newAccount := false
-	if err != nil || !ok {
-		// New account flow.
+	if newAccount {
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			panic(err)
@@ -461,46 +465,45 @@ func (c *client) loadUI() {
 		if err != nil {
 			panic(err)
 		}
-		c.createPassphraseUI()
+		pw := c.createPassphraseUI()
+		c.createErasureStorage(pw, stateFile)
 		c.createAccountUI()
 		newAccount = true
 	} else {
 		// First try with zero key.
-		err = c.loadState(state)
+		err := c.loadState(stateFile, "")
 		for err == disk.BadPasswordError {
 			// That didn't work, try prompting for a key.
-			err = c.keyPromptUI(state)
+			err = c.keyPromptUI(stateFile)
 		}
 		if err != nil {
 			// Fatal error loading state. Abort.
 			c.errorUI(err.Error(), colorError)
-			select {}
 			c.ShutdownAndSuspend()
 		}
 	}
 
 	if newAccount {
-		file, err := os.OpenFile(c.stateFilename, os.O_CREATE|os.O_WRONLY, 0600)
-		if err == nil {
-			c.stateLock, ok = disk.LockStateFile(file)
-			if !ok {
-				err = errors.New("Failed to obtain lock on newly created state file")
-			}
-			file.Close()
+		c.stateLock, err = stateFile.Lock(true /* create */)
+		if err != nil {
+			err = errors.New("Failed to create state file: " + err.Error())
+		} else if c.stateLock == nil {
+			err = errors.New("Failed to obtain lock on created state file")
 		}
 		if err != nil {
 			c.errorUI(err.Error(), colorError)
 			c.ShutdownAndSuspend()
 		}
+		c.lastErasureStorageTime = time.Now()
 	}
 
-	c.writerChan = make(chan []byte)
+	c.writerChan = make(chan disk.NewState)
 	c.writerDone = make(chan struct{})
 	c.fetchNowChan = make(chan chan bool, 1)
 	c.revocationUpdateChan = make(chan revocationUpdate, 8)
 
 	// Start disk and network workers.
-	go disk.StateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)
+	go stateFile.StartWriter(c.writerChan, c.writerDone)
 	go c.transact()
 	if newAccount {
 		c.save()
@@ -1997,7 +2000,7 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
-func (c *client) keyPromptUI(state []byte) error {
+func (c *client) keyPromptUI(stateFile *disk.StateFile) error {
 	ui := VBox{
 		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
 		children: []Widget{
@@ -2070,20 +2073,11 @@ func (c *client) keyPromptUI(state []byte) error {
 		if !ok {
 			panic("missing pw")
 		}
-		if len(pw) == 0 {
-			break
-		}
 
 		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
 		c.ui.Signal()
 
-		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
-			panic(err)
-		} else {
-			copy(c.diskKey[:], diskKey)
-		}
-
-		err := c.loadState(state)
+		err := c.loadState(stateFile, pw)
 		if err != disk.BadPasswordError {
 			return err
 		}
@@ -2097,7 +2091,7 @@ func (c *client) keyPromptUI(state []byte) error {
 	return nil
 }
 
-func (c *client) createPassphraseUI() {
+func (c *client) createPassphraseUI() string {
 	ui := VBox{
 		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
 		children: []Widget{
@@ -2162,21 +2156,111 @@ func (c *client) createPassphraseUI() {
 		if !ok {
 			panic("missing pw")
 		}
-		if len(pw) == 0 {
-			break
+
+		return pw
+	}
+
+	panic("unreachable")
+}
+
+func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) error {
+	var tpmInfo string
+	present := tpm.Present()
+	if present {
+		tpmInfo = "Your computer appears to have a TPM chip. Click below to try and use it. You'll need tcsd (the TPM daemon) running."
+	} else {
+		tpmInfo = "Your computer does not appear to have a TPM chip. Without one, it's possible that someone in physical possession of your computer and passphrase could extract old messages that should have been deleted. Using a computer with a TPM is strongly preferable until alternatives can be implemented."
+	}
+
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Configure TPM",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: "It's very difficult to erase information on modern computers so Pond tries to use the TPM chip if possible.\n\n" + tpmInfo,
+				wrap: 600,
+			},
+			HBox{
+				children: []Widget{
+					Button{
+						widgetBase: widgetBase{name: "tpm"},
+						text:       "Try to configure TPM",
+					},
+				},
+			},
+			TextView{
+				widgetBase: widgetBase{name: "log", expand: true, fill: true},
+				editable:   false,
+			},
+			Button{
+				widgetBase: widgetBase{name: "continue"},
+				text:       "Continue without TPM",
+			},
+		},
+	}
+
+	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.ui.Actions() <- SetFocus{name: "tpm"}
+	c.ui.Actions() <- UIState{uiStateErasureStorage}
+	c.ui.Signal()
+
+	var logText string
+
+	tpm := disk.TPM{
+		Log: func(format string, args ...interface{}) {
+			c.log.Printf(format, args...)
+			logText += fmt.Sprintf(format, args...) + "\n"
+			c.ui.Actions() <- SetTextView{name: "log", text: logText}
+			c.ui.Signal()
+		},
+		Rand: c.rand,
+	}
+
+NextEvent:
+	for {
+		event, ok := <-c.ui.Events()
+		if !ok {
+			c.ShutdownAndSuspend()
 		}
 
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
-		c.ui.Signal()
-
-		c.randBytes(c.diskSalt[:])
-		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
-			panic(err)
-		} else {
-			copy(c.diskKey[:], diskKey)
+		click, ok := event.(Click)
+		if !ok {
+			continue
 		}
 
-		break
+		switch click.name {
+		case "continue":
+			stateFile.Erasure = nil
+			return stateFile.Create(pw)
+		case "tpm":
+			if len(logText) > 0 {
+				c.ui.Actions() <- SetTextView{name: "log", text: ""}
+				c.ui.Signal()
+				logText = ""
+				time.Sleep(300 * time.Millisecond)
+			}
+
+			stateFile.Erasure = &tpm
+			c.ui.Actions() <- Sensitive{name: "tpm", sensitive: false}
+			c.ui.Actions() <- Sensitive{name: "continue", sensitive: false}
+			c.ui.Signal()
+			if err := stateFile.Create(pw); err != nil {
+				tpm.Log("Setup failed with error: %s", err)
+				tpm.Log("You can click the button to try again")
+				c.ui.Actions() <- Sensitive{name: "tpm", sensitive: true}
+				c.ui.Actions() <- Sensitive{name: "continue", sensitive: true}
+				c.ui.Signal()
+				continue NextEvent
+			}
+			return nil
+		}
 	}
 }
 
@@ -2413,7 +2497,6 @@ func (c *client) unsealPendingMessages(contact *Contact) {
 			c.updateWindowTitle()
 		}
 	}
-
 }
 
 type pandaUpdate struct {

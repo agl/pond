@@ -27,6 +27,10 @@ import (
 // can be helpful when debugging.
 const clientLogToStderr = false
 
+// Since t.Log calls don't result in any output until the test terminates, this
+// constant can be tweaked to enable logging to stderr.
+const debugDeadlock = false
+
 type TestServer struct {
 	cmd      *exec.Cmd
 	port     int
@@ -184,7 +188,9 @@ ReadActions:
 		select {
 		case action := <-ui.actions:
 			ui.t.Logf("%#v", action)
-			// fmt.Printf("%#v\n", action)
+			if debugDeadlock {
+				fmt.Printf("%#v\n", action)
+			}
 			switch action := action.(type) {
 			case UIState:
 				ui.currentStateID = action.stateID
@@ -235,7 +241,11 @@ type TestClient struct {
 	name       string
 }
 
-func NewTestClient(t *testing.T, name string) (*TestClient, error) {
+type TestClientOptions struct {
+	initialStateFile string
+}
+
+func NewTestClient(t *testing.T, name string, options *TestClientOptions) (*TestClient, error) {
 	tc := &TestClient{
 		ui:   NewTestUI(t),
 		name: name,
@@ -244,7 +254,17 @@ func NewTestClient(t *testing.T, name string) (*TestClient, error) {
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
 		return nil, err
 	}
-	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
+	stateFilePath := filepath.Join(tc.stateDir, "state")
+	if options != nil && len(options.initialStateFile) != 0 {
+		inBytes, err := ioutil.ReadFile(options.initialStateFile)
+		if err != nil {
+			panic(err)
+		}
+		if err := ioutil.WriteFile(stateFilePath, inBytes, 0600); err != nil {
+			panic(err)
+		}
+	}
+	tc.client = NewClient(stateFilePath, tc.ui, rand.Reader, true, false)
 	tc.client.log.name = name
 	tc.client.log.toStderr = clientLogToStderr
 	tc.client.Start()
@@ -303,7 +323,7 @@ func (tc *TestClient) ReloadWithMeetingPlace(mp panda.MeetingPlace) {
 func TestOpenClose(t *testing.T) {
 	t.Parallel()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +339,7 @@ func TestAccountCreation(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,6 +357,15 @@ func TestAccountCreation(t *testing.T) {
 	client.ui.events <- Click{
 		name:    "next",
 		entries: map[string]string{"pw": ""},
+	}
+
+	client.ui.WaitForSignal()
+	if id := client.ui.currentStateID; id != uiStateErasureStorage {
+		t.Fatalf("client in UI state %d when it was expected to be setting up erasure storage", id)
+	}
+
+	client.ui.events <- Click{
+		name: "continue",
 	}
 
 	client.ui.WaitForSignal()
@@ -385,6 +414,10 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 	client.ui.events <- Click{
 		name:    "next",
 		entries: map[string]string{"pw": ""},
+	}
+	client.AdvanceTo(uiStateErasureStorage)
+	client.ui.events <- Click{
+		name: "continue",
 	}
 	client.AdvanceTo(uiStateCreateAccount)
 	url := server.URL()
@@ -440,13 +473,13 @@ func TestKeyExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,13 +611,13 @@ func TestMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,13 +672,13 @@ func TestACKs(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,13 +730,13 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +807,7 @@ func TestDraft(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -903,7 +936,7 @@ func TestDraftDiscard(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -934,13 +967,13 @@ func testDetached(t *testing.T, upload bool) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1074,7 +1107,7 @@ func TestLogOverflow(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1096,7 +1129,7 @@ func TestServerAnnounce(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1146,25 +1179,25 @@ func TestRevoke(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client2.Close()
 
-	client3, err := NewTestClient(t, "client3")
+	client3, err := NewTestClient(t, "client3", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client3.Close()
 
-	client4, err := NewTestClient(t, "client4")
+	client4, err := NewTestClient(t, "client4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1316,13 +1349,13 @@ func TestPANDA(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1374,4 +1407,26 @@ func TestPANDA(t *testing.T) {
 	if g := client1FromClient2.generation; g != client1.generation {
 		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
 	}
+}
+
+func TestReadingOldStateFiles(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", &TestClientOptions{
+		initialStateFile: "testdata/state-old",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client1.AdvanceTo(uiStateMain)
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
 }

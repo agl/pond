@@ -16,6 +16,10 @@ func main() {
 	runtime.GOMAXPROCS(4)
 	flag.Parse()
 
+	if len(*stateFile) == 0 && testing {
+		*stateFile = "state"
+	}
+
 	if len(*stateFile) == 0 {
 		home := os.Getenv("HOME")
 		if len(home) == 0 {

@@ -11,8 +11,12 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-func (c *client) loadState(state []byte) error {
-	parsedState, err := disk.LoadState(state, &c.diskKey)
+// erasureRotationTime is the amount of time that we'll use a single erasure
+// storage value before rotating.
+const erasureRotationTime = 24 * time.Hour
+
+func (c *client) loadState(stateFile *disk.StateFile, pw string) error {
+	parsedState, err := stateFile.Read(pw)
 	if err != nil {
 		return err
 	}
@@ -21,8 +25,14 @@ func (c *client) loadState(state []byte) error {
 
 func (c *client) save() {
 	c.log.Printf("Saving state")
+	now := time.Now()
+	rotateErasureStorage := time.Now().Before(c.lastErasureStorageTime) || time.Now().Sub(c.lastErasureStorageTime) > erasureRotationTime
+	if rotateErasureStorage {
+		c.log.Printf("Rotating erasure storage key")
+		c.lastErasureStorageTime = now
+	}
 	serialized := c.marshal()
-	c.writerChan <- serialized
+	c.writerChan <- disk.NewState{serialized, rotateErasureStorage}
 }
 
 func (c *client) unmarshal(state *disk.State) error {
@@ -52,6 +62,10 @@ func (c *client) unmarshal(state *disk.State) error {
 	}
 	copy(c.pub[:], state.Public)
 	c.generation = *state.Generation
+
+	if state.LastErasureStorageTime != nil {
+		c.lastErasureStorageTime = time.Unix(*state.LastErasureStorageTime, 0)
+	}
 
 	for _, prevGroupPriv := range state.PreviousGroupPrivateKeys {
 		group, ok := new(bbssig.Group).Unmarshal(prevGroupPriv.Group)
@@ -317,17 +331,18 @@ func (c *client) marshal() []byte {
 	}
 
 	state := &disk.State{
-		Private:      c.priv[:],
-		Public:       c.pub[:],
-		Identity:     c.identity[:],
-		Server:       proto.String(c.server),
-		Group:        c.groupPriv.Group.Marshal(),
-		GroupPrivate: c.groupPriv.Marshal(),
-		Generation:   proto.Uint32(c.generation),
-		Contacts:     contacts,
-		Inbox:        inbox,
-		Outbox:       outbox,
-		Drafts:       drafts,
+		Private:                c.priv[:],
+		Public:                 c.pub[:],
+		Identity:               c.identity[:],
+		Server:                 proto.String(c.server),
+		Group:                  c.groupPriv.Group.Marshal(),
+		GroupPrivate:           c.groupPriv.Marshal(),
+		Generation:             proto.Uint32(c.generation),
+		Contacts:               contacts,
+		Inbox:                  inbox,
+		Outbox:                 outbox,
+		Drafts:                 drafts,
+		LastErasureStorageTime: proto.Int64(c.lastErasureStorageTime.Unix()),
 	}
 	for _, prevGroupPriv := range c.prevGroupPrivs {
 		if time.Since(prevGroupPriv.expired) > previousTagLifetime {

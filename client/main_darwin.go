@@ -19,6 +19,10 @@ func main() {
 	}
 	stateFile := filepath.Join(home, ".pond")
 
+	if testing {
+		stateFile = "state"
+	}
+
 	ui := NewGTKUI()
 	client := NewClient(stateFile, ui, rand.Reader, testing, true /* autoFetch */)
 	client.Start()
