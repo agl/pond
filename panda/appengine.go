@@ -18,7 +18,7 @@ import (
 
 type HTTPMeetingPlace struct {
 	TorAddress string
-	URL string
+	URL        string
 }
 
 const payloadBytes = 1 << 15

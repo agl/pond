@@ -467,7 +467,7 @@ func (c *client) loadUI() {
 	}
 	c.ui.Actions() <- Reset{ui}
 
-	c.torAddress = "127.0.0.1:9050"  // default for dev mode.
+	c.torAddress = "127.0.0.1:9050" // default for dev mode.
 	if !c.dev && !c.detectTor() {
 		c.torPromptUI()
 	}
