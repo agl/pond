@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -105,6 +106,9 @@ type client struct {
 	// stateLock protects the state against concurrent access by another
 	// program.
 	stateLock *disk.Lock
+	// torAddress contains a string like "127.0.0.1:9050", which specifies
+	// the address of the local Tor SOCKS proxy.
+	torAddress string
 
 	ui UI
 	// server is the URL of the user's home server.
@@ -368,6 +372,66 @@ func (c *client) errorUI(errorText string, bgColor uint32) {
 	}
 }
 
+// detectTor attempts to connect to port 9050 and 9150 on the local host and
+// assumes that Tor is running on the first port that it finds to be open.
+func (c *client) detectTor() bool {
+	ports := []int{9050, 9150}
+	for _, port := range ports {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			continue
+		}
+		c.torAddress = addr
+		conn.Close()
+		return true
+	}
+
+	return false
+}
+
+// torPromptUI displays a prompt to start Tor and tries once a second until it
+// can be found.
+func (c *client) torPromptUI() {
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Cannot find Tor",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150...",
+				wrap: 600,
+			},
+		},
+	}
+
+	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.ui.Signal()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case _, ok := <-c.ui.Events():
+			if !ok {
+				c.ShutdownAndSuspend()
+			}
+		case <-ticker.C:
+			if c.detectTor() {
+				return
+			}
+		}
+	}
+
+	panic("unreachable")
+}
+
 func (c *client) loadUI() {
 	ui := VBox{
 		widgetBase: widgetBase{
@@ -400,6 +464,10 @@ func (c *client) loadUI() {
 		},
 	}
 	c.ui.Actions() <- Reset{ui}
+
+	if !c.detectTor() {
+		c.torPromptUI()
+	}
 
 	loading := EventBox{
 		widgetBase: widgetBase{expand: true, fill: true},

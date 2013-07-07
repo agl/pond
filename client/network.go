@@ -582,9 +582,6 @@ func parseServer(server string, testing bool) (serverIdentity *[32]byte, host st
 	return
 }
 
-// torAddr is the address at which we expect to find the local Tor SOCKS proxy.
-const torAddr = "127.0.0.1:9050"
-
 func (c *client) torDialer() proxy.Dialer {
 	// We generate a random username so that Tor will decouple all of our
 	// connections.
@@ -594,7 +591,7 @@ func (c *client) torDialer() proxy.Dialer {
 		User:     base32.StdEncoding.EncodeToString(userBytes[:]),
 		Password: "password",
 	}
-	dialer, err := proxy.SOCKS5("tcp", torAddr, &auth, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", c.torAddress, &auth, proxy.Direct)
 	if err != nil {
 		panic(err)
 	}
@@ -647,7 +644,7 @@ func (c *client) doCreateAccount() error {
 
 	if !c.testing {
 		// Check that Tor is running.
-		testConn, err := net.Dial("tcp", torAddr)
+		testConn, err := net.Dial("tcp", c.torAddress)
 		if err != nil {
 			return errors.New("Failed to connect to local Tor: " + err.Error())
 		}
