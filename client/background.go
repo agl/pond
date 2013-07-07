@@ -96,7 +96,6 @@ func (c *client) startUpload(id uint64, inPath string) (cancel func()) {
 		} else {
 			c.backgroundChan <- DetachmentError{id, err}
 		}
-		tmp.Close()
 	}()
 	return func() {
 		killChan <- true
@@ -126,7 +125,6 @@ func (c *client) startDownload(id uint64, outPath string, detachment *pond.Messa
 		} else {
 			c.backgroundChan <- DetachmentError{id, err}
 		}
-		tmp.Close()
 	}()
 	return func() {
 		killChan <- true
