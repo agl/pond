@@ -629,7 +629,7 @@ func (c *client) identityUI() interface{} {
 
 func (c *client) showContact(id uint64) interface{} {
 	contact := c.contacts[id]
-	if contact.isPending && len(contact.pandaKeyExchange) == 0 {
+	if contact.isPending && len(contact.pandaKeyExchange) == 0 && len(contact.pandaResult) == 0 {
 		return c.newContactUI(contact)
 	}
 

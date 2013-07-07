@@ -782,6 +782,9 @@ func (c *client) mainUI() {
 		if contact.isPending {
 			subline = "pending"
 		}
+		if len(contact.pandaResult) > 0 {
+			subline = "failed"
+		}
 		c.contactsUI.Add(id, contact.name, subline, indicatorNone)
 	}
 
