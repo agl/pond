@@ -12,11 +12,11 @@ import (
 var stateFile *string = flag.String("state-file", "", "File in which to save persistent state")
 
 func main() {
-	testing := os.Getenv("POND") == "dev"
+	dev := os.Getenv("POND") == "dev"
 	runtime.GOMAXPROCS(4)
 	flag.Parse()
 
-	if len(*stateFile) == 0 && testing {
+	if len(*stateFile) == 0 && dev {
 		*stateFile = "state"
 	}
 
@@ -32,7 +32,8 @@ func main() {
 	}
 
 	ui := NewGTKUI()
-	client := NewClient(*stateFile, ui, rand.Reader, testing, true /* autoFetch */)
+	client := NewClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+	client.dev = dev
 	client.Start()
 	ui.Run()
 }

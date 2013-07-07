@@ -93,6 +93,8 @@ type client struct {
 	// testing is true in unittests and disables some assertions that are
 	// needed in the real world, but which make testing difficult.
 	testing bool
+	// dev is true if POND=dev is in the environment. Unittests also set this.
+	dev bool
 	// autoFetch controls whether the network goroutine performs periodic
 	// transactions or waits for outside prompting.
 	autoFetch bool
@@ -465,7 +467,8 @@ func (c *client) loadUI() {
 	}
 	c.ui.Actions() <- Reset{ui}
 
-	if !c.detectTor() {
+	c.torAddress = "127.0.0.1:9050"  // default for dev mode.
+	if !c.dev && !c.detectTor() {
 		c.torPromptUI()
 	}
 
@@ -2341,7 +2344,7 @@ NextEvent:
 
 func (c *client) createAccountUI() {
 	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
-	if c.testing {
+	if c.dev {
 		defaultServer = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
 	}
 
@@ -2537,7 +2540,7 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 		}
 		contact.pandaKeyExchange = update.serialised
 	case update.result != nil:
-		if err := contact.processKeyExchange(update.result, c.testing); err != nil {
+		if err := contact.processKeyExchange(update.result, c.dev); err != nil {
 			contact.pandaResult = err.Error()
 			c.contactsUI.SetSubline(contact.id, "failed")
 			contact.pandaKeyExchange = nil
@@ -2583,13 +2586,9 @@ type pandaUpdate struct {
 
 func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
 	c := &client{
-		testing:   testing,
-		autoFetch: autoFetch,
-		newMeetingPlace: func() panda.MeetingPlace {
-			return &panda.HTTPMeetingPlace{
-				URL: "https://panda-key-exchange.appspot.com/exchange",
-			}
-		},
+		testing:           testing,
+		dev:               testing,
+		autoFetch:         autoFetch,
 		stateFilename:     stateFilename,
 		log:               NewLog(),
 		ui:                ui,
@@ -2601,6 +2600,12 @@ func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch b
 		backgroundChan:    make(chan interface{}, 8),
 		pandaChan:         make(chan pandaUpdate, 1),
 		pandaShutdownChan: make(chan bool),
+	}
+	c.newMeetingPlace = func() panda.MeetingPlace {
+		return &panda.HTTPMeetingPlace{
+			TorAddress: c.torAddress,
+			URL:        "https://panda-key-exchange.appspot.com/exchange",
+		}
 	}
 	c.log.toStderr = true
 	return c

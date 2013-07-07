@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	testing := os.Getenv("POND") == "dev"
+	dev := os.Getenv("POND") == "dev"
 	runtime.GOMAXPROCS(4)
 
 	home := os.Getenv("HOME")
@@ -19,12 +19,13 @@ func main() {
 	}
 	stateFile := filepath.Join(home, ".pond")
 
-	if testing {
+	if dev {
 		stateFile = "state"
 	}
 
 	ui := NewGTKUI()
-	client := NewClient(stateFile, ui, rand.Reader, testing, true /* autoFetch */)
+	client := NewClient(stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+	client.dev = dev
 	client.Start()
 	ui.Run()
 }

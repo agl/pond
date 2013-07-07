@@ -612,12 +612,12 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 		identityPublic = &randomIdentityPublic
 	}
 
-	serverIdentity, host, err := parseServer(server, c.testing)
+	serverIdentity, host, err := parseServer(server, c.dev)
 	if err != nil {
 		return nil, err
 	}
 	var tor proxy.Dialer
-	if c.testing {
+	if c.dev {
 		tor = proxy.Direct
 	} else {
 		tor = c.torDialer()
@@ -637,12 +637,12 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 }
 
 func (c *client) doCreateAccount() error {
-	_, _, err := parseServer(c.server, c.testing)
+	_, _, err := parseServer(c.server, c.dev)
 	if err != nil {
 		return err
 	}
 
-	if !c.testing {
+	if !c.dev {
 		// Check that Tor is running.
 		testConn, err := net.Dial("tcp", c.torAddress)
 		if err != nil {
@@ -742,7 +742,7 @@ func (c *client) transact() {
 				seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
 				r := mrand.New(mrand.NewSource(seed))
 				delay := r.ExpFloat64() * transactionRateSeconds
-				if c.testing {
+				if c.dev {
 					delay = 5
 				}
 				c.log.Printf("Next network transaction in %d seconds", int(delay))
