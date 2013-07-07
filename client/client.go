@@ -2260,8 +2260,11 @@ func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) erro
 			HBox{
 				children: []Widget{
 					Button{
-						widgetBase: widgetBase{name: "tpm"},
-						text:       "Try to configure TPM",
+						widgetBase: widgetBase{
+							name:        "tpm",
+							insensitive: !present,
+						},
+						text: "Try to configure TPM",
 					},
 				},
 			},
