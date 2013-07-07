@@ -29,10 +29,14 @@ import (
 )
 
 const (
-	nonceLen          = 24
+	// nonceLen is the length of a NaCl nonce.
+	nonceLen = 24
+	// ephemeralBlockLen is the length of the signcrypted, ephemeral key
+	// used when Contact.supportedVersion >= 1.
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
+// send encrypts |message| and enqueues it for transmission.
 func (c *client) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
@@ -43,6 +47,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		return errors.New("message too large")
 	}
 
+	// All messages are padded to the maximum length.
 	plaintext := make([]byte, pond.MaxSerializedMessage+4)
 	binary.LittleEndian.PutUint32(plaintext, uint32(len(messageBytes)))
 	copy(plaintext[4:], messageBytes)
@@ -54,6 +59,10 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	sealedLen := nonceLen + len(plaintext) + box.Overhead
 	dhPrivate := &to.lastDHPrivate
 
+	// If the other client indicates that they are recent enough then we
+	// generate an ephemeral key, signcrypt it with our DH key and
+	// signcrypt the message with the ephemeral key. In the future, this
+	// will be the default.
 	if to.supportedVersion >= 1 {
 		public, private, err := box.GenerateKey(c.rand)
 		if err != nil {
