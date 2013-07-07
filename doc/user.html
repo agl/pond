@@ -15,11 +15,11 @@ title: User guide
 
 <p><b>The state file should not be copied.</b> Pond depends on the ability to delete past information and making copies of the state file may allow information that should have been deleted, to be recovered. Additionally, Pond is not designed to operate concurrently on multiple computers.</p>
 
-<p><i>Warning</i>: it is not currently clear how well modern computers, using SSDs, are able to delete anything. Deleted messages may be recoverable with current versions of Pond.</p>
+<p>After setting the passphrase (or not), you may be prompted to setup TPM storage if your computer has a TPM chip. Pond depends on being able to erase old information but it is not clear how well modern computers, using SSDs or log-structured filesystems, are able to erase anything. Without some form of special storage, such as a TPM chip, it may be possible to recover &ldquo;deleted&rdquo; messages given the passphrase.</p>
 
 <p>&nbsp;</p>
 
-<p>Once the passphrase has been configured, you'll be prompted to create an account on a Pond server.</p>
+<p>Once the passphrase and TPM have been configured, you'll be prompted to create an account on a Pond server.</p>
 
 <img src="images/create-account.svg" style="width: 50em;">
 
