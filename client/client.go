@@ -421,7 +421,7 @@ func (c *client) loadUI() {
 	stateFile := &disk.StateFile{
 		Path: c.stateFilename,
 		Rand: c.rand,
-		Log:  func(format string, args ...interface{}) {
+		Log: func(format string, args ...interface{}) {
 			c.log.Printf(format, args...)
 		},
 	}
@@ -2264,6 +2264,8 @@ NextEvent:
 			return nil
 		}
 	}
+
+	panic("unreachable")
 }
 
 func (c *client) createAccountUI() {
