@@ -255,7 +255,7 @@ func (kx *KeyExchange) derivePassword() error {
 		h.Write(serialised)
 		h.Sum(kx.meeting2[:0])
 	} else {
-		data, err := scrypt.Key(serialised, nil, 1<<16, 16, 4, 32*3)
+		data, err := scrypt.Key(serialised, nil, 1<<17, 16, 4, 32*3)
 		if err != nil {
 			return err
 		}
