@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -18,6 +17,7 @@ import (
 )
 
 type HTTPMeetingPlace struct {
+	TorAddress string
 	URL string
 }
 
@@ -33,7 +33,7 @@ func (hmp *HTTPMeetingPlace) attemptExchange(log func(string, ...interface{}), i
 		return nil, nil, err
 	}
 
-	dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", hmp.TorAddress, nil, proxy.Direct)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +99,6 @@ func (hmp *HTTPMeetingPlace) attemptExchange(log func(string, ...interface{}), i
 func (hmp *HTTPMeetingPlace) Exchange(log func(string, ...interface{}), id, message []byte) ([]byte, error) {
 	delay := 15 * time.Second
 	for {
-		fmt.Printf("PANDA message size: %d\n", len(message))
 		response, body, err := hmp.attemptExchange(log, id, message)
 		if err != nil {
 			log("PANDA exchange failed. Will try again in %s: %s", delay, err)

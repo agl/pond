@@ -32,7 +32,8 @@ func (s *SharedSecret) toProto() *panda_proto.KeyExchange_SharedSecret {
 	}
 	if s.Cards.NumDecks > 0 {
 		ret.NumDecks = proto.Int32(int32(s.Cards.NumDecks))
-		ret.CardCount = s.Cards.counts[:]
+		canonical := s.Cards.Canonicalise()
+		ret.CardCount = canonical.counts[:]
 	}
 	if s.Year != 0 {
 		ret.Time = &panda_proto.KeyExchange_SharedSecret_Time{
