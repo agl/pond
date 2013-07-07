@@ -1,0 +1,72 @@
+---
+layout: default
+title: Pond
+---
+
+<p>(<i>Note: recent events have lead to these topics being in the news quite often in recent weeks. However, Pond is not a reaction to those events - it was started nearly a year ago.</i>)</p>
+
+<p>For secure, synchronous communication we have OTR and, when run over Tor, this is pretty good. But while we have secure asynchronous messaging in the form of PGP email, it's not forward secure and it gratuitously leaks traffic information. While a desire for forward secure PGP <a href="http://tools.ietf.org/html/draft-brown-pgp-pfs-03">is hardly new</a>, it still hasn't materialised in a widely usable manner.</p>
+
+<p>Additionally, email is used predominately for insecure communications (mailing lists, etc) and is useful because it allows previously unconnected people to communicate as long as a (public) email address is known to one party. But the flip side to this is that volume and spam are driving people to use centralised email services. These provide such huge benefits to the majority of email communication, so it's unlikely that this trend is going to reverse. But, even with PGP, these services are trusted with hugely valuable traffic information if any party uses them.</p>
+
+<p>So Pond is not email. Pond is forward secure, asynchronous messaging for the discerning. Pond messages are asynchronous, but are not a record; they expire automatically a week after they are received. Pond seeks to prevent leaking traffic information against everyone except a global passive attacker.</p>
+
+<p><b>Dear God, please don't use Pond for anything real yet. I've hammered out nearly 20K lines of code that have never been reviewed. There are no binaries here for a good reason. Unless you're looking to experiment you should go use something that <a href="http://gnupg.org/">actually works</a>.</b></p>
+
+<p>&nbsp;</p>
+
+<p>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="user.html">User Guide</a>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="threat.html">Threat Model</a>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="tech.html">Technical Details</a>
+</p>
+
+<p>&nbsp;</p>
+
+
+<h4>Building</h4>
+
+<p>These are very simple build instructions that will get Pond running from source. There are no binaries because that would suggest that it's reasonable for non-experts to be playing with Pond and that's not currently the case.</p>
+
+<p>You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
+
+<h5>Ubuntu 13.04</h5>
+
+<p>Ubuntu only has Go 1.0, but that's sufficient (although future commits may accidently break compatibility because I develop with 1.1).</p>
+
+<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers tor
+cd
+mkdir gopkg
+export GOPATH=$HOME/gopkg
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client
+$GOPATH/bin/client</pre>
+
+<h5>Fedora 19</h5>
+
+<p>Fedora's <tt>golang</tt> package appears to be completely broken, so this installs Go from source.</p>
+
+<pre>sudo yum install gtk3-devel gtkspell3-devel gcc trousers-devel git mercurial tor
+sudo systemctl start tor
+cd
+hg clone https://code.google.com/p/go
+cd go/src
+./all.bash
+cd
+export PATH=$PATH:$HOME/go/bin
+go get -tags fedora github.com/agl/pond/client
+go install github.com/agl/pond/client</pre>
+
+<h5>Arch</h5>
+
+<p>I don't have tested instructions for Arch, but one thing that will go wrong is that Arch's Trousers build enables a GTK-2 based UI. Pond uses GTK-3 and one cannot link GTK 2 and 3 into the same binary. You'll need the <a href="https://aur.archlinux.org/packages.php?ID=14330">trousers package from AUR</a> and you'll need to edit the <tt>PKGBUILD</tt> so that the <tt>configure</tt> command has <tt>--with-gui=openssl</tt>, not <tt>--with-gui=gtk</tt>. Then <tt>makepkg</tt> and <tt>pacman -U</tt> as normal. In order to actually use the TPM, you'll need to <tt>systemctl start tcsd</tt>.</p>
+
+<h5>OS X</h5>
+
+<p>It's possible to get Pond building on OS X after spending <i>lots</i> of time with homebrew. I'm afraid that I didn't keep a log of all the commands but, if you get <tt>gtk+3</tt> and <tt>gtkspell3</tt> built, then it should work. See the Fedora section for instructions on fetching and building Go itself.</p>
+
+<p>(Unless you <tt>brew edit gtk+3</tt> and add <tt>--enable-quartz-backend</tt> to the <tt>configure</tt> arguments, you'll need an X server running in order to launch Pond.)</p>
+
+<p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point.</p>
+
+<p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
