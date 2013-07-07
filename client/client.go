@@ -421,7 +421,9 @@ func (c *client) loadUI() {
 	stateFile := &disk.StateFile{
 		Path: c.stateFilename,
 		Rand: c.rand,
-		Log:  c.log.Printf,
+		Log:  func(format string, args ...interface{}) {
+			c.log.Printf(format, args...)
+		},
 	}
 
 	var newAccount bool
