@@ -879,7 +879,10 @@ func (c *client) transact() {
 
 type detachmentTransfer interface {
 	Request() *pond.Request
-	ProcessReply(*pond.Reply) (*os.File, bool, int64, bool, error)
+	// ProcessReply returns a file to read/write from, the starting offset
+	// for the transfer and the total size of the file. The file will
+	// already have been positioned correctly.
+	ProcessReply(*pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error)
 	Complete(conn *transport.Conn) bool
 }
 
@@ -898,14 +901,17 @@ func (ut uploadTransfer) Request() *pond.Request {
 	}
 }
 
-func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
-	var offset int64
+func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error) {
 	if reply.Upload != nil && reply.Upload.Resume != nil {
 		offset = *reply.Upload.Resume
 	}
 
 	if offset == ut.total {
 		isComplete = true
+		return
+	}
+	if offset > ut.total {
+		err = fmt.Errorf("offset from server is greater than the length of the file: %d vs %d", offset, ut.total)
 		return
 	}
 	pos, err := ut.file.Seek(offset, 0 /* from start */)
@@ -916,7 +922,7 @@ func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUploa
 
 	file = ut.file
 	isUpload = true
-	total = ut.total - offset
+	total = ut.total
 	return
 }
 
@@ -946,7 +952,14 @@ type downloadTransfer struct {
 	from   *[32]byte
 }
 
-func (dt downloadTransfer) Request() *pond.Request {
+func (dt *downloadTransfer) Request() *pond.Request {
+	pos, err := dt.file.Seek(0, 2 /* from end */)
+	if err == nil {
+		dt.resume = pos
+	} else {
+		dt.resume = 0
+	}
+
 	var resume *int64
 	if dt.resume > 0 {
 		resume = proto.Int64(dt.resume)
@@ -961,24 +974,24 @@ func (dt downloadTransfer) Request() *pond.Request {
 	}
 }
 
-func (dt downloadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
+func (dt *downloadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error) {
 	if reply.Download == nil {
 		err = errors.New("Reply from server didn't include a download section")
 		return
 	}
 
-	size := *reply.Download.Size
-	if size < dt.resume {
+	total = *reply.Download.Size
+	if total < dt.resume {
 		err = errors.New("Reply from server suggested that the file was truncated")
 		return
 	}
 
+	offset = dt.resume
 	file = dt.file
-	total = size - dt.resume
 	return
 }
 
-func (dt downloadTransfer) Complete(conn *transport.Conn) bool {
+func (dt *downloadTransfer) Complete(conn *transport.Conn) bool {
 	return true
 }
 
@@ -1018,25 +1031,121 @@ func (c *client) downloadDetachment(out chan interface{}, file *os.File, id uint
 	u.Path = ""
 	server := u.String()
 
-	transfer := downloadTransfer{file: file, fileID: fileID, from: &from}
-
-	pos, err := file.Seek(0, 2 /* from end */)
-	if err != nil {
-		return err
-	}
-	transfer.resume = pos
+	transfer := &downloadTransfer{file: file, fileID: fileID, from: &from}
 
 	return c.transferDetachment(out, server, transfer, id, killChan)
 }
 
-func (c *client) transferDetachment(out chan interface{}, server string, transfer detachmentTransfer, id uint64, killChan chan bool) error {
-	var transferred, total int64
+// transferDetachmentConn transfers as much of a detachment as possible on a
+// single connection. It calls sendStatus repeatedly with the current state of
+// the transfer and watches killChan for an abort signal. It returns an error
+// and an indication of whether the error is fatal. If not fatatl then another
+// connection can be attempted in order to resume the transfer.
+func (c *client) transferDetachmentConn(sendStatus func(s string, done, total int64), conn *transport.Conn, transfer detachmentTransfer, killChan chan bool) (err error, fatal bool) {
+	defer conn.Close()
 
-	sendStatus := func(s string) {
+	// transferred is the number of bytes that *this connection* has transferred.
+	// total is the full length of the file.
+	var startingOffset, transferred, total int64
+
+	sendStatus("Requesting transfer", 0, 0)
+	if err := conn.WriteProto(transfer.Request()); err != nil {
+		return fmt.Errorf("failed to write request: %s", err), false
+	}
+
+	reply := new(pond.Reply)
+	if err := conn.ReadProto(reply); err != nil {
+		return fmt.Errorf("failed to read reply: %s", err), false
+	}
+
+	if reply.Status != nil && *reply.Status == pond.Reply_RESUME_PAST_END_OF_FILE {
+		return nil, false
+	}
+
+	if err := replyToError(reply); err != nil {
+		return fmt.Errorf("request failed: %s", err), false
+	}
+
+	var file *os.File
+	var isUpload, isComplete bool
+	if file, isUpload, startingOffset, total, isComplete, err = transfer.ProcessReply(reply); err != nil {
+		return fmt.Errorf("request failed: %s", err), false
+	}
+	if isComplete {
+		return nil, false
+	}
+	todo := total - startingOffset
+
+	var in io.Reader
+	var out io.Writer
+	if isUpload {
+		out = conn
+		in = file
+	} else {
+		out = file
+		in = conn
+	}
+
+	buf := make([]byte, 16*1024)
+	var lastUpdate time.Time
+
+	for transferred < todo {
+		select {
+		case <-killChan:
+			return backgroundCanceledError, true
+		default:
+			break
+		}
+
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+		n, err := in.Read(buf)
+		if err != nil {
+			if isUpload {
+				return fmt.Errorf("failed to read from disk: %s", err), true
+			}
+
+			return err, false
+		}
+
+		n, err = out.Write(buf[:n])
+		if err != nil {
+			if !isUpload {
+				return fmt.Errorf("failed to write to disk: %s", err), true
+			}
+
+			return err, false
+		}
+
+		transferred += int64(n)
+
+		if transferred > todo {
+			return errors.New("transferred more than the expected amount"), true
+		}
+		now := time.Now()
+		if lastUpdate.IsZero() || now.Sub(lastUpdate) > 10*time.Millisecond {
+			lastUpdate = now
+			sendStatus("", startingOffset+transferred, total)
+		}
+	}
+	sendStatus("", startingOffset+transferred, total)
+
+	if transferred < todo {
+		return errors.New("incomplete transfer"), false
+	}
+
+	if !transfer.Complete(conn) {
+		return errors.New("didn't receive confirmation from server"), false
+	}
+	return nil, false
+}
+
+func (c *client) transferDetachment(out chan interface{}, server string, transfer detachmentTransfer, id uint64, killChan chan bool) error {
+	sendStatus := func(s string, done, total int64) {
 		select {
 		case out <- DetachmentProgress{
 			id:     id,
-			done:   uint64(transferred),
+			done:   uint64(done),
 			total:  uint64(total),
 			status: s,
 		}:
@@ -1049,13 +1158,16 @@ func (c *client) transferDetachment(out chan interface{}, server string, transfe
 	const maxBackoff = 5 * time.Minute
 	backoff := initialBackoff
 
-	for {
-		sendStatus("Connecting")
+	const maxTransientErrors = 15
+	transientErrors := 0
+
+	for transientErrors < maxTransientErrors {
+		sendStatus("Connecting", 0, 0)
 
 		conn, err := c.dialServer(server, false)
 		if err != nil {
-			c.log.Printf("Failed to connect to %s: %s", c.server, err)
-			sendStatus("Waiting to reconnect")
+			c.log.Printf("Failed to connect to %s: %s", server, err)
+			sendStatus("Waiting to reconnect", 0, 0)
 
 			select {
 			case <-time.After(backoff):
@@ -1071,122 +1183,29 @@ func (c *client) transferDetachment(out chan interface{}, server string, transfe
 		}
 
 		backoff = initialBackoff
-
-		sendStatus("Requesting transfer")
-		if err := conn.WriteProto(transfer.Request()); err != nil {
-			c.log.Printf("Failed to write request to %s: %s", c.server, err)
-			conn.Close()
-			continue
-		}
-
-		reply := new(pond.Reply)
-		if err := conn.ReadProto(reply); err != nil {
-			c.log.Printf("Failed to read reply from %s: %s", c.server, err)
-			conn.Close()
-			continue
-		}
-
-		if reply.Status != nil && *reply.Status == pond.Reply_RESUME_PAST_END_OF_FILE {
-			conn.Close()
+		err, isFatal := c.transferDetachmentConn(sendStatus, conn, transfer, killChan)
+		if err == nil {
+			c.log.Printf("Completed transfer to/from %s", server)
 			return nil
 		}
 
-		if err := replyToError(reply); err != nil {
-			c.log.Printf("Request failed: %s", err)
-			conn.Close()
+		if err == backgroundCanceledError {
 			return err
 		}
 
-		var file *os.File
-		var isUpload, isComplete bool
-		if file, isUpload, total, isComplete, err = transfer.ProcessReply(reply); err != nil {
-			c.log.Printf("Request failed: %s", err)
-			conn.Close()
-			return err
-		}
-		if isComplete {
-			conn.Close()
-			return nil
-		}
-
-		var in io.Reader
-		var out io.Writer
-		if isUpload {
-			out = conn
-			in = file
+		if isFatal {
+			err = fmt.Errorf("fatal error: %s", err)
 		} else {
-			out = file
-			in = conn
+			transientErrors++
+			err = fmt.Errorf("transient error: %s", err)
 		}
-
-		buf := make([]byte, 16*1024)
-		var lastUpdate time.Time
-
-		for {
-			select {
-			case <-killChan:
-				conn.Close()
-				return backgroundCanceledError
-			default:
-				break
-			}
-
-			conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-			n, err := in.Read(buf)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				conn.Close()
-				if isUpload {
-					err = fmt.Errorf("failed to read during transfer: %s", err)
-					c.log.Printf("%s", err)
-					return err
-				}
-				// Read errors from the network are transient.
-				continue
-			}
-
-			n, err = out.Write(buf[:n])
-			if err != nil {
-				conn.Close()
-				if !isUpload {
-					err = fmt.Errorf("failed to write during download: %s", err)
-					c.log.Printf("%s", err)
-					return err
-				}
-				// Write errors to the network are transient.
-				continue
-			}
-
-			transferred += int64(n)
-			if transferred > total {
-				err = errors.New("transferred more than the expected amount")
-				conn.Close()
-				c.log.Printf("%s", err)
-				return err
-			}
-			now := time.Now()
-			if lastUpdate.IsZero() || now.Sub(lastUpdate) > 500*time.Millisecond {
-				lastUpdate = now
-				sendStatus("")
-			}
-
-			time.Sleep(5 * time.Millisecond)
-		}
-
-		if transferred < total {
-			conn.Close()
-			continue
-		}
-
-		ok := transfer.Complete(conn)
-		conn.Close()
-		if ok {
-			return nil
+		c.log.Printf("While transferring to/from %s: %s", server, err)
+		if isFatal {
+			return err
 		}
 	}
 
-	return nil
+	err := errors.New("too many transient errors")
+	c.log.Printf("While tranferring to/from %s: %s", server, err)
+	return err
 }
