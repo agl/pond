@@ -144,13 +144,18 @@ func (sf *StateFile) Read(pw string) (*State, error) {
 	}
 
 	if !bytes.Equal(b[:len(headerMagic)], headerMagic[:]) {
-		state, err := sf.readOldStyle(b)
-		if err != nil {
-			return nil, err
-		}
 		sf.header.NoErasureStorage = proto.Bool(true)
 		if len(pw) > 0 {
 			sf.header.Scrypt = new(Header_SCrypt)
+			sf.header.KdfSalt = b[:32]
+			if err := sf.deriveKey(pw); err != nil {
+				return nil, err
+			}
+		}
+		b = b[32:]
+		state, err := sf.readOldStyle(b)
+		if err != nil {
+			return nil, err
 		}
 		return state, nil
 	}
@@ -349,8 +354,6 @@ func loadOldState(b []byte, key *[32]byte) (*State, error) {
 	if len(b) < SCryptSaltLen+24*smearedCopies {
 		return nil, errors.New("state file is too small to be valid")
 	}
-
-	b = b[SCryptSaltLen:]
 
 	var nonce [24]byte
 	for i := 0; i < smearedCopies; i++ {
