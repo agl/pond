@@ -41,7 +41,7 @@ title: Threat Model
 <p>What a global, passive adversary (one who can observe all Internet traffic) can achieve:</p>
 <ol>
 	<li>A GPA can learn who is using Pond and where their home servers are located.</li>
-	<li>A GPA can learn when messages are sent and to which server.</li>
+	<li>A GPA can learn when messages are sent to a non-home server and which server that is.</li>
 	<li>A GPA can observe detachment uploads and downloads, and who is performing each of those actions.</li>
 	<li>A GPA can observe when a shared-secret key exchange is performed and can limit possible set of other parties to those who were also performing a key exchange at the same time.</li>
 </ol>
@@ -56,7 +56,7 @@ title: Threat Model
 
 <p>What a physical seizure of the user's computer can achieve:</p>
 <ol>
-	<li>A seizure can perform an offline attack against the user's passphrase and obtain undeleted messages if successful.</li>
+	<li>After a seizure, an attacker can perform an offline attack against the user's passphrase and obtain undeleted messages if successful.</li>
 </ol>
 
 <p>What a physical compromise of the user's computer can achieve:</p>
@@ -66,7 +66,7 @@ title: Threat Model
 
 <p>What the shared-secret key exchange (PANDA) server can achieve:</p>
 <ol>
-	<li>The PANDA server can run offline attacks against the shared secret and can MITM any that it can break.</li>
+	<li>The PANDA server can run offline attacks against the shared secret and can MITM any in-progress exchanges that it can break.</li>
 	<li>The PANDA server can drop or delay any key exchanges that it wishes.</li>
 </ol>
 
