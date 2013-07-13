@@ -83,9 +83,11 @@ const (
 	uiStateErasureStorage
 )
 
-const shortTimeFormat = "Jan _2 15:04"
-const logTimeFormat = "Jan _2 15:04:05"
-const keyExchangePEM = "POND KEY EXCHANGE"
+const (
+	shortTimeFormat = "Jan _2 15:04"
+	logTimeFormat   = "Jan _2 15:04:05"
+	keyExchangePEM  = "POND KEY EXCHANGE"
+)
 
 // client is the main structure containing most of the client's state.
 type client struct {

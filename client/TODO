@@ -4,14 +4,12 @@ Allow for immediate deletion.
 Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
-
-
-Medium:
-
-Attachments
-PANDA support
+Yellow indicator for unacked messages.
 
 
 Minor, non-urgent:
 
 Expose server queue length in fetches
+
+Replying to a message, clicking away from the draft and coming back later
+forgets about the reply status.

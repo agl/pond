@@ -53,37 +53,34 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	copy(plaintext[4:], messageBytes)
 	c.randBytes(plaintext[4+len(messageBytes):])
 
+	// The message is encrypted to an ephemeral key so that the sending
+	// client can choose not to store it and then cannot decrypt it once
+	// sent.
+
+	//            +---------------------+            +---...
+	// outerNonce | ephemeral DH public | innerNonce | message
+	// (24 bytes) |                     | (24 bytes) |
+	//            +---------------------+            +---....
+
+	sealedLen := ephemeralBlockLen + nonceLen + len(plaintext) + box.Overhead
+	sealed := make([]byte, sealedLen)
+	var outerNonce [24]byte
+	c.randBytes(outerNonce[:])
+	copy(sealed, outerNonce[:])
+	x := sealed[nonceLen:]
+
+	public, private, err := box.GenerateKey(c.rand)
+	if err != nil {
+		return err
+	}
+	box.Seal(x[:0], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
+	x = x[len(public)+box.Overhead:]
+
 	var innerNonce [24]byte
 	c.randBytes(innerNonce[:])
-	var sealed, innerSealed []byte
-	sealedLen := nonceLen + len(plaintext) + box.Overhead
-	dhPrivate := &to.lastDHPrivate
-
-	// If the other client indicates that they are recent enough then we
-	// generate an ephemeral key, signcrypt it with our DH key and
-	// signcrypt the message with the ephemeral key. In the future, this
-	// will be the default.
-	if to.supportedVersion >= 1 {
-		public, private, err := box.GenerateKey(c.rand)
-		if err != nil {
-			return err
-		}
-		dhPrivate = private
-
-		var outerNonce [24]byte
-		c.randBytes(outerNonce[:])
-		sealedLen += ephemeralBlockLen
-		sealed = make([]byte, sealedLen)
-		copy(sealed, outerNonce[:])
-		box.Seal(sealed[nonceLen:nonceLen], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
-		innerSealed = sealed[ephemeralBlockLen:]
-	} else {
-		sealed = make([]byte, sealedLen)
-		innerSealed = sealed
-	}
-
-	copy(innerSealed, innerNonce[:])
-	box.Seal(innerSealed[nonceLen:nonceLen], plaintext, &innerNonce, &to.theirCurrentDHPublic, dhPrivate)
+	copy(x, innerNonce[:])
+	x = x[nonceLen:]
+	box.Seal(x[:0], plaintext, &innerNonce, &to.theirCurrentDHPublic, private)
 
 	sha := sha256.New()
 	sha.Write(sealed)
@@ -189,43 +186,40 @@ func (c *client) revoke(to *Contact) {
 }
 
 func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
-	plaintext, ok := decryptMessageInner(sealed, nonce, from)
-	if ok {
-		return plaintext, true
-	}
-
-	// The message might have an ephemeral block, the nonce of which has already been split off.
+	// The message starts with an ephemeral block, the nonce of which has
+	// already been split off. See the commends in send.
 	headerLen := ephemeralBlockLen - len(nonce)
-	if len(sealed) > headerLen {
-		publicBytes, ok := decryptMessageInner(sealed[:headerLen], nonce, from)
-		if !ok || len(publicBytes) != 32 {
-			return nil, false
-		}
-		var innerNonce [nonceLen]byte
-		sealed = sealed[headerLen:]
-		copy(innerNonce[:], sealed)
-		sealed = sealed[nonceLen:]
-		var ephemeralPublicKey [32]byte
-		copy(ephemeralPublicKey[:], publicBytes)
-
-		if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
-			return plaintext, ok
-		}
-
-		plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
-		if !ok {
-			return nil, false
-		}
-		// They have clearly received our current DH value. Time to
-		// rotate.
-		copy(from.lastDHPrivate[:], from.currentDHPrivate[:])
-		if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
-			panic(err)
-		}
-		return plaintext, true
+	if len(sealed) < headerLen {
+		return nil, false
 	}
 
-	return nil, false
+	publicBytes, ok := decryptMessageInner(sealed[:headerLen], nonce, from)
+	if !ok || len(publicBytes) != 32 {
+		return nil, false
+	}
+	var innerNonce [nonceLen]byte
+	sealed = sealed[headerLen:]
+	copy(innerNonce[:], sealed)
+	sealed = sealed[nonceLen:]
+	var ephemeralPublicKey [32]byte
+	copy(ephemeralPublicKey[:], publicBytes)
+
+	if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
+		return plaintext, ok
+	}
+
+	plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
+	if !ok {
+		return nil, false
+	}
+
+	// They have clearly received our current DH value. Time to
+	// rotate.
+	copy(from.lastDHPrivate[:], from.currentDHPrivate[:])
+	if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
+		panic(err)
+	}
+	return plaintext, true
 }
 
 func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
@@ -877,12 +871,16 @@ func (c *client) transact() {
 	}
 }
 
+// detachmentTransfer is the interface to either an upload or download so that
+// the code for moving the bytes can be shared between them.
 type detachmentTransfer interface {
+	// Request returns the request that should be sent to the server.
 	Request() *pond.Request
 	// ProcessReply returns a file to read/write from, the starting offset
 	// for the transfer and the total size of the file. The file will
 	// already have been positioned correctly.
 	ProcessReply(*pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error)
+	// Complete is called once the bytes have been transfered. It trues true on success.
 	Complete(conn *transport.Conn) bool
 }
 
