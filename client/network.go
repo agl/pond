@@ -36,6 +36,27 @@ const (
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
+func (c *client) sendAck(msg *InboxMessage) {
+	to := c.contacts[msg.from]
+
+	var nextDHPub [32]byte
+	curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+
+	id := c.randId()
+	err := c.send(to, &pond.Message{
+		Id:               proto.Uint64(id),
+		Time:             proto.Int64(time.Now().Unix()),
+		Body:             make([]byte, 0),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		MyNextDh:         nextDHPub[:],
+		InReplyTo:        msg.message.Id,
+		SupportedVersion: proto.Int32(protoVersion),
+	})
+	if err != nil {
+		c.log.Errorf("Error sending message: %s", err)
+	}
+}
+
 // send encrypts |message| and enqueues it for transmission.
 func (c *client) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)

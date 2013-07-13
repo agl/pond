@@ -9,7 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"path/filepath"
+	"os"
 
+	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
@@ -1225,3 +1228,690 @@ SharedSecretEvent:
 	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
 	return c.showContact(contact.id)
 }
+
+// usageString returns a description of the amount of space taken up by a body
+// with the given contents and a bool indicating overflow.
+func usageString(draft *Draft) (string, bool) {
+	var replyToId *uint64
+	if draft.inReplyTo != 0 {
+		replyToId = proto.Uint64(1)
+	}
+	var dhPub [32]byte
+
+	msg := &pond.Message{
+		Id:               proto.Uint64(0),
+		Time:             proto.Int64(1 << 62),
+		Body:             []byte(draft.body),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		InReplyTo:        replyToId,
+		MyNextDh:         dhPub[:],
+		Files:            draft.attachments,
+		DetachedFiles:    draft.detachments,
+		SupportedVersion: proto.Int32(protoVersion),
+	}
+
+	serialized, err := proto.Marshal(msg)
+	if err != nil {
+		panic("error while serialising candidate Message: " + err.Error())
+	}
+
+	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
+	return s, len(serialized) > pond.MaxSerializedMessage
+}
+
+func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
+	var labelName string
+	var labelColor uint32
+	if isError {
+		labelName = fmt.Sprintf("attachment-error-%x", id)
+		labelColor = colorRed
+	} else {
+		labelName = fmt.Sprintf("attachment-label-%x", id)
+	}
+	return Frame{
+		widgetBase: widgetBase{
+			name:    fmt.Sprintf("attachment-frame-%x", id),
+			padding: 1,
+		},
+		child: VBox{
+			widgetBase: widgetBase{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+			},
+			children: append([]Widget{
+				HBox{
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{
+								padding:    2,
+								foreground: labelColor,
+								name:       labelName,
+							},
+							yAlign: 0.5,
+							text:   label,
+						},
+						VBox{
+							widgetBase: widgetBase{expand: true, fill: true},
+						},
+						Button{
+							widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+							image:      indicatorRemove,
+						},
+					},
+				},
+			}, extraWidgets...),
+		},
+	}
+}
+
+type DetachmentUI interface {
+	IsValid(id uint64) bool
+	ProgressName(id uint64) string
+	VBoxName(id uint64) string
+	OnFinal(id uint64)
+	OnSuccess(id uint64, detachment *pond.Message_Detachment)
+}
+
+type ComposeDetachmentUI struct {
+	draft       *Draft
+	detachments map[uint64]int
+	ui          UI
+	final       func()
+}
+
+func (i ComposeDetachmentUI) IsValid(id uint64) bool {
+	_, ok := i.draft.pendingDetachments[id]
+	return ok
+}
+
+func (i ComposeDetachmentUI) ProgressName(id uint64) string {
+	return fmt.Sprintf("attachment-progress-%x", id)
+}
+
+func (i ComposeDetachmentUI) VBoxName(id uint64) string {
+	return fmt.Sprintf("attachment-vbox-%x", id)
+}
+
+func (i ComposeDetachmentUI) OnFinal(id uint64) {
+	delete(i.draft.pendingDetachments, id)
+	i.final()
+}
+
+func (i ComposeDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
+	i.detachments[id] = len(i.draft.detachments)
+	i.draft.detachments = append(i.draft.detachments, detachment)
+}
+
+// maybeProcessDetachmentMsg is called to process a possible message from a
+// background, detachment task. It returns true if event was handled.
+func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
+	if derr, ok := event.(DetachmentError); ok {
+		id := derr.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		c.ui.Actions() <- Destroy{name: ui.ProgressName(id)}
+		c.ui.Actions() <- Append{
+			name: ui.VBoxName(id),
+			children: []Widget{
+				Label{
+					widgetBase: widgetBase{
+						foreground: colorRed,
+					},
+					text: derr.err.Error(),
+				},
+			},
+		}
+		ui.OnFinal(id)
+		c.ui.Signal()
+		return true
+	}
+	if prog, ok := event.(DetachmentProgress); ok {
+		id := prog.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		if prog.total == 0 {
+			return true
+		}
+		f := float64(prog.done) / float64(prog.total)
+		if f > 1 {
+			f = 1
+		}
+		c.ui.Actions() <- SetProgress{
+			name:     ui.ProgressName(id),
+			s:        prog.status,
+			fraction: f,
+		}
+		c.ui.Signal()
+		return true
+	}
+	if complete, ok := event.(DetachmentComplete); ok {
+		id := complete.id
+		if !ui.IsValid(id) {
+			return true
+		}
+		c.ui.Actions() <- Destroy{
+			name: ui.ProgressName(id),
+		}
+		ui.OnFinal(id)
+		ui.OnSuccess(id, complete.detachment)
+		c.ui.Signal()
+		return true
+	}
+
+	return false
+}
+
+func (c *client) updateUsage(validContactSelected bool, draft *Draft) bool {
+	usageMessage, over := usageString(draft)
+	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
+	color := uint32(colorBlack)
+	if over {
+		color = colorRed
+		c.ui.Actions() <- Sensitive{name: "send", sensitive: false}
+	} else if validContactSelected {
+		c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
+	}
+	c.ui.Actions() <- SetForeground{name: "usage", foreground: color}
+	return over
+}
+
+func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
+	if draft != nil && inReplyTo != nil {
+		panic("draft and inReplyTo both set")
+	}
+
+	var contactNames []string
+	for _, contact := range c.contacts {
+		if !contact.revokedUs {
+			contactNames = append(contactNames, contact.name)
+		}
+	}
+
+	var preSelected string
+	if inReplyTo != nil {
+		if from, ok := c.contacts[inReplyTo.from]; ok {
+			preSelected = from.name
+		}
+	}
+
+	attachments := make(map[uint64]int)
+	detachments := make(map[uint64]int)
+
+	if draft != nil {
+		if to, ok := c.contacts[draft.to]; ok {
+			preSelected = to.name
+		}
+		for i := range draft.attachments {
+			attachments[c.randId()] = i
+		}
+		for i := range draft.detachments {
+			detachments[c.randId()] = i
+		}
+	}
+
+	if draft == nil {
+		var replyToId, contactId uint64
+		from := preSelected
+
+		if inReplyTo != nil {
+			replyToId = inReplyTo.id
+			contactId = inReplyTo.from
+		}
+		if len(preSelected) == 0 {
+			from = "Unknown"
+		}
+
+		draft = &Draft{
+			id:        c.randId(),
+			inReplyTo: replyToId,
+			to:        contactId,
+			created:   time.Now(),
+		}
+
+		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
+		c.draftsUI.Select(draft.id)
+		c.drafts[draft.id] = draft
+	}
+
+	initialUsageMessage, overSize := usageString(draft)
+	validContactSelected := len(preSelected) > 0
+
+	lhs := VBox{
+		children: []Widget{
+			HBox{
+				widgetBase: widgetBase{padding: 2},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "TO",
+						yAlign:     0.5,
+					},
+					Combo{
+						widgetBase: widgetBase{
+							name:        "to",
+							insensitive: len(preSelected) > 0 && inReplyTo != nil,
+						},
+						labels:      contactNames,
+						preSelected: preSelected,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 2},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "SIZE",
+						yAlign:     0.5,
+					},
+					Label{
+						widgetBase: widgetBase{name: "usage"},
+						text:       initialUsageMessage,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 0},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						text:       "ATTACHMENTS",
+						yAlign:     0.5,
+					},
+					Button{
+						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
+						image:      indicatorAdd,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 0},
+				children: []Widget{
+					VBox{
+						widgetBase: widgetBase{name: "filesvbox", padding: 25},
+					},
+				},
+			},
+		},
+	}
+	rhs := VBox{
+		widgetBase: widgetBase{padding: 5},
+		children: []Widget{
+			Button{
+				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2},
+				text:       "Send",
+			},
+			Button{
+				widgetBase: widgetBase{name: "discard", padding: 2},
+				text:       "Discard",
+			},
+		},
+	}
+	ui := VBox{
+		children: []Widget{
+			EventBox{
+				widgetBase: widgetBase{background: colorHeaderBackground},
+				child: VBox{
+					children: []Widget{
+						HBox{
+							widgetBase: widgetBase{padding: 10},
+							children: []Widget{
+								Label{
+									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
+									text:       "COMPOSE",
+								},
+							},
+						},
+					},
+				},
+			},
+			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			HBox{
+				children: []Widget{
+					lhs,
+					Label{
+						widgetBase: widgetBase{expand: true, fill: true},
+					},
+					rhs,
+				},
+			},
+			Scrolled{
+				widgetBase: widgetBase{expand: true, fill: true},
+				horizontal: true,
+				child: TextView{
+					widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+					editable:       true,
+					wrap:           true,
+					updateOnChange: true,
+					spellCheck:     true,
+					text:           draft.body,
+				},
+			},
+		},
+	}
+
+	c.ui.Actions() <- SetChild{name: "right", child: ui}
+
+	if draft.pendingDetachments == nil {
+		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
+	}
+
+	var initialAttachmentChildren []Widget
+	for id, index := range attachments {
+		attachment := draft.attachments[index]
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)), false, nil))
+	}
+	for id, index := range detachments {
+		detachment := draft.detachments[index]
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
+	}
+	for id, pending := range draft.pendingDetachments {
+		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", filepath.Base(pending.path), pending.size), false, []Widget{
+			Progress{
+				widgetBase: widgetBase{
+					name: fmt.Sprintf("attachment-progress-%x", id),
+				},
+			},
+		}))
+	}
+
+	if len(initialAttachmentChildren) > 0 {
+		c.ui.Actions() <- Append{
+			name:     "filesvbox",
+			children: initialAttachmentChildren,
+		}
+	}
+
+	detachmentUI := ComposeDetachmentUI{draft, detachments, c.ui, func() {
+		overSize = c.updateUsage(validContactSelected, draft)
+	}}
+
+	c.ui.Actions() <- UIState{uiStateCompose}
+	c.ui.Signal()
+
+	for {
+		event, wanted := c.nextEvent()
+		if wanted {
+			return event
+		}
+
+		if update, ok := event.(Update); ok {
+			overSize = c.updateUsage(validContactSelected, draft)
+			draft.body = update.text
+			c.ui.Signal()
+			continue
+		}
+
+		if open, ok := event.(OpenResult); ok && open.ok && open.arg == nil {
+			// Opening a file for an attachment.
+			contents, size, err := func(path string) (contents []byte, size int64, err error) {
+				file, err := os.Open(path)
+				if err != nil {
+					return
+				}
+				defer file.Close()
+
+				fi, err := file.Stat()
+				if err != nil {
+					return
+				}
+				if fi.Size() < pond.MaxSerializedMessage-500 {
+					contents, err = ioutil.ReadAll(file)
+					size = -1
+				} else {
+					size = fi.Size()
+				}
+				return
+			}(open.path)
+
+			base := filepath.Base(open.path)
+			id := c.randId()
+
+			var label string
+			var extraWidgets []Widget
+			if err != nil {
+				label = base + ": " + err.Error()
+			} else if size > 0 {
+				// Oversize attachment.
+				label = fmt.Sprintf("%s (%d bytes, external)", base, size)
+				extraWidgets = []Widget{VBox{
+					widgetBase: widgetBase{
+						name: fmt.Sprintf("attachment-addi-%x", id),
+					},
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{
+								padding: 4,
+							},
+							text: "This file is too large to send via Pond directly. Instead, this Pond message can contain the encryption key for the file and the encrypted file can be transported via a non-Pond mechanism.",
+							wrap: 300,
+						},
+						HBox{
+							children: []Widget{
+								Button{
+									widgetBase: widgetBase{
+										name: fmt.Sprintf("attachment-convert-%x", id),
+									},
+									text: "Save Encrypted",
+								},
+								Button{
+									widgetBase: widgetBase{
+										name: fmt.Sprintf("attachment-upload-%x", id),
+									},
+									text: "Upload",
+								},
+							},
+						},
+					},
+				}}
+
+				draft.pendingDetachments[id] = &pendingDetachment{
+					path: open.path,
+					size: size,
+				}
+			} else {
+				label = fmt.Sprintf("%s (%d bytes)", base, len(contents))
+				a := &pond.Message_Attachment{
+					Filename: proto.String(filepath.Base(open.path)),
+					Contents: contents,
+				}
+				attachments[id] = len(draft.attachments)
+				draft.attachments = append(draft.attachments, a)
+			}
+
+			c.ui.Actions() <- Append{
+				name: "filesvbox",
+				children: []Widget{
+					widgetForAttachment(id, label, err != nil, extraWidgets),
+				},
+			}
+			overSize = c.updateUsage(validContactSelected, draft)
+			c.ui.Signal()
+		}
+		if open, ok := event.(OpenResult); ok && open.ok && open.arg != nil {
+			// Saving a detachment.
+			id := open.arg.(uint64)
+			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.ui.Actions() <- Append{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+				children: []Widget{
+					Progress{
+						widgetBase: widgetBase{
+							name: fmt.Sprintf("attachment-progress-%x", id),
+						},
+					},
+				},
+			}
+			draft.pendingDetachments[id].cancel = c.startEncryption(id, open.path, draft.pendingDetachments[id].path)
+			c.ui.Signal()
+		}
+
+		if c.maybeProcessDetachmentMsg(event, detachmentUI) {
+			continue
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		if click.name == "attach" {
+			c.ui.Actions() <- FileOpen{
+				title: "Attach File",
+			}
+			c.ui.Signal()
+			continue
+		}
+		if click.name == "to" {
+			selected := click.combos["to"]
+			if len(selected) > 0 {
+				validContactSelected = true
+			}
+			for _, contact := range c.contacts {
+				if contact.name == selected {
+					draft.to = contact.id
+				}
+			}
+			c.draftsUI.SetLine(draft.id, selected)
+			if validContactSelected && !overSize {
+				c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
+				c.ui.Signal()
+			}
+			continue
+		}
+		if click.name == "discard" {
+			c.draftsUI.Remove(draft.id)
+			delete(c.drafts, draft.id)
+			c.save()
+			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.ui.Actions() <- UIState{uiStateMain}
+			c.ui.Signal()
+			return nil
+		}
+		if strings.HasPrefix(click.name, "remove-") {
+			// One of the attachment remove buttons.
+			id, err := strconv.ParseUint(click.name[7:], 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
+			if index, ok := attachments[id]; ok {
+				draft.attachments = append(draft.attachments[:index], draft.attachments[index+1:]...)
+				delete(attachments, id)
+			}
+			if detachment, ok := draft.pendingDetachments[id]; ok {
+				if detachment.cancel != nil {
+					detachment.cancel()
+				}
+				delete(draft.pendingDetachments, id)
+			}
+			if index, ok := detachments[id]; ok {
+				draft.detachments = append(draft.detachments[:index], draft.detachments[index+1:]...)
+				delete(detachments, id)
+			}
+			overSize = c.updateUsage(validContactSelected, draft)
+			c.ui.Signal()
+			continue
+		}
+		const convertPrefix = "attachment-convert-"
+		if strings.HasPrefix(click.name, convertPrefix) {
+			// One of the attachment "Save Encrypted" buttons.
+			idStr := click.name[len(convertPrefix):]
+			id, err := strconv.ParseUint(idStr, 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- FileOpen{
+				save:  true,
+				title: "Save encrypted file",
+				arg:   id,
+			}
+			c.ui.Signal()
+		}
+		const uploadPrefix = "attachment-upload-"
+		if strings.HasPrefix(click.name, uploadPrefix) {
+			idStr := click.name[len(uploadPrefix):]
+			id, err := strconv.ParseUint(idStr, 16, 64)
+			if err != nil {
+				panic(click.name)
+			}
+			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.ui.Actions() <- Append{
+				name: fmt.Sprintf("attachment-vbox-%x", id),
+				children: []Widget{
+					Progress{
+						widgetBase: widgetBase{
+							name: fmt.Sprintf("attachment-progress-%x", id),
+						},
+					},
+				},
+			}
+			draft.pendingDetachments[id].cancel = c.startUpload(id, draft.pendingDetachments[id].path)
+			c.ui.Signal()
+		}
+
+		if click.name != "send" {
+			continue
+		}
+
+		toName := click.combos["to"]
+		if len(toName) == 0 {
+			continue
+		}
+
+		var to *Contact
+		for _, contact := range c.contacts {
+			if contact.name == toName {
+				to = contact
+				break
+			}
+		}
+
+		var nextDHPub [32]byte
+		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+
+		var replyToId *uint64
+		if inReplyTo != nil {
+			replyToId = inReplyTo.message.Id
+		}
+
+		body := click.textViews["body"]
+		// Zero length bodies are ACKs.
+		if len(body) == 0 {
+			body = " "
+		}
+
+		id := c.randId()
+		err := c.send(to, &pond.Message{
+			Id:               proto.Uint64(id),
+			Time:             proto.Int64(time.Now().Unix()),
+			Body:             []byte(body),
+			BodyEncoding:     pond.Message_RAW.Enum(),
+			InReplyTo:        replyToId,
+			MyNextDh:         nextDHPub[:],
+			Files:            draft.attachments,
+			DetachedFiles:    draft.detachments,
+			SupportedVersion: proto.Int32(protoVersion),
+		})
+		if err != nil {
+			// TODO: handle this case better.
+			println(err.Error())
+			c.log.Errorf("Error sending message: %s", err)
+			continue
+		}
+		if inReplyTo != nil {
+			inReplyTo.acked = true
+		}
+
+		c.draftsUI.Remove(draft.id)
+		delete(c.drafts, draft.id)
+
+		c.save()
+
+		c.outboxUI.Select(id)
+		return c.showOutbox(id)
+	}
+
+	return nil
+}
+
