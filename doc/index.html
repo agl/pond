@@ -37,7 +37,7 @@ title: Pond
 
 <p>Ubuntu only has Go 1.0, but that's sufficient (although future commits may accidently break compatibility because I develop with 1.1).</p>
 
-<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers tor
+<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers tor mercurial
 cd
 mkdir gopkg
 export GOPATH=$HOME/gopkg
@@ -57,6 +57,8 @@ cd go/src
 ./all.bash
 cd
 export PATH=$PATH:$HOME/go/bin
+mkdir gopkg
+export GOPATH=$HOME/gopkg
 go get -tags fedora github.com/agl/pond/client
 go install github.com/agl/pond/client</pre>
 
