@@ -5,7 +5,7 @@ title: Technical
 
 <p>Pond consists of users and servers. Servers exist in order to provide availability by accepting messages for a user while that user may be offline. Servers may be freely chosen by users and each user may have their own server if they wish.</p>
 
-<p>Pond assumes the existence of an overlay network that prevents a network attacker from learning which servers a user is connecting to. That network is take to be Tor for the remainder of this document and servers are Tor hidden services. Since a global, passive attacker can deanonymise Tor, that attacker is capable of violating this assumption and breaking Pond. Other attacks on Tor may also break this assumption.</p>
+<p>Pond assumes the existence of an overlay network that prevents a network attacker from learning which servers a user is connecting to. That network is taken to be Tor for the remainder of this document and servers are Tor hidden services. Since a global, passive attacker can deanonymise Tor, that attacker is capable of violating this assumption and breaking Pond. Other attacks on Tor may also break this assumption.</p>
 
 <p>Users are assumed to have trustworthy computers with storage that reliably deletes old information. For more details, see the <a href="threat.html">threat model</a>.</p>
 
@@ -17,7 +17,7 @@ title: Technical
 
 <p>Users make connections periodically in order to send and receive messages. The time between each connection is exponentially distributed. Each connection is either to the user's own server, to fetch any messages that may be waiting, or to the server of another user, to deliver a message. Connections to the user's own server for fetching messages are authenticated as that user. Connections for delivering messages (whether to a user on the same server or not) are authenticated as fresh, random identities. These connections need not be authenticated, but it's easier to keep the traffic profile identical if they are authenticated with a random key.</p>
 
-<p>From the point of view of the network close to the user, all that is seen are randomly timed connections over Tor, all with an identical traffic profiles. That profile is fairly distinctive and would allow the network to learn that a host is using Pond, but the network cannot tell when messages are being sent or received.</p>
+<p>From the point of view of the network close to the user, all that is seen are randomly timed connections over Tor, all with identical traffic profiles. That profile is fairly distinctive and would allow the network to learn that a host is using Pond, but the network cannot tell when messages are being sent or received.</p>
 
 <p>From the point of view of the user's server, it receives exponentially distributed connections from the user, over Tor, and can reply with a message when one is waiting. The connections are randomly timed, rather than having a constant period, in order to avoid the server learning when the user is sending messages. If a server saw connections at 11 minutes past the hour, 21 minutes and 41 minutes, it's not too hard to guess when the user connected to another server in order to deliver a message. With an exponential distribution, although there is a slight, probabilistic bias in the timing between two fetches when the user sent a message in between, we can assume that messages are sent by users on a reasonably random basis and so there's no practical use for the bias.</p>
 
