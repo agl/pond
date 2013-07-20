@@ -1430,3 +1430,86 @@ func TestReadingOldStateFiles(t *testing.T) {
 	client1.Reload()
 	client1.AdvanceTo(uiStateMain)
 }
+
+func testReplyACKs(t *testing.T, reloadDraft bool) {
+	// Test that a message is acked by sending a reply. If reloadDraft is
+	// true then the message is reloaded as draft before sending.
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+	if !client1.outbox[0].acked.IsZero() {
+		t.Fatalf("client1 incorrectly believes that its message has been acked")
+	}
+	client2.ui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.ui.events <- Click{
+		name: "reply",
+	}
+	client2.AdvanceTo(uiStateCompose)
+
+	if reloadDraft {
+		client2.ui.events <- Click{
+			name: client2.draftsUI.entries[0].boxName,
+		}
+		client2.AdvanceTo(uiStateCompose)
+	}
+
+	client2.ui.events <- Click{
+		name:      "send",
+		combos:    map[string]string{"to": "client1"},
+		textViews: map[string]string{"body": "reply message"},
+	}
+
+	client2.AdvanceTo(uiStateOutbox)
+
+	ackChan := make(chan bool)
+	client2.fetchNowChan <- ackChan
+	<-ackChan
+
+	from, _ = fetchMessage(client1)
+	if from != "client2" {
+		t.Fatalf("ack received from wrong contact: %s", from)
+	}
+
+	if client1.outbox[0].acked.IsZero() {
+		t.Fatalf("client1 doesn't believe that its message has been acked")
+	}
+	if !client2.inbox[0].acked {
+		t.Fatalf("client2 doesn't believe that it has acked the message")
+	}
+}
+
+func TestReplyACKs(t *testing.T) {
+	testReplyACKs(t, false)
+}
+
+func TestReplyACKsWithDraft(t *testing.T) {
+	testReplyACKs(t, true)
+}

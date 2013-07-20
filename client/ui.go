@@ -1450,6 +1450,15 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		}
 	}
 
+	if draft != nil && draft.inReplyTo != 0 {
+		for _, msg := range c.inbox {
+			if msg.id == draft.inReplyTo {
+				inReplyTo = msg
+				break
+			}
+		}
+	}
+
 	if draft == nil {
 		var replyToId, contactId uint64
 		from := preSelected
