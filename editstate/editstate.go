@@ -117,7 +117,8 @@ func serialiseValue(out io.Writer, name string, v reflect.Value, t reflect.Type,
 		var msg pond.Message
 		if err := proto.Unmarshal(v.Bytes(), &msg); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to unmarshal Message: %s\n", err)
-			panic("deserialisation error")
+			fmt.Fprintf(out, "BAD MESSAGE: \"%x\"\n", v.Bytes())
+			return
 		}
 		v = reflect.ValueOf(msg)
 		serialiseValue(out, name, v, v.Type(), context, level, entities)
