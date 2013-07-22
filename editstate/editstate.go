@@ -25,7 +25,10 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-var stateFileName *string = flag.String("state-file", "state", "File in which to save persistent state")
+var (
+	stateFileName *string = flag.String("state-file", "state", "File in which to save persistent state")
+	skipChecks    *bool   = flag.Bool("skip-checks", false, "If true, system sanity checks are skipped")
+)
 
 func main() {
 	flag.Parse()
@@ -406,9 +409,11 @@ func parseValue(v reflect.Value, t reflect.StructField, context string, in *Toke
 }
 
 func do() bool {
-	if err := system.IsSafe(); err != nil {
-		fmt.Fprintf(os.Stderr, "System checks failed: %s\n", err)
-		return false
+	if !*skipChecks {
+		if err := system.IsSafe(); err != nil {
+			fmt.Fprintf(os.Stderr, "System checks failed: %s\n", err)
+			return false
+		}
 	}
 
 	editor := os.Getenv("EDITOR")
