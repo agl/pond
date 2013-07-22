@@ -13,3 +13,9 @@ Expose server queue length in fetches
 
 Replying to a message, clicking away from the draft and coming back later
 forgets about the reply status.
+
+
+BUGS:
+
+When revoking, the wrong server is used and revoking a pending contact causes a revocation that can't be sent.
+A key exchange should send the group that's currently on the server, not the current group.
