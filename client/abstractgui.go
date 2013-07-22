@@ -2,7 +2,7 @@ package main
 
 const uiActionsQueueLen = 256
 
-type UI interface {
+type GUI interface {
 	Actions() chan<- interface{}
 	Events() <-chan interface{}
 	Signal()

@@ -76,7 +76,7 @@ func (l *Log) add(isError bool, format string, args ...interface{}) {
 	}
 }
 
-func (c *client) logUI() interface{} {
+func (c *guiClient) logUI() interface{} {
 	ui := VBox{
 		children: []Widget{
 			EventBox{
@@ -142,10 +142,10 @@ func (c *client) logUI() interface{} {
 	}
 	c.log.Unlock()
 
-	c.ui.Actions() <- SetChild{name: "right", child: ui}
-	c.ui.Actions() <- SetTextView{name: "log", text: log}
-	c.ui.Actions() <- UIState{uiStateLog}
-	c.ui.Signal()
+	c.gui.Actions() <- SetChild{name: "right", child: ui}
+	c.gui.Actions() <- SetTextView{name: "log", text: log}
+	c.gui.Actions() <- UIState{uiStateLog}
+	c.gui.Signal()
 
 	for {
 		event, wanted := c.nextEvent()
@@ -173,8 +173,8 @@ func (c *client) logUI() interface{} {
 		}
 		c.log.Unlock()
 
-		c.ui.Actions() <- SetTextView{name: "log", text: log}
-		c.ui.Signal()
+		c.gui.Actions() <- SetTextView{name: "log", text: log}
+		c.gui.Signal()
 	}
 
 	return nil

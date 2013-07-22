@@ -5,20 +5,951 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-	"path/filepath"
-	"os"
 
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
+	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
 
-func (c *client) showInbox(id uint64) interface{} {
+const (
+	colorDefault               = 0
+	colorWhite                 = 0xffffff
+	colorGray                  = 0xfafafa
+	colorHighlight             = 0xffebcd
+	colorSubline               = 0x999999
+	colorHeaderBackground      = 0xececed
+	colorHeaderForeground      = 0x777777
+	colorHeaderForegroundSmall = 0x7b7f83
+	colorSep                   = 0xc9c9c9
+	colorTitleForeground       = 0xdddddd
+	colorBlack                 = 1
+	colorRed                   = 0xff0000
+	colorError                 = 0xff0000
+)
+
+const (
+	fontLoadTitle   = "DejaVu Serif 30"
+	fontLoadLarge   = "Arial Bold 30"
+	fontListHeading = "Ariel Bold 11"
+	fontListEntry   = "Liberation Sans 12"
+	fontListSubline = "Liberation Sans 10"
+	fontMainTitle   = "Arial 16"
+	fontMainLabel   = "Arial Bold 9"
+	fontMainBody    = "Arial 12"
+	fontMainMono    = "Liberation Mono 10"
+)
+
+// uiState values are used for synchronisation with tests.
+const (
+	uiStateInvalid = iota
+	uiStateLoading
+	uiStateError
+	uiStateMain
+	uiStateCreateAccount
+	uiStateCreatePassphrase
+	uiStateNewContact
+	uiStateNewContact2
+	uiStateShowContact
+	uiStateCompose
+	uiStateOutbox
+	uiStateShowIdentity
+	uiStatePassphrase
+	uiStateInbox
+	uiStateLog
+	uiStateRevocationProcessed
+	uiStatePANDAComplete
+	uiStateErasureStorage
+)
+
+type guiClient struct {
+	client
+
+	gui                                               GUI
+	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
+}
+
+func (c *guiClient) nextEvent() (event interface{}, wanted bool) {
+	var ok bool
+	select {
+	case event, ok = <-c.gui.Events():
+		if !ok {
+			c.ShutdownAndSuspend()
+		}
+	case newMessage := <-c.newMessageChan:
+		c.processNewMessage(newMessage)
+		return
+	case msr := <-c.messageSentChan:
+		c.processMessageSent(msr)
+		return
+	case update := <-c.pandaChan:
+		c.processPANDAUpdate(update)
+		return
+	case event = <-c.backgroundChan:
+		break
+	case <-c.log.updateChan:
+		return
+	}
+
+	if _, ok := c.contactsUI.Event(event); ok {
+		wanted = true
+	}
+	if _, ok := c.outboxUI.Event(event); ok {
+		wanted = true
+	}
+	if _, ok := c.inboxUI.Event(event); ok {
+		wanted = true
+	}
+	if _, ok := c.clientUI.Event(event); ok {
+		wanted = true
+	}
+	if _, ok := c.draftsUI.Event(event); ok {
+		wanted = true
+	}
+	if click, ok := event.(Click); ok {
+		wanted = wanted || click.name == "newcontact" || click.name == "compose"
+	}
+	return
+}
+
+// torPromptUI displays a prompt to start Tor and tries once a second until it
+// can be found.
+func (c *guiClient) torPromptUI() error {
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Cannot find Tor",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150...",
+				wrap: 600,
+			},
+		},
+	}
+
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Signal()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case _, ok := <-c.gui.Events():
+			if !ok {
+				c.ShutdownAndSuspend()
+			}
+		case <-ticker.C:
+			if c.detectTor() {
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *guiClient) sleepUI(d time.Duration) error {
+	select {
+	case _, ok := <-c.gui.Events():
+		if !ok {
+			// User asked to close the window.
+			close(c.gui.Actions())
+			select {}
+		}
+	case <-time.After(d):
+		break
+	}
+
+	return nil
+}
+
+func (c *guiClient) initUI() {
+	ui := VBox{
+		widgetBase: widgetBase{
+			background: colorWhite,
+		},
+		children: []Widget{
+			EventBox{
+				widgetBase: widgetBase{background: 0x333355},
+				child: HBox{
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{
+								foreground: colorWhite,
+								padding:    10,
+								font:       fontLoadTitle,
+							},
+							text: "Pond",
+						},
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{
+					name:    "body",
+					padding: 30,
+					expand:  true,
+					fill:    true,
+				},
+			},
+		},
+	}
+	c.gui.Actions() <- Reset{ui}
+}
+
+func (c *guiClient) loadingUI() {
+	loading := EventBox{
+		widgetBase: widgetBase{expand: true, fill: true},
+		child: Label{
+			widgetBase: widgetBase{
+				foreground: colorTitleForeground,
+				font:       fontLoadLarge,
+			},
+			text:   "Loading...",
+			xAlign: 0.5,
+			yAlign: 0.5,
+		},
+	}
+
+	c.gui.Actions() <- SetBoxContents{name: "body", child: loading}
+	c.gui.Actions() <- UIState{uiStateLoading}
+	c.gui.Signal()
+}
+
+func (c *guiClient) DeselectAll() {
+	c.inboxUI.Deselect()
+	c.outboxUI.Deselect()
+	c.contactsUI.Deselect()
+	c.clientUI.Deselect()
+	c.draftsUI.Deselect()
+}
+
+var rightPlaceholderUI = EventBox{
+	widgetBase: widgetBase{background: colorGray, name: "right"},
+	child: Label{
+		widgetBase: widgetBase{
+			foreground: colorTitleForeground,
+			font:       fontLoadLarge,
+		},
+		text:   "Pond",
+		xAlign: 0.5,
+		yAlign: 0.5,
+	},
+}
+
+func (c *guiClient) updateWindowTitle() {
+	unreadCount := 0
+
+	for _, msg := range c.inbox {
+		if msg.message != nil && !msg.read && len(msg.message.Body) > 0 {
+			unreadCount++
+		}
+	}
+
+	if unreadCount == 0 {
+		c.gui.Actions() <- SetTitle{"Pond"}
+	} else {
+		c.gui.Actions() <- SetTitle{fmt.Sprintf("Pond (%d)", unreadCount)}
+	}
+	c.gui.Signal()
+}
+
+func (c *guiClient) mainUI() {
+	ui := Paned{
+		left: Scrolled{
+			viewport: true,
+			child: EventBox{
+				widgetBase: widgetBase{background: colorGray},
+				child: VBox{
+					children: []Widget{
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Inbox",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						VBox{widgetBase: widgetBase{name: "inboxVbox"}},
+
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Outbox",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						HBox{
+							widgetBase: widgetBase{padding: 6},
+							children: []Widget{
+								HBox{widgetBase: widgetBase{expand: true}},
+								HBox{
+									widgetBase: widgetBase{padding: 8},
+									children: []Widget{
+										VBox{
+											widgetBase: widgetBase{padding: 8},
+											children: []Widget{
+												Button{
+													widgetBase: widgetBase{width: 100, name: "compose"},
+													text:       "Compose",
+												},
+											},
+										},
+									},
+								},
+								HBox{widgetBase: widgetBase{expand: true}},
+							},
+						},
+						VBox{widgetBase: widgetBase{name: "outboxVbox"}},
+
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Drafts",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						VBox{widgetBase: widgetBase{name: "draftsVbox"}},
+
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Contacts",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						HBox{
+							widgetBase: widgetBase{padding: 6},
+							children: []Widget{
+								HBox{widgetBase: widgetBase{expand: true}},
+								HBox{
+									widgetBase: widgetBase{padding: 8},
+									children: []Widget{
+										VBox{
+											widgetBase: widgetBase{padding: 8},
+											children: []Widget{
+												Button{
+													widgetBase: widgetBase{width: 100, name: "newcontact"},
+													text:       "Add",
+												},
+											},
+										},
+									},
+								},
+								HBox{widgetBase: widgetBase{expand: true}},
+							},
+						},
+						VBox{widgetBase: widgetBase{name: "contactsVbox"}},
+
+						EventBox{
+							widgetBase: widgetBase{background: colorHeaderBackground},
+							child: Label{
+								widgetBase: widgetBase{
+									foreground: colorHeaderForegroundSmall,
+									padding:    10,
+									font:       fontListHeading,
+								},
+								xAlign: 0.5,
+								text:   "Client",
+							},
+						},
+						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						VBox{
+							widgetBase: widgetBase{name: "clientVbox"},
+						},
+					},
+				},
+			},
+		},
+		right: Scrolled{
+			horizontal: true,
+			viewport:   true,
+			child:      rightPlaceholderUI,
+		},
+	}
+
+	c.gui.Actions() <- Reset{ui}
+	c.gui.Signal()
+
+	c.contactsUI = &listUI{
+		gui:      c.gui,
+		vboxName: "contactsVbox",
+	}
+
+	for id, contact := range c.contacts {
+		subline := ""
+		if contact.isPending {
+			subline = "pending"
+		}
+		if len(contact.pandaResult) > 0 {
+			subline = "failed"
+		}
+		c.contactsUI.Add(id, contact.name, subline, indicatorNone)
+	}
+
+	c.inboxUI = &listUI{
+		gui:      c.gui,
+		vboxName: "inboxVbox",
+	}
+
+	for _, msg := range c.inbox {
+		var subline string
+		i := indicatorNone
+
+		if msg.message == nil {
+			subline = "pending"
+		} else {
+			if len(msg.message.Body) == 0 {
+				continue
+			}
+			if !msg.read {
+				i = indicatorBlue
+			}
+			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
+		}
+		fromString := "Home Server"
+		if msg.from != 0 {
+			fromString = c.contacts[msg.from].name
+		}
+		c.inboxUI.Add(msg.id, fromString, subline, i)
+	}
+	c.updateWindowTitle()
+
+	c.outboxUI = &listUI{
+		gui:      c.gui,
+		vboxName: "outboxVbox",
+	}
+
+	for _, msg := range c.outbox {
+		if msg.revocation {
+			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
+			c.outboxUI.SetInsensitive(msg.id)
+			continue
+		}
+		if len(msg.message.Body) > 0 {
+			subline := msg.created.Format(shortTimeFormat)
+			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
+		}
+	}
+
+	c.draftsUI = &listUI{
+		gui:      c.gui,
+		vboxName: "draftsVbox",
+	}
+
+	for _, draft := range c.drafts {
+		to := "Unknown"
+		if draft.to != 0 {
+			to = c.contacts[draft.to].name
+		}
+		subline := draft.created.Format(shortTimeFormat)
+		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
+	}
+
+	c.clientUI = &listUI{
+		gui:      c.gui,
+		vboxName: "clientVbox",
+	}
+	const (
+		clientUIIdentity = iota + 1
+		clientUIActivity
+	)
+	c.clientUI.Add(clientUIIdentity, "Identity", "", indicatorNone)
+	c.clientUI.Add(clientUIActivity, "Activity Log", "", indicatorNone)
+
+	c.gui.Actions() <- UIState{uiStateMain}
+	c.gui.Signal()
+
+	var nextEvent interface{}
+	for {
+		event := nextEvent
+		nextEvent = nil
+		if event == nil {
+			event, _ = c.nextEvent()
+		}
+		if event == nil {
+			continue
+		}
+
+		c.DeselectAll()
+		if id, ok := c.inboxUI.Event(event); ok {
+			c.inboxUI.Select(id)
+			nextEvent = c.showInbox(id)
+			continue
+		}
+		if id, ok := c.outboxUI.Event(event); ok {
+			c.outboxUI.Select(id)
+			nextEvent = c.showOutbox(id)
+			continue
+		}
+		if id, ok := c.contactsUI.Event(event); ok {
+			c.contactsUI.Select(id)
+			nextEvent = c.showContact(id)
+			continue
+		}
+		if id, ok := c.clientUI.Event(event); ok {
+			c.clientUI.Select(id)
+			switch id {
+			case clientUIIdentity:
+				nextEvent = c.identityUI()
+			case clientUIActivity:
+				nextEvent = c.logUI()
+			default:
+				panic("bad clientUI event")
+			}
+			continue
+		}
+		if id, ok := c.draftsUI.Event(event); ok {
+			c.draftsUI.Select(id)
+			nextEvent = c.composeUI(c.drafts[id], nil)
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		switch click.name {
+		case "newcontact":
+			nextEvent = c.newContactUI(nil)
+		case "compose":
+			nextEvent = c.composeUI(nil, nil)
+		}
+	}
+}
+
+func (qm *queuedMessage) indicator() Indicator {
+	switch {
+	case !qm.acked.IsZero():
+		return indicatorGreen
+	case !qm.sent.IsZero():
+		if qm.revocation {
+			// Revocations are never acked so they are green as
+			// soon as they are sent.
+			return indicatorGreen
+		}
+		return indicatorYellow
+	}
+	return indicatorRed
+}
+
+func (c *guiClient) errorUI(errorText string, fatal bool) {
+	bgColor := uint32(colorDefault)
+	if fatal {
+		bgColor = colorError
+	}
+
+	ui := EventBox{
+		widgetBase: widgetBase{background: bgColor, expand: true, fill: true},
+		child: Label{
+			widgetBase: widgetBase{
+				foreground: colorBlack,
+				font:       "Ariel Bold 12",
+			},
+			text:   errorText,
+			xAlign: 0.5,
+			yAlign: 0.5,
+		},
+	}
+	c.log.Printf("Fatal error: %s", errorText)
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Actions() <- UIState{uiStateError}
+	c.gui.Signal()
+	if !c.testing {
+		select {
+		case _, ok := <-c.gui.Events():
+			if !ok {
+				// User asked to close the window.
+				close(c.gui.Actions())
+				select {}
+			}
+		}
+	}
+}
+
+func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Passphrase",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: msgKeyPrompt,
+				wrap: 600,
+			},
+			HBox{
+				spacing: 5,
+				children: []Widget{
+					Label{
+						text:   "Passphrase:",
+						yAlign: 0.5,
+					},
+					Entry{
+						widgetBase: widgetBase{name: "pw"},
+						width:      60,
+						password:   true,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 40},
+				children: []Widget{
+					Button{
+						widgetBase: widgetBase{name: "next"},
+						text:       "Next",
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 5},
+				children: []Widget{
+					Label{
+						widgetBase: widgetBase{name: "status"},
+					},
+				},
+			},
+		},
+	}
+
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Actions() <- SetFocus{name: "pw"}
+	c.gui.Actions() <- UIState{uiStatePassphrase}
+	c.gui.Signal()
+
+	for {
+		event, ok := <-c.gui.Events()
+		if !ok {
+			c.ShutdownAndSuspend()
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		if click.name != "next" && click.name != "pw" {
+			continue
+		}
+
+		pw, ok := click.entries["pw"]
+		if !ok {
+			panic("missing pw")
+		}
+
+		c.gui.Actions() <- Sensitive{name: "next", sensitive: false}
+		c.gui.Signal()
+
+		if err := c.loadState(stateFile, pw); err != disk.BadPasswordError {
+			return err
+		}
+
+		c.gui.Actions() <- SetText{name: "status", text: msgIncorrectPassword}
+		c.gui.Actions() <- SetEntry{name: "pw", text: ""}
+		c.gui.Actions() <- Sensitive{name: "next", sensitive: true}
+		c.gui.Signal()
+	}
+
+	return nil
+}
+
+func (c *guiClient) createPassphraseUI() (string, error) {
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Set Passphrase",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: msgCreatePassphrase,
+				wrap: 600,
+			},
+			HBox{
+				spacing: 5,
+				children: []Widget{
+					Label{
+						text:   "Passphrase:",
+						yAlign: 0.5,
+					},
+					Entry{
+						widgetBase: widgetBase{name: "pw"},
+						width:      60,
+						password:   true,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 40},
+				children: []Widget{
+					Button{
+						widgetBase: widgetBase{name: "next"},
+						text:       "Next",
+					},
+				},
+			},
+		},
+	}
+
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Actions() <- SetFocus{name: "pw"}
+	c.gui.Actions() <- UIState{uiStateCreatePassphrase}
+	c.gui.Signal()
+
+	for {
+		event, ok := <-c.gui.Events()
+		if !ok {
+			c.ShutdownAndSuspend()
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		if click.name != "next" && click.name != "pw" {
+			continue
+		}
+
+		pw, ok := click.entries["pw"]
+		if !ok {
+			panic("missing pw")
+		}
+
+		return pw, nil
+	}
+
+	panic("unreachable")
+}
+
+func (c *guiClient) createAccountUI() error {
+	defaultServer := msgDefaultServer
+	if c.dev {
+		defaultServer = msgDefaultDevServer
+	}
+
+	ui := VBox{
+		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
+		children: []Widget{
+			Label{
+				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				text:       "Create Account",
+			},
+			Label{
+				widgetBase: widgetBase{
+					padding: 20,
+					font:    "DejaVu Sans 14",
+				},
+				text: msgCreateAccount + " If you want to use the default server, just click 'Create'.",
+				wrap: 600,
+			},
+			HBox{
+				spacing: 5,
+				children: []Widget{
+					Label{
+						text:   "Server:",
+						yAlign: 0.5,
+					},
+					Entry{
+						widgetBase: widgetBase{name: "server"},
+						width:      60,
+						text:       defaultServer,
+					},
+				},
+			},
+			HBox{
+				widgetBase: widgetBase{padding: 40},
+				children: []Widget{
+					Button{
+						widgetBase: widgetBase{name: "create"},
+						text:       "Create",
+					},
+				},
+			},
+		},
+	}
+
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Actions() <- SetFocus{name: "create"}
+	c.gui.Actions() <- UIState{uiStateCreateAccount}
+	c.gui.Signal()
+
+	var spinnerCreated bool
+	for {
+		click, ok := <-c.gui.Events()
+		if !ok {
+			c.ShutdownAndSuspend()
+		}
+		c.server = click.(Click).entries["server"]
+
+		c.gui.Actions() <- Sensitive{name: "server", sensitive: false}
+		c.gui.Actions() <- Sensitive{name: "create", sensitive: false}
+
+		const initialMessage = "Checking..."
+
+		if !spinnerCreated {
+			c.gui.Actions() <- Append{
+				name: "vbox",
+				children: []Widget{
+					HBox{
+						widgetBase: widgetBase{name: "statusbox"},
+						spacing:    10,
+						children: []Widget{
+							Spinner{
+								widgetBase: widgetBase{name: "spinner"},
+							},
+							Label{
+								widgetBase: widgetBase{name: "status"},
+								text:       initialMessage,
+							},
+						},
+					},
+				},
+			}
+			spinnerCreated = true
+		} else {
+			c.gui.Actions() <- StartSpinner{name: "spinner"}
+			c.gui.Actions() <- SetText{name: "status", text: initialMessage}
+		}
+		c.gui.Signal()
+
+		updateMsg := func(msg string) {
+			c.gui.Actions() <- SetText{name: "status", text: msg}
+			c.gui.Signal()
+		}
+
+		if err := c.doCreateAccount(updateMsg); err != nil {
+			c.gui.Actions() <- StopSpinner{name: "spinner"}
+			c.gui.Actions() <- UIError{err}
+			c.gui.Actions() <- SetText{name: "status", text: err.Error()}
+			c.gui.Actions() <- Sensitive{name: "server", sensitive: true}
+			c.gui.Actions() <- Sensitive{name: "create", sensitive: true}
+			c.gui.Signal()
+			continue
+		}
+
+		break
+	}
+
+	return nil
+}
+
+func (c *guiClient) ShutdownAndSuspend() error {
+	if c.writerChan != nil {
+		c.save()
+	}
+	c.Shutdown()
+	close(c.gui.Actions())
+	select {}
+	return nil
+}
+
+func (c *guiClient) Shutdown() {
+	close(c.pandaShutdownChan)
+	if c.testing {
+		c.pandaWaitGroup.Wait()
+
+	ProcessPANDAUpdates:
+		for {
+			select {
+			case update := <-c.pandaChan:
+				c.processPANDAUpdate(update)
+			default:
+				break ProcessPANDAUpdates
+			}
+		}
+	}
+	if c.writerChan != nil {
+		close(c.writerChan)
+		<-c.writerDone
+	}
+	if c.fetchNowChan != nil {
+		close(c.fetchNowChan)
+	}
+	if c.revocationUpdateChan != nil {
+		close(c.revocationUpdateChan)
+	}
+	if c.stateLock != nil {
+		c.stateLock.Close()
+	}
+}
+
+type InboxDetachmentUI struct {
+	msg *InboxMessage
+	gui GUI
+}
+
+func (i InboxDetachmentUI) IsValid(id uint64) bool {
+	_, ok := i.msg.decryptions[id]
+	return ok
+}
+
+func (i InboxDetachmentUI) ProgressName(id uint64) string {
+	return fmt.Sprintf("detachment-progress-%d", i.msg.decryptions[id].index)
+}
+
+func (i InboxDetachmentUI) VBoxName(id uint64) string {
+	return fmt.Sprintf("detachment-vbox-%d", i.msg.decryptions[id].index)
+}
+
+func (i InboxDetachmentUI) OnFinal(id uint64) {
+	i.gui.Actions() <- Sensitive{
+		name:      fmt.Sprintf("detachment-decrypt-%d", i.msg.decryptions[id].index),
+		sensitive: true,
+	}
+	i.gui.Actions() <- Sensitive{
+		name:      fmt.Sprintf("detachment-download-%d", i.msg.decryptions[id].index),
+		sensitive: true,
+	}
+	delete(i.msg.decryptions, id)
+}
+
+func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
+}
+func (c *guiClient) showInbox(id uint64) interface{} {
 	var msg *InboxMessage
 	for _, candidate := range c.inbox {
 		if candidate.id == id {
@@ -136,7 +1067,7 @@ func (c *client) showInbox(id uint64) interface{} {
 		wrap:       true,
 	}
 
-	c.ui.Actions() <- SetChild{name: "right", child: rightPane("RECEIVED MESSAGE", left, right, main)}
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("RECEIVED MESSAGE", left, right, main)}
 
 	// The UI names widgets with strings so these prefixes are used to
 	// generate names for the dynamic parts of the UI.
@@ -165,14 +1096,14 @@ func (c *client) showInbox(id uint64) interface{} {
 			})
 		}
 
-		c.ui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
 			{1, 1, Label{
 				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
 				text:       "ATTACHMENTS",
 			}},
 		}}
 		lhsNextRow++
-		c.ui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
 		lhsNextRow++
 	}
 
@@ -235,22 +1166,22 @@ func (c *client) showInbox(id uint64) interface{} {
 			grid.rows = append(grid.rows, progressRow)
 		}
 
-		c.ui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
 			{1, 1, Label{
 				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
 				text:       "KEYS",
 			}},
 		}}
 		lhsNextRow++
-		c.ui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
 		lhsNextRow++
-		c.ui.Signal()
+		c.gui.Signal()
 	}
 
-	c.ui.Actions() <- UIState{uiStateInbox}
-	c.ui.Signal()
+	c.gui.Actions() <- UIState{uiStateInbox}
+	c.gui.Signal()
 
-	detachmentUI := InboxDetachmentUI{msg, c.ui}
+	detachmentUI := InboxDetachmentUI{msg, c.gui}
 
 	if msg.decryptions == nil {
 		msg.decryptions = make(map[uint64]*pendingDecryption)
@@ -291,7 +1222,7 @@ NextEvent:
 				ioutil.WriteFile(open.path, bytes, 0600)
 			case detachmentDecryptIndex:
 				// Decrypt a local file with a detachment key.
-				c.ui.Actions() <- FileOpen{
+				c.gui.Actions() <- FileOpen{
 					save:  true,
 					title: "Save decrypted file",
 					arg: detachmentDecryptInput{
@@ -299,7 +1230,7 @@ NextEvent:
 						inPath: open.path,
 					},
 				}
-				c.ui.Signal()
+				c.gui.Signal()
 			case detachmentDecryptInput:
 				// Decrypt a local file with a detachment key,
 				// after the second save dialog - which prompts
@@ -309,15 +1240,15 @@ NextEvent:
 						continue NextEvent
 					}
 				}
-				c.ui.Actions() <- Sensitive{
+				c.gui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i.index),
 					sensitive: false,
 				}
-				c.ui.Actions() <- Sensitive{
+				c.gui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDownloadPrefix, i.index),
 					sensitive: false,
 				}
-				c.ui.Actions() <- InsertRow{
+				c.gui.Actions() <- InsertRow{
 					name: "detachment-grid",
 					pos:  i.index*2 + 1,
 					row: []GridE{
@@ -333,7 +1264,7 @@ NextEvent:
 					index:  i.index,
 					cancel: c.startDecryption(id, open.path, i.inPath, msg.message.DetachedFiles[i.index]),
 				}
-				c.ui.Signal()
+				c.gui.Signal()
 			case detachmentDownloadIndex:
 				// Download a detachment.
 				for _, decryption := range msg.decryptions {
@@ -341,15 +1272,15 @@ NextEvent:
 						continue NextEvent
 					}
 				}
-				c.ui.Actions() <- Sensitive{
+				c.gui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDecryptPrefix, i),
 					sensitive: false,
 				}
-				c.ui.Actions() <- Sensitive{
+				c.gui.Actions() <- Sensitive{
 					name:      fmt.Sprintf("%s%d", detachmentDownloadPrefix, i),
 					sensitive: false,
 				}
-				c.ui.Actions() <- InsertRow{
+				c.gui.Actions() <- InsertRow{
 					name: "detachment-grid",
 					pos:  int(i)*2 + 1,
 					row: []GridE{
@@ -365,7 +1296,7 @@ NextEvent:
 					index:  int(i),
 					cancel: c.startDownload(id, open.path, msg.message.DetachedFiles[i]),
 				}
-				c.ui.Signal()
+				c.gui.Signal()
 			default:
 				panic("unimplemented OpenResult")
 			}
@@ -383,45 +1314,45 @@ NextEvent:
 		switch {
 		case strings.HasPrefix(click.name, attachmentPrefix):
 			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				save:  true,
 				title: "Save Attachment",
 				arg:   attachmentSaveIndex(i),
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		case strings.HasPrefix(click.name, detachmentSavePrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentSavePrefix):])
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				save:  true,
 				title: "Save Key",
 				arg:   detachmentSaveIndex(i),
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		case strings.HasPrefix(click.name, detachmentDecryptPrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentDecryptPrefix):])
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				title: "Select encrypted file",
 				arg:   detachmentDecryptIndex(i),
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		case strings.HasPrefix(click.name, detachmentDownloadPrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentDownloadPrefix):])
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				title: "Save to",
 				arg:   detachmentDownloadIndex(i),
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		case click.name == "ack":
-			c.ui.Actions() <- Sensitive{name: "ack", sensitive: false}
-			c.ui.Signal()
+			c.gui.Actions() <- Sensitive{name: "ack", sensitive: false}
+			c.gui.Signal()
 			msg.acked = true
 			c.sendAck(msg)
-			c.ui.Actions() <- UIState{uiStateInbox}
-			c.ui.Signal()
+			c.gui.Actions() <- UIState{uiStateInbox}
+			c.gui.Signal()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
 			return c.composeUI(nil, msg)
@@ -435,9 +1366,9 @@ NextEvent:
 				newInbox = append(newInbox, inboxMsg)
 			}
 			c.inbox = newInbox
-			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
-			c.ui.Actions() <- UIState{uiStateMain}
-			c.ui.Signal()
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			c.save()
 			return nil
 		}
@@ -446,7 +1377,7 @@ NextEvent:
 	return nil
 }
 
-func (c *client) showOutbox(id uint64) interface{} {
+func (c *guiClient) showOutbox(id uint64) interface{} {
 	var msg *queuedMessage
 	for _, candidate := range c.outbox {
 		if candidate.id == id {
@@ -517,9 +1448,9 @@ func (c *client) showOutbox(id uint64) interface{} {
 		wrap:       true,
 	}
 
-	c.ui.Actions() <- SetChild{name: "right", child: rightPane("SENT MESSAGE", left, nil, main)}
-	c.ui.Actions() <- UIState{uiStateOutbox}
-	c.ui.Signal()
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("SENT MESSAGE", left, nil, main)}
+	c.gui.Actions() <- UIState{uiStateOutbox}
+	c.gui.Signal()
 
 	haveSentTime := !msg.sent.IsZero()
 	haveAckTime := !msg.acked.IsZero()
@@ -531,12 +1462,12 @@ func (c *client) showOutbox(id uint64) interface{} {
 		}
 
 		if !haveSentTime && !msg.sent.IsZero() {
-			c.ui.Actions() <- SetText{name: "sent", text: formatTime(msg.sent)}
-			c.ui.Signal()
+			c.gui.Actions() <- SetText{name: "sent", text: formatTime(msg.sent)}
+			c.gui.Signal()
 		}
 		if !haveAckTime && !msg.acked.IsZero() {
-			c.ui.Actions() <- SetText{name: "acked", text: formatTime(msg.acked)}
-			c.ui.Signal()
+			c.gui.Actions() <- SetText{name: "acked", text: formatTime(msg.acked)}
+			c.gui.Signal()
 		}
 	}
 
@@ -614,7 +1545,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 	return grid
 }
 
-func (c *client) identityUI() interface{} {
+func (c *guiClient) identityUI() interface{} {
 	left := nameValuesLHS([]nvEntry{
 		{"SERVER", c.server},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
@@ -623,14 +1554,14 @@ func (c *client) identityUI() interface{} {
 		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
 	})
 
-	c.ui.Actions() <- SetChild{name: "right", child: rightPane("IDENTITY", left, nil, nil)}
-	c.ui.Actions() <- UIState{uiStateShowIdentity}
-	c.ui.Signal()
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("IDENTITY", left, nil, nil)}
+	c.gui.Actions() <- UIState{uiStateShowIdentity}
+	c.gui.Signal()
 
 	return nil
 }
 
-func (c *client) showContact(id uint64) interface{} {
+func (c *guiClient) showContact(id uint64) interface{} {
 	contact := c.contacts[id]
 	if contact.isPending && len(contact.pandaKeyExchange) == 0 && len(contact.pandaResult) == 0 {
 		return c.newContactUI(contact)
@@ -690,9 +1621,9 @@ func (c *client) showContact(id uint64) interface{} {
 	}
 
 	left := nameValuesLHS(entries)
-	c.ui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
-	c.ui.Actions() <- UIState{uiStateShowContact}
-	c.ui.Signal()
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+	c.gui.Actions() <- UIState{uiStateShowContact}
+	c.gui.Signal()
 
 	for {
 		event, wanted := c.nextEvent()
@@ -707,8 +1638,8 @@ func (c *client) showContact(id uint64) interface{} {
 
 		if click.name == "revoke" {
 			c.revoke(contact)
-			c.ui.Actions() <- Sensitive{name: "revoke", sensitive: false}
-			c.ui.Signal()
+			c.gui.Actions() <- Sensitive{name: "revoke", sensitive: false}
+			c.gui.Signal()
 			c.save()
 		}
 	}
@@ -716,7 +1647,7 @@ func (c *client) showContact(id uint64) interface{} {
 	panic("unreachable")
 }
 
-func (c *client) newContactUI(contact *Contact) interface{} {
+func (c *guiClient) newContactUI(contact *Contact) interface{} {
 	var name string
 	existing := contact != nil
 	if existing {
@@ -792,9 +1723,9 @@ Shared secret keying involves anonymously contacting a global, shared service an
 
 	nextRow := len(grid.rows)
 
-	c.ui.Actions() <- SetChild{name: "right", child: rightPane("CREATE CONTACT", nil, nil, grid)}
-	c.ui.Actions() <- UIState{uiStateNewContact}
-	c.ui.Signal()
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CREATE CONTACT", nil, nil, grid)}
+	c.gui.Actions() <- UIState{uiStateNewContact}
+	c.gui.Signal()
 
 	if existing {
 		return c.newContactManual(contact, existing, nextRow)
@@ -820,9 +1751,9 @@ Shared secret keying involves anonymously contacting a global, shared service an
 		for _, contact := range c.contacts {
 			if contact.name == name {
 				const errText = "A contact by that name already exists!"
-				c.ui.Actions() <- SetText{name: "error1", text: errText}
-				c.ui.Actions() <- UIError{errors.New(errText)}
-				c.ui.Signal()
+				c.gui.Actions() <- SetText{name: "error1", text: errText}
+				c.gui.Actions() <- UIError{errors.New(errText)}
+				c.gui.Signal()
 				nameIsUnique = false
 				break
 			}
@@ -842,11 +1773,11 @@ Shared secret keying involves anonymously contacting a global, shared service an
 	c.contactsUI.Add(contact.id, name, "pending", indicatorNone)
 	c.contactsUI.Select(contact.id)
 
-	c.ui.Actions() <- SetText{name: "error1", text: ""}
-	c.ui.Actions() <- Sensitive{name: "name", sensitive: false}
-	c.ui.Actions() <- Sensitive{name: "manual", sensitive: true}
-	c.ui.Actions() <- Sensitive{name: "shared", sensitive: true}
-	c.ui.Signal()
+	c.gui.Actions() <- SetText{name: "error1", text: ""}
+	c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
+	c.gui.Actions() <- Sensitive{name: "manual", sensitive: true}
+	c.gui.Actions() <- Sensitive{name: "shared", sensitive: true}
+	c.gui.Signal()
 
 	for {
 		event, wanted := c.nextEvent()
@@ -874,15 +1805,15 @@ Shared secret keying involves anonymously contacting a global, shared service an
 			continue
 		}
 
-		c.ui.Actions() <- Sensitive{name: "manual", sensitive: false}
-		c.ui.Actions() <- Sensitive{name: "shared", sensitive: false}
+		c.gui.Actions() <- Sensitive{name: "manual", sensitive: false}
+		c.gui.Actions() <- Sensitive{name: "shared", sensitive: false}
 		return nextFunc(contact, existing, nextRow)
 	}
 
 	panic("unreachable")
 }
 
-func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) interface{} {
+func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow int) interface{} {
 	if !existing {
 		c.newKeyExchange(contact)
 		c.contacts[contact.id] = contact
@@ -959,11 +1890,11 @@ func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) 
 	}
 
 	for _, row := range rows {
-		c.ui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
+		c.gui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
 		nextRow++
 	}
-	c.ui.Actions() <- UIState{uiStateNewContact2}
-	c.ui.Signal()
+	c.gui.Actions() <- UIState{uiStateNewContact2}
+	c.gui.Signal()
 
 	for {
 		event, wanted := c.nextEvent()
@@ -982,15 +1913,15 @@ func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) 
 		block, _ := pem.Decode([]byte(click.textViews["kxin"]))
 		if block == nil || block.Type != keyExchangePEM {
 			const errText = "No key exchange message found!"
-			c.ui.Actions() <- SetText{name: "error2", text: errText}
-			c.ui.Actions() <- UIError{errors.New(errText)}
-			c.ui.Signal()
+			c.gui.Actions() <- SetText{name: "error2", text: errText}
+			c.gui.Actions() <- UIError{errors.New(errText)}
+			c.gui.Signal()
 			continue
 		}
-		if err := contact.processKeyExchange(block.Bytes, c.testing); err != nil {
-			c.ui.Actions() <- SetText{name: "error2", text: err.Error()}
-			c.ui.Actions() <- UIError{err}
-			c.ui.Signal()
+		if err := contact.processKeyExchange(block.Bytes, c.dev); err != nil {
+			c.gui.Actions() <- SetText{name: "error2", text: err.Error()}
+			c.gui.Actions() <- UIError{err}
+			c.gui.Signal()
 			continue
 		} else {
 			break
@@ -1004,7 +1935,7 @@ func (c *client) newContactManual(contact *Contact, existing bool, nextRow int) 
 	return c.showContact(contact.id)
 }
 
-func (c *client) newContactPanda(contact *Contact, existing bool, nextRow int) interface{} {
+func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int) interface{} {
 	c.newKeyExchange(contact)
 	c.contacts[contact.id] = contact
 
@@ -1093,11 +2024,11 @@ When entering the cards enter the number or face of the card first, and then the
 	}
 
 	for _, row := range rows {
-		c.ui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
+		c.gui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
 		nextRow++
 	}
-	c.ui.Actions() <- UIState{uiStateNewContact2}
-	c.ui.Signal()
+	c.gui.Actions() <- UIState{uiStateNewContact2}
+	c.gui.Signal()
 
 	const cardsPerRow = 10
 	type gridPoint struct {
@@ -1152,7 +2083,7 @@ SharedSecretEvent:
 					markup = markup[:numLen] + "<span color=\"red\">" + markup[numLen:] + "</span>"
 				}
 				name := fmt.Sprintf("card-%d,%d", point.col, point.row)
-				c.ui.Actions() <- GridSet{"cards", point.col, point.row, Button{
+				c.gui.Actions() <- GridSet{"cards", point.col, point.row, Button{
 					widgetBase: widgetBase{name: name},
 					markup:     markup,
 				}}
@@ -1160,12 +2091,12 @@ SharedSecretEvent:
 				if min := stack.MinimumDecks(); min > minDecks {
 					minDecks = min
 					if min > 1 {
-						c.ui.Actions() <- Sensitive{name: "numdecks", sensitive: false}
+						c.gui.Actions() <- Sensitive{name: "numdecks", sensitive: false}
 					}
 				}
 			}
-			c.ui.Actions() <- SetEntry{name: "cardentry", text: update.text[len(cardText):]}
-			c.ui.Signal()
+			c.gui.Actions() <- SetEntry{name: "cardentry", text: update.text[len(cardText):]}
+			c.gui.Signal()
 			continue
 		}
 
@@ -1181,17 +2112,17 @@ SharedSecretEvent:
 				if min := stack.MinimumDecks(); min < minDecks {
 					minDecks = min
 					if min < 2 {
-						c.ui.Actions() <- Sensitive{name: "numdecks", sensitive: true}
+						c.gui.Actions() <- Sensitive{name: "numdecks", sensitive: true}
 					}
 				}
-				c.ui.Actions() <- Destroy{name: click.name}
-				c.ui.Signal()
+				c.gui.Actions() <- Destroy{name: click.name}
+				c.gui.Signal()
 			case click.name == "hastime":
 				timeEnabled = click.checks["hastime"]
-				c.ui.Actions() <- Sensitive{name: "cal", sensitive: timeEnabled}
-				c.ui.Actions() <- Sensitive{name: "hour", sensitive: timeEnabled}
-				c.ui.Actions() <- Sensitive{name: "minute", sensitive: timeEnabled}
-				c.ui.Signal()
+				c.gui.Actions() <- Sensitive{name: "cal", sensitive: timeEnabled}
+				c.gui.Actions() <- Sensitive{name: "hour", sensitive: timeEnabled}
+				c.gui.Actions() <- Sensitive{name: "minute", sensitive: timeEnabled}
+				c.gui.Signal()
 			case click.name == "numdecks":
 				numDecks := click.radios["numdecks"] + 1
 				if numDecks >= minDecks {
@@ -1314,7 +2245,7 @@ type DetachmentUI interface {
 type ComposeDetachmentUI struct {
 	draft       *Draft
 	detachments map[uint64]int
-	ui          UI
+	gui         GUI
 	final       func()
 }
 
@@ -1343,14 +2274,14 @@ func (i ComposeDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detac
 
 // maybeProcessDetachmentMsg is called to process a possible message from a
 // background, detachment task. It returns true if event was handled.
-func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
+func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
 	if derr, ok := event.(DetachmentError); ok {
 		id := derr.id
 		if !ui.IsValid(id) {
 			return true
 		}
-		c.ui.Actions() <- Destroy{name: ui.ProgressName(id)}
-		c.ui.Actions() <- Append{
+		c.gui.Actions() <- Destroy{name: ui.ProgressName(id)}
+		c.gui.Actions() <- Append{
 			name: ui.VBoxName(id),
 			children: []Widget{
 				Label{
@@ -1362,7 +2293,7 @@ func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) b
 			},
 		}
 		ui.OnFinal(id)
-		c.ui.Signal()
+		c.gui.Signal()
 		return true
 	}
 	if prog, ok := event.(DetachmentProgress); ok {
@@ -1377,12 +2308,12 @@ func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) b
 		if f > 1 {
 			f = 1
 		}
-		c.ui.Actions() <- SetProgress{
+		c.gui.Actions() <- SetProgress{
 			name:     ui.ProgressName(id),
 			s:        prog.status,
 			fraction: f,
 		}
-		c.ui.Signal()
+		c.gui.Signal()
 		return true
 	}
 	if complete, ok := event.(DetachmentComplete); ok {
@@ -1390,33 +2321,33 @@ func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) b
 		if !ui.IsValid(id) {
 			return true
 		}
-		c.ui.Actions() <- Destroy{
+		c.gui.Actions() <- Destroy{
 			name: ui.ProgressName(id),
 		}
 		ui.OnFinal(id)
 		ui.OnSuccess(id, complete.detachment)
-		c.ui.Signal()
+		c.gui.Signal()
 		return true
 	}
 
 	return false
 }
 
-func (c *client) updateUsage(validContactSelected bool, draft *Draft) bool {
+func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
 	usageMessage, over := usageString(draft)
-	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
+	c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
 	color := uint32(colorBlack)
 	if over {
 		color = colorRed
-		c.ui.Actions() <- Sensitive{name: "send", sensitive: false}
+		c.gui.Actions() <- Sensitive{name: "send", sensitive: false}
 	} else if validContactSelected {
-		c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
+		c.gui.Actions() <- Sensitive{name: "send", sensitive: true}
 	}
-	c.ui.Actions() <- SetForeground{name: "usage", foreground: color}
+	c.gui.Actions() <- SetForeground{name: "usage", foreground: color}
 	return over
 }
 
-func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
+func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	if draft != nil && inReplyTo != nil {
 		panic("draft and inReplyTo both set")
 	}
@@ -1600,7 +2531,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		},
 	}
 
-	c.ui.Actions() <- SetChild{name: "right", child: ui}
+	c.gui.Actions() <- SetChild{name: "right", child: ui}
 
 	if draft.pendingDetachments == nil {
 		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
@@ -1626,18 +2557,18 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	}
 
 	if len(initialAttachmentChildren) > 0 {
-		c.ui.Actions() <- Append{
+		c.gui.Actions() <- Append{
 			name:     "filesvbox",
 			children: initialAttachmentChildren,
 		}
 	}
 
-	detachmentUI := ComposeDetachmentUI{draft, detachments, c.ui, func() {
+	detachmentUI := ComposeDetachmentUI{draft, detachments, c.gui, func() {
 		overSize = c.updateUsage(validContactSelected, draft)
 	}}
 
-	c.ui.Actions() <- UIState{uiStateCompose}
-	c.ui.Signal()
+	c.gui.Actions() <- UIState{uiStateCompose}
+	c.gui.Signal()
 
 	for {
 		event, wanted := c.nextEvent()
@@ -1648,7 +2579,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 		if update, ok := event.(Update); ok {
 			overSize = c.updateUsage(validContactSelected, draft)
 			draft.body = update.text
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		}
 
@@ -1729,20 +2660,20 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				draft.attachments = append(draft.attachments, a)
 			}
 
-			c.ui.Actions() <- Append{
+			c.gui.Actions() <- Append{
 				name: "filesvbox",
 				children: []Widget{
 					widgetForAttachment(id, label, err != nil, extraWidgets),
 				},
 			}
 			overSize = c.updateUsage(validContactSelected, draft)
-			c.ui.Signal()
+			c.gui.Signal()
 		}
 		if open, ok := event.(OpenResult); ok && open.ok && open.arg != nil {
 			// Saving a detachment.
 			id := open.arg.(uint64)
-			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
-			c.ui.Actions() <- Append{
+			c.gui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.gui.Actions() <- Append{
 				name: fmt.Sprintf("attachment-vbox-%x", id),
 				children: []Widget{
 					Progress{
@@ -1753,7 +2684,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				},
 			}
 			draft.pendingDetachments[id].cancel = c.startEncryption(id, open.path, draft.pendingDetachments[id].path)
-			c.ui.Signal()
+			c.gui.Signal()
 		}
 
 		if c.maybeProcessDetachmentMsg(event, detachmentUI) {
@@ -1765,10 +2696,10 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			continue
 		}
 		if click.name == "attach" {
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				title: "Attach File",
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		}
 		if click.name == "to" {
@@ -1783,8 +2714,8 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			}
 			c.draftsUI.SetLine(draft.id, selected)
 			if validContactSelected && !overSize {
-				c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
-				c.ui.Signal()
+				c.gui.Actions() <- Sensitive{name: "send", sensitive: true}
+				c.gui.Signal()
 			}
 			continue
 		}
@@ -1792,9 +2723,9 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			c.draftsUI.Remove(draft.id)
 			delete(c.drafts, draft.id)
 			c.save()
-			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
-			c.ui.Actions() <- UIState{uiStateMain}
-			c.ui.Signal()
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			return nil
 		}
 		if strings.HasPrefix(click.name, "remove-") {
@@ -1803,7 +2734,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			if err != nil {
 				panic(click.name)
 			}
-			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
+			c.gui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
 			if index, ok := attachments[id]; ok {
 				draft.attachments = append(draft.attachments[:index], draft.attachments[index+1:]...)
 				delete(attachments, id)
@@ -1819,7 +2750,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				delete(detachments, id)
 			}
 			overSize = c.updateUsage(validContactSelected, draft)
-			c.ui.Signal()
+			c.gui.Signal()
 			continue
 		}
 		const convertPrefix = "attachment-convert-"
@@ -1830,12 +2761,12 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			if err != nil {
 				panic(click.name)
 			}
-			c.ui.Actions() <- FileOpen{
+			c.gui.Actions() <- FileOpen{
 				save:  true,
 				title: "Save encrypted file",
 				arg:   id,
 			}
-			c.ui.Signal()
+			c.gui.Signal()
 		}
 		const uploadPrefix = "attachment-upload-"
 		if strings.HasPrefix(click.name, uploadPrefix) {
@@ -1844,8 +2775,8 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 			if err != nil {
 				panic(click.name)
 			}
-			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
-			c.ui.Actions() <- Append{
+			c.gui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
+			c.gui.Actions() <- Append{
 				name: fmt.Sprintf("attachment-vbox-%x", id),
 				children: []Widget{
 					Progress{
@@ -1856,7 +2787,7 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 				},
 			}
 			draft.pendingDetachments[id].cancel = c.startUpload(id, draft.pendingDetachments[id].path)
-			c.ui.Signal()
+			c.gui.Signal()
 		}
 
 		if click.name != "send" {
@@ -1924,3 +2855,94 @@ func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
 	return nil
 }
 
+// unsealPendingMessages is run once a key exchange with a contact has
+// completed and unseals any previously unreadable messages from that contact.
+func (c *guiClient) unsealPendingMessages(contact *Contact) {
+	contact.isPending = false
+
+	for _, msg := range c.inbox {
+		if msg.message == nil && msg.from == contact.id {
+			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
+				c.inboxUI.Remove(msg.id)
+				continue
+			}
+			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.SetSubline(msg.id, subline)
+			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
+			c.updateWindowTitle()
+		}
+	}
+}
+
+// processPANDAUpdate runs on the main client goroutine and handles messages
+// from a runPANDA goroutine.
+func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
+	contact, ok := c.contacts[update.id]
+	if !ok {
+		return
+	}
+
+	switch {
+	case update.err != nil:
+		contact.pandaResult = update.err.Error()
+		contact.pandaKeyExchange = nil
+		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
+		c.contactsUI.SetSubline(contact.id, "failed")
+	case update.serialised != nil:
+		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
+			return
+		}
+		contact.pandaKeyExchange = update.serialised
+	case update.result != nil:
+		if err := contact.processKeyExchange(update.result, c.dev); err != nil {
+			contact.pandaResult = err.Error()
+			c.contactsUI.SetSubline(contact.id, "failed")
+			contact.pandaKeyExchange = nil
+			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
+		} else {
+			c.unsealPendingMessages(contact)
+			c.contactsUI.SetSubline(contact.id, "")
+			contact.pandaKeyExchange = nil
+			c.log.Printf("Key exchange with %s complete", contact.name)
+			c.gui.Actions() <- UIState{uiStatePANDAComplete}
+			c.gui.Signal()
+		}
+	}
+
+	c.save()
+}
+
+func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool) *guiClient {
+	c := &guiClient{
+		client: client{
+			testing:           testing,
+			dev:               testing,
+			autoFetch:         autoFetch,
+			stateFilename:     stateFilename,
+			log:               NewLog(),
+			rand:              rand,
+			contacts:          make(map[uint64]*Contact),
+			drafts:            make(map[uint64]*Draft),
+			newMessageChan:    make(chan NewMessage),
+			messageSentChan:   make(chan messageSendResult, 1),
+			backgroundChan:    make(chan interface{}, 8),
+			pandaChan:         make(chan pandaUpdate, 1),
+			pandaShutdownChan: make(chan bool),
+		},
+		gui: gui,
+	}
+	c.ui = c
+
+	c.newMeetingPlace = func() panda.MeetingPlace {
+		return &panda.HTTPMeetingPlace{
+			TorAddress: c.torAddress,
+			URL:        "https://panda-key-exchange.appspot.com/exchange",
+		}
+	}
+	c.log.toStderr = true
+	return c
+}
+
+func (c *guiClient) Start() {
+	go c.loadUI()
+}

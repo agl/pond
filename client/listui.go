@@ -7,7 +7,7 @@ import (
 // listUI manages the sections in the left-hand side list. It contains a number
 // of items, which may have subheadlines and indicators (coloured dots).
 type listUI struct {
-	ui       UI
+	gui      GUI
 	vboxName string
 	entries  []listItem
 	selected uint64
@@ -50,7 +50,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 
 	if index > 0 {
 		// Add the separator bar.
-		cs.ui.Actions() <- AddToBox{
+		cs.gui.Actions() <- AddToBox{
 			box:   cs.vboxName,
 			pos:   index*2 - 1,
 			child: EventBox{widgetBase: widgetBase{height: 1, background: 0xe5e6e6, name: c.sepName}},
@@ -104,7 +104,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		children:   sublineChildren,
 	})
 
-	cs.ui.Actions() <- AddToBox{
+	cs.gui.Actions() <- AddToBox{
 		box: cs.vboxName,
 		pos: index * 2,
 		child: EventBox{
@@ -112,7 +112,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 			child:      VBox{children: children},
 		},
 	}
-	cs.ui.Signal()
+	cs.gui.Signal()
 }
 
 func (cs *listUI) SetInsensitive(id uint64) {
@@ -127,10 +127,10 @@ func (cs *listUI) Remove(id uint64) {
 	for i, entry := range cs.entries {
 		if entry.id == id {
 			if i > 0 {
-				cs.ui.Actions() <- Destroy{name: entry.sepName}
+				cs.gui.Actions() <- Destroy{name: entry.sepName}
 			}
-			cs.ui.Actions() <- Destroy{name: entry.boxName}
-			cs.ui.Signal()
+			cs.gui.Actions() <- Destroy{name: entry.boxName}
+			cs.gui.Signal()
 			if cs.selected == id {
 				cs.selected = 0
 			}
@@ -155,9 +155,9 @@ func (cs *listUI) Deselect() {
 		}
 	}
 
-	cs.ui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
+	cs.gui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
 	cs.selected = 0
-	cs.ui.Signal()
+	cs.gui.Signal()
 }
 
 func (cs *listUI) Select(id uint64) {
@@ -184,18 +184,18 @@ func (cs *listUI) Select(id uint64) {
 	}
 
 	if len(currentlySelected) > 0 {
-		cs.ui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
+		cs.gui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
 	}
-	cs.ui.Actions() <- SetBackground{name: newSelected, color: colorHighlight}
+	cs.gui.Actions() <- SetBackground{name: newSelected, color: colorHighlight}
 	cs.selected = id
-	cs.ui.Signal()
+	cs.gui.Signal()
 }
 
 func (cs *listUI) SetIndicator(id uint64, indicator Indicator) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
-			cs.ui.Actions() <- SetImage{name: entry.imageName, image: indicator}
-			cs.ui.Signal()
+			cs.gui.Actions() <- SetImage{name: entry.imageName, image: indicator}
+			cs.gui.Signal()
 			break
 		}
 	}
@@ -204,8 +204,8 @@ func (cs *listUI) SetIndicator(id uint64, indicator Indicator) {
 func (cs *listUI) SetLine(id uint64, line string) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
-			cs.ui.Actions() <- SetText{name: entry.lineName, text: line}
-			cs.ui.Signal()
+			cs.gui.Actions() <- SetText{name: entry.lineName, text: line}
+			cs.gui.Signal()
 			break
 		}
 	}
@@ -215,11 +215,11 @@ func (cs *listUI) SetSubline(id uint64, subline string) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
 			if len(subline) > 0 {
-				cs.ui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
+				cs.gui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
 			} else {
-				cs.ui.Actions() <- Destroy{name: entry.sublineTextName}
+				cs.gui.Actions() <- Destroy{name: entry.sublineTextName}
 			}
-			cs.ui.Signal()
+			cs.gui.Signal()
 			break
 		}
 	}

@@ -59,7 +59,6 @@ package main
 // the tests can fully synchonise and avoid non-determinism.
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -88,56 +87,6 @@ const (
 )
 
 const (
-	colorDefault               = 0
-	colorWhite                 = 0xffffff
-	colorGray                  = 0xfafafa
-	colorHighlight             = 0xffebcd
-	colorSubline               = 0x999999
-	colorHeaderBackground      = 0xececed
-	colorHeaderForeground      = 0x777777
-	colorHeaderForegroundSmall = 0x7b7f83
-	colorSep                   = 0xc9c9c9
-	colorTitleForeground       = 0xdddddd
-	colorBlack                 = 1
-	colorRed                   = 0xff0000
-	colorError                 = 0xff0000
-)
-
-const (
-	fontLoadTitle   = "DejaVu Serif 30"
-	fontLoadLarge   = "Arial Bold 30"
-	fontListHeading = "Ariel Bold 11"
-	fontListEntry   = "Liberation Sans 12"
-	fontListSubline = "Liberation Sans 10"
-	fontMainTitle   = "Arial 16"
-	fontMainLabel   = "Arial Bold 9"
-	fontMainBody    = "Arial 12"
-	fontMainMono    = "Liberation Mono 10"
-)
-
-// uiState values are used for synchronisation with tests.
-const (
-	uiStateInvalid = iota
-	uiStateLoading
-	uiStateError
-	uiStateMain
-	uiStateCreateAccount
-	uiStateCreatePassphrase
-	uiStateNewContact
-	uiStateNewContact2
-	uiStateShowContact
-	uiStateCompose
-	uiStateOutbox
-	uiStateShowIdentity
-	uiStatePassphrase
-	uiStateInbox
-	uiStateLog
-	uiStateRevocationProcessed
-	uiStatePANDAComplete
-	uiStateErasureStorage
-)
-
-const (
 	shortTimeFormat = "Jan _2 15:04"
 	logTimeFormat   = "Jan _2 15:04:05"
 	keyExchangePEM  = "POND KEY EXCHANGE"
@@ -157,6 +106,7 @@ type client struct {
 	// tests this can be overridden to return a testing meeting place.
 	newMeetingPlace func() panda.MeetingPlace
 
+	ui UI
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
 	stateFilename string
@@ -167,7 +117,6 @@ type client struct {
 	// the address of the local Tor SOCKS proxy.
 	torAddress string
 
-	ui UI
 	// server is the URL of the user's home server.
 	server string
 	// identity is a curve25519 private value that's used to authenticate
@@ -209,8 +158,6 @@ type client struct {
 
 	log *Log
 
-	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
-
 	// outbox contains all outgoing messages.
 	outbox   []*queuedMessage
 	drafts   map[uint64]*Draft
@@ -240,6 +187,29 @@ type client struct {
 	pandaWaitGroup sync.WaitGroup
 }
 
+type UI interface {
+	initUI()
+	// loadingUI shows a basic "loading" prompt while the state file is read.
+	loadingUI()
+	// torPromptUI prompts the user to start Tor.
+	torPromptUI() error
+	// sleepUI waits the given amount of time or never returns if the user
+	// closes the UI.
+	sleepUI(d time.Duration) error
+	// errorUI shows an error and returns.
+	errorUI(msg string, fatal bool)
+	// ShutdownAndSuspend quits the program - possibly waiting for the user
+	// to close the window in the case of a GUI so any error message can be
+	// read first.
+	ShutdownAndSuspend() error
+	createPassphraseUI() (string, error)
+	createErasureStorage(pw string, stateFile *disk.StateFile) error
+	createAccountUI() error
+	keyPromptUI(stateFile *disk.StateFile) error
+	// mainUI starts the main interface.
+	mainUI()
+}
+
 type messageSendResult struct {
 	id uint64
 	// revocation optionally contains a revocation update that resulted
@@ -267,6 +237,52 @@ type pendingDecryption struct {
 	cancel func()
 }
 
+// cliId represents a short, unique ID that is assigned by the command-line
+// interface so that users can select an object by typing a short sequence of
+// letters and digits. The value is 15 bits long and represented as a string in
+// z-base-32.
+type cliId uint
+
+const invalidCliId cliId = 0
+
+// See http://philzimmermann.com/docs/human-oriented-base-32-encoding.txt
+const zBase32Chars = "ybndrfg8ejkmcpqxot1uwisza345h769"
+
+func (id cliId) String() string {
+	var chars [3]byte
+
+	for i := range chars {
+		chars[i] = zBase32Chars[id&31]
+		id >>= 5
+	}
+
+	return string(chars[:])
+}
+
+func cliIdFromString(s string) (id cliId, ok bool) {
+	if len(s) != 3 {
+		return
+	}
+
+	var shift uint
+
+NextChar:
+	for _, r := range s {
+		for i, r2 := range zBase32Chars {
+			if r == r2 {
+				id |= cliId(i) << shift
+				shift += 5
+				continue NextChar
+			}
+		}
+
+		return
+	}
+
+	ok = true
+	return
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -281,6 +297,10 @@ type InboxMessage struct {
 	// message may be nil if the contact who sent this is pending. In this
 	// case, sealed with contain the encrypted message.
 	message *pond.Message
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
 
 	decryptions map[uint64]*pendingDecryption
 }
@@ -384,6 +404,10 @@ type Draft struct {
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
 	detachments []*pond.Message_Detachment
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
 
 	pendingDetachments map[uint64]*pendingDetachment
 }
@@ -398,35 +422,11 @@ type queuedMessage struct {
 	acked      time.Time
 	revocation bool
 	message    *pond.Message
-}
 
-func (c *client) errorUI(errorText string, bgColor uint32) {
-	ui := EventBox{
-		widgetBase: widgetBase{background: bgColor, expand: true, fill: true},
-		child: Label{
-			widgetBase: widgetBase{
-				foreground: colorBlack,
-				font:       "Ariel Bold 12",
-			},
-			text:   errorText,
-			xAlign: 0.5,
-			yAlign: 0.5,
-		},
-	}
-	c.log.Printf("Fatal error: %s", errorText)
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- UIState{uiStateError}
-	c.ui.Signal()
-	if !c.testing {
-		select {
-		case _, ok := <-c.ui.Events():
-			if !ok {
-				// User asked to close the window.
-				close(c.ui.Actions())
-				select {}
-			}
-		}
-	}
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
 }
 
 // detectTor attempts to connect to port 9050 and 9150 on the local host and
@@ -447,102 +447,40 @@ func (c *client) detectTor() bool {
 	return false
 }
 
-// torPromptUI displays a prompt to start Tor and tries once a second until it
-// can be found.
-func (c *client) torPromptUI() {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Cannot find Tor",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150...",
-				wrap: 600,
-			},
-		},
-	}
+func (c *client) enqueue(m *queuedMessage) {
+	c.queueMutex.Lock()
+	defer c.queueMutex.Unlock()
 
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Signal()
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case _, ok := <-c.ui.Events():
-			if !ok {
-				c.ShutdownAndSuspend()
-			}
-		case <-ticker.C:
-			if c.detectTor() {
-				return
-			}
-		}
-	}
-
-	panic("unreachable")
+	c.queue = append(c.queue, m)
 }
 
-func (c *client) loadUI() {
-	ui := VBox{
-		widgetBase: widgetBase{
-			background: colorWhite,
-		},
-		children: []Widget{
-			EventBox{
-				widgetBase: widgetBase{background: 0x333355},
-				child: HBox{
-					children: []Widget{
-						Label{
-							widgetBase: widgetBase{
-								foreground: colorWhite,
-								padding:    10,
-								font:       fontLoadTitle,
-							},
-							text: "Pond",
-						},
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{
-					name:    "body",
-					padding: 30,
-					expand:  true,
-					fill:    true,
-				},
-			},
-		},
+func maybeTruncate(s string) string {
+	if runes := []rune(s); len(runes) > 30 {
+		runes = runes[:30]
+		runes = append(runes, 0x2026 /* ellipsis */)
+		return string(runes)
 	}
-	c.ui.Actions() <- Reset{ui}
+	return s
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return "(not yet)"
+	}
+	return t.Format(time.RFC1123)
+}
+
+func (c *client) loadUI() error {
+	c.ui.initUI()
 
 	c.torAddress = "127.0.0.1:9050" // default for dev mode.
 	if !c.dev && !c.detectTor() {
-		c.torPromptUI()
+		if err := c.ui.torPromptUI(); err != nil {
+			return err
+		}
 	}
 
-	loading := EventBox{
-		widgetBase: widgetBase{expand: true, fill: true},
-		child: Label{
-			widgetBase: widgetBase{
-				foreground: colorTitleForeground,
-				font:       fontLoadLarge,
-			},
-			text:   "Loading...",
-			xAlign: 0.5,
-			yAlign: 0.5,
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: loading}
-	c.ui.Actions() <- UIState{uiStateLoading}
-	c.ui.Signal()
+	c.ui.loadingUI()
 
 	stateFile := &disk.StateFile{
 		Path: c.stateFilename,
@@ -555,30 +493,25 @@ func (c *client) loadUI() {
 	var newAccount bool
 	var err error
 	if c.stateLock, err = stateFile.Lock(false /* don't create */); err == nil && c.stateLock == nil {
-		c.errorUI("State file locked by another process. Waiting for lock.", colorDefault)
+		c.ui.errorUI("State file locked by another process. Waiting for lock.", false)
 		c.log.Errorf("Waiting for locked state file")
 
 		for {
 			if c.stateLock, err = stateFile.Lock(false /* don't create */); c.stateLock != nil {
 				break
 			}
-			select {
-			case _, ok := <-c.ui.Events():
-				if !ok {
-					// User asked to close the window.
-					close(c.ui.Actions())
-					select {}
-				}
-			case <-time.After(1 * time.Second):
-				break
+			if err := c.ui.sleepUI(1 * time.Second); err != nil {
+				return err
 			}
 		}
 	} else if err == nil {
 	} else if os.IsNotExist(err) {
 		newAccount = true
 	} else {
-		c.errorUI(err.Error(), colorError)
-		c.ShutdownAndSuspend()
+		c.ui.errorUI(err.Error(), true)
+		if err := c.ui.ShutdownAndSuspend(); err != nil {
+			return err
+		}
 	}
 
 	if newAccount {
@@ -593,21 +526,31 @@ func (c *client) loadUI() {
 		if err != nil {
 			panic(err)
 		}
-		pw := c.createPassphraseUI()
-		c.createErasureStorage(pw, stateFile)
-		c.createAccountUI()
+		pw, err := c.ui.createPassphraseUI()
+		if err != nil {
+			return err
+		}
+		c.ui.createErasureStorage(pw, stateFile)
+		if err := c.ui.createAccountUI(); err != nil {
+			return err
+		}
 		newAccount = true
 	} else {
 		// First try with zero key.
 		err := c.loadState(stateFile, "")
 		for err == disk.BadPasswordError {
 			// That didn't work, try prompting for a key.
-			err = c.keyPromptUI(stateFile)
+			err = c.ui.keyPromptUI(stateFile)
+		}
+		if err == errInterrupted {
+			return err
 		}
 		if err != nil {
 			// Fatal error loading state. Abort.
-			c.errorUI(err.Error(), colorError)
-			c.ShutdownAndSuspend()
+			c.ui.errorUI(err.Error(), true)
+			if err := c.ui.ShutdownAndSuspend(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -619,8 +562,10 @@ func (c *client) loadUI() {
 			err = errors.New("Failed to obtain lock on created state file")
 		}
 		if err != nil {
-			c.errorUI(err.Error(), colorError)
-			c.ShutdownAndSuspend()
+			c.ui.errorUI(err.Error(), true)
+			if err := c.ui.ShutdownAndSuspend(); err != nil {
+				return err
+			}
 		}
 		c.lastErasureStorageTime = time.Now()
 	}
@@ -646,402 +591,9 @@ func (c *client) loadUI() {
 		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
 	}
 
-	c.mainUI()
-}
+	c.ui.mainUI()
 
-func (c *client) DeselectAll() {
-	c.inboxUI.Deselect()
-	c.outboxUI.Deselect()
-	c.contactsUI.Deselect()
-	c.clientUI.Deselect()
-	c.draftsUI.Deselect()
-}
-
-var rightPlaceholderUI = EventBox{
-	widgetBase: widgetBase{background: colorGray, name: "right"},
-	child: Label{
-		widgetBase: widgetBase{
-			foreground: colorTitleForeground,
-			font:       fontLoadLarge,
-		},
-		text:   "Pond",
-		xAlign: 0.5,
-		yAlign: 0.5,
-	},
-}
-
-func (c *client) updateWindowTitle() {
-	unreadCount := 0
-
-	for _, msg := range c.inbox {
-		if msg.message != nil && !msg.read && len(msg.message.Body) > 0 {
-			unreadCount++
-		}
-	}
-
-	if unreadCount == 0 {
-		c.ui.Actions() <- SetTitle{"Pond"}
-	} else {
-		c.ui.Actions() <- SetTitle{fmt.Sprintf("Pond (%d)", unreadCount)}
-	}
-	c.ui.Signal()
-}
-
-func (c *client) mainUI() {
-	ui := Paned{
-		left: Scrolled{
-			viewport: true,
-			child: EventBox{
-				widgetBase: widgetBase{background: colorGray},
-				child: VBox{
-					children: []Widget{
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Inbox",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{widgetBase: widgetBase{name: "inboxVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Outbox",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						HBox{
-							widgetBase: widgetBase{padding: 6},
-							children: []Widget{
-								HBox{widgetBase: widgetBase{expand: true}},
-								HBox{
-									widgetBase: widgetBase{padding: 8},
-									children: []Widget{
-										VBox{
-											widgetBase: widgetBase{padding: 8},
-											children: []Widget{
-												Button{
-													widgetBase: widgetBase{width: 100, name: "compose"},
-													text:       "Compose",
-												},
-											},
-										},
-									},
-								},
-								HBox{widgetBase: widgetBase{expand: true}},
-							},
-						},
-						VBox{widgetBase: widgetBase{name: "outboxVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Drafts",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{widgetBase: widgetBase{name: "draftsVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Contacts",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						HBox{
-							widgetBase: widgetBase{padding: 6},
-							children: []Widget{
-								HBox{widgetBase: widgetBase{expand: true}},
-								HBox{
-									widgetBase: widgetBase{padding: 8},
-									children: []Widget{
-										VBox{
-											widgetBase: widgetBase{padding: 8},
-											children: []Widget{
-												Button{
-													widgetBase: widgetBase{width: 100, name: "newcontact"},
-													text:       "Add",
-												},
-											},
-										},
-									},
-								},
-								HBox{widgetBase: widgetBase{expand: true}},
-							},
-						},
-						VBox{widgetBase: widgetBase{name: "contactsVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Client",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{
-							widgetBase: widgetBase{name: "clientVbox"},
-						},
-					},
-				},
-			},
-		},
-		right: Scrolled{
-			horizontal: true,
-			viewport:   true,
-			child:      rightPlaceholderUI,
-		},
-	}
-
-	c.ui.Actions() <- Reset{ui}
-	c.ui.Signal()
-
-	c.contactsUI = &listUI{
-		ui:       c.ui,
-		vboxName: "contactsVbox",
-	}
-
-	for id, contact := range c.contacts {
-		subline := ""
-		if contact.isPending {
-			subline = "pending"
-		}
-		if len(contact.pandaResult) > 0 {
-			subline = "failed"
-		}
-		c.contactsUI.Add(id, contact.name, subline, indicatorNone)
-	}
-
-	c.inboxUI = &listUI{
-		ui:       c.ui,
-		vboxName: "inboxVbox",
-	}
-
-	for _, msg := range c.inbox {
-		var subline string
-		i := indicatorNone
-
-		if msg.message == nil {
-			subline = "pending"
-		} else {
-			if len(msg.message.Body) == 0 {
-				continue
-			}
-			if !msg.read {
-				i = indicatorBlue
-			}
-			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-		}
-		fromString := "Home Server"
-		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
-		}
-		c.inboxUI.Add(msg.id, fromString, subline, i)
-	}
-	c.updateWindowTitle()
-
-	c.outboxUI = &listUI{
-		ui:       c.ui,
-		vboxName: "outboxVbox",
-	}
-
-	for _, msg := range c.outbox {
-		if msg.revocation {
-			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
-			c.outboxUI.SetInsensitive(msg.id)
-			continue
-		}
-		if len(msg.message.Body) > 0 {
-			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
-		}
-	}
-
-	c.draftsUI = &listUI{
-		ui:       c.ui,
-		vboxName: "draftsVbox",
-	}
-
-	for _, draft := range c.drafts {
-		to := "Unknown"
-		if draft.to != 0 {
-			to = c.contacts[draft.to].name
-		}
-		subline := draft.created.Format(shortTimeFormat)
-		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
-	}
-
-	c.clientUI = &listUI{
-		ui:       c.ui,
-		vboxName: "clientVbox",
-	}
-	const (
-		clientUIIdentity = iota + 1
-		clientUIActivity
-	)
-	c.clientUI.Add(clientUIIdentity, "Identity", "", indicatorNone)
-	c.clientUI.Add(clientUIActivity, "Activity Log", "", indicatorNone)
-
-	c.ui.Actions() <- UIState{uiStateMain}
-	c.ui.Signal()
-
-	var nextEvent interface{}
-	for {
-		event := nextEvent
-		nextEvent = nil
-		if event == nil {
-			event, _ = c.nextEvent()
-		}
-		if event == nil {
-			continue
-		}
-
-		c.DeselectAll()
-		if id, ok := c.inboxUI.Event(event); ok {
-			c.inboxUI.Select(id)
-			nextEvent = c.showInbox(id)
-			continue
-		}
-		if id, ok := c.outboxUI.Event(event); ok {
-			c.outboxUI.Select(id)
-			nextEvent = c.showOutbox(id)
-			continue
-		}
-		if id, ok := c.contactsUI.Event(event); ok {
-			c.contactsUI.Select(id)
-			nextEvent = c.showContact(id)
-			continue
-		}
-		if id, ok := c.clientUI.Event(event); ok {
-			c.clientUI.Select(id)
-			switch id {
-			case clientUIIdentity:
-				nextEvent = c.identityUI()
-			case clientUIActivity:
-				nextEvent = c.logUI()
-			default:
-				panic("bad clientUI event")
-			}
-			continue
-		}
-		if id, ok := c.draftsUI.Event(event); ok {
-			c.draftsUI.Select(id)
-			nextEvent = c.composeUI(c.drafts[id], nil)
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		switch click.name {
-		case "newcontact":
-			nextEvent = c.newContactUI(nil)
-		case "compose":
-			nextEvent = c.composeUI(nil, nil)
-		}
-	}
-}
-
-func (qm *queuedMessage) indicator() Indicator {
-	switch {
-	case !qm.acked.IsZero():
-		return indicatorGreen
-	case !qm.sent.IsZero():
-		if qm.revocation {
-			// Revocations are never acked so they are green as
-			// soon as they are sent.
-			return indicatorGreen
-		}
-		return indicatorYellow
-	}
-	return indicatorRed
-}
-
-func (c *client) enqueue(m *queuedMessage) {
-	c.queueMutex.Lock()
-	defer c.queueMutex.Unlock()
-
-	c.queue = append(c.queue, m)
-}
-
-func maybeTruncate(s string) string {
-	if runes := []rune(s); len(runes) > 30 {
-		runes = runes[:30]
-		runes = append(runes, 0x2026 /* ellipsis */)
-		return string(runes)
-	}
-	return s
-}
-
-type InboxDetachmentUI struct {
-	msg *InboxMessage
-	ui  UI
-}
-
-func (i InboxDetachmentUI) IsValid(id uint64) bool {
-	_, ok := i.msg.decryptions[id]
-	return ok
-}
-
-func (i InboxDetachmentUI) ProgressName(id uint64) string {
-	return fmt.Sprintf("detachment-progress-%d", i.msg.decryptions[id].index)
-}
-
-func (i InboxDetachmentUI) VBoxName(id uint64) string {
-	return fmt.Sprintf("detachment-vbox-%d", i.msg.decryptions[id].index)
-}
-
-func (i InboxDetachmentUI) OnFinal(id uint64) {
-	i.ui.Actions() <- Sensitive{
-		name:      fmt.Sprintf("detachment-decrypt-%d", i.msg.decryptions[id].index),
-		sensitive: true,
-	}
-	i.ui.Actions() <- Sensitive{
-		name:      fmt.Sprintf("detachment-download-%d", i.msg.decryptions[id].index),
-		sensitive: true,
-	}
-	delete(i.msg.decryptions, id)
-}
-
-func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return "(not yet)"
-	}
-	return t.Format(time.RFC1123)
+	return nil
 }
 
 func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error {
@@ -1096,49 +648,6 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error 
 	contact.generation = *kx.Generation
 
 	return nil
-}
-
-func (c *client) nextEvent() (event interface{}, wanted bool) {
-	var ok bool
-	select {
-	case event, ok = <-c.ui.Events():
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-	case newMessage := <-c.newMessageChan:
-		c.processNewMessage(newMessage)
-		return
-	case msr := <-c.messageSentChan:
-		c.processMessageSent(msr)
-		return
-	case update := <-c.pandaChan:
-		c.processPANDAUpdate(update)
-		return
-	case event = <-c.backgroundChan:
-		break
-	case <-c.log.updateChan:
-		return
-	}
-
-	if _, ok := c.contactsUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.outboxUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.inboxUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.clientUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.draftsUI.Event(event); ok {
-		wanted = true
-	}
-	if click, ok := event.(Click); ok {
-		wanted = wanted || click.name == "newcontact" || click.name == "compose"
-	}
-	return
 }
 
 func (c *client) randBytes(buf []byte) {
@@ -1197,313 +706,6 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
-func (c *client) keyPromptUI(stateFile *disk.StateFile) error {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Passphrase",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "Please enter the passphrase used to encrypt Pond's state file. If you set a passphrase and forgot it, it cannot be recovered. You will have to start afresh.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Passphrase:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "pw"},
-						width:      60,
-						password:   true,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "next"},
-						text:       "Next",
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 5},
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{name: "status"},
-					},
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "pw"}
-	c.ui.Actions() <- UIState{uiStatePassphrase}
-	c.ui.Signal()
-
-	for {
-		event, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		if click.name != "next" && click.name != "pw" {
-			continue
-		}
-
-		pw, ok := click.entries["pw"]
-		if !ok {
-			panic("missing pw")
-		}
-
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
-		c.ui.Signal()
-
-		err := c.loadState(stateFile, pw)
-		if err != disk.BadPasswordError {
-			return err
-		}
-
-		c.ui.Actions() <- SetText{name: "status", text: "Incorrect passphrase or corrupt state file"}
-		c.ui.Actions() <- SetEntry{name: "pw", text: ""}
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: true}
-		c.ui.Signal()
-	}
-
-	return nil
-}
-
-func (c *client) createPassphraseUI() string {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Set Passphrase",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "Pond keeps private keys, messages etc on disk for a limited amount of time and that information can be encrypted with a passphrase. If you are comfortable with the security of your home directory, this passphrase can be empty and you won't be prompted for it again. If you set a passphrase and forget it, it cannot be recovered. You will have to start afresh.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Passphrase:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "pw"},
-						width:      60,
-						password:   true,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "next"},
-						text:       "Next",
-					},
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "pw"}
-	c.ui.Actions() <- UIState{uiStateCreatePassphrase}
-	c.ui.Signal()
-
-	for {
-		event, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		if click.name != "next" && click.name != "pw" {
-			continue
-		}
-
-		pw, ok := click.entries["pw"]
-		if !ok {
-			panic("missing pw")
-		}
-
-		return pw
-	}
-
-	panic("unreachable")
-}
-
-func (c *client) createAccountUI() {
-	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
-	if c.dev {
-		defaultServer = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
-	}
-
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Create Account",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "In order to use Pond you have to have an account on a server. Servers may set their own account policies, but the default server allows anyone to create an account. If you want to use the default server, just click 'Create'.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Server:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "server"},
-						width:      60,
-						text:       defaultServer,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "create"},
-						text:       "Create",
-					},
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "create"}
-	c.ui.Actions() <- UIState{uiStateCreateAccount}
-	c.ui.Signal()
-
-	var spinnerCreated bool
-	for {
-		click, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-		c.server = click.(Click).entries["server"]
-
-		c.ui.Actions() <- Sensitive{name: "server", sensitive: false}
-		c.ui.Actions() <- Sensitive{name: "create", sensitive: false}
-
-		const initialMessage = "Checking..."
-
-		if !spinnerCreated {
-			c.ui.Actions() <- Append{
-				name: "vbox",
-				children: []Widget{
-					HBox{
-						widgetBase: widgetBase{name: "statusbox"},
-						spacing:    10,
-						children: []Widget{
-							Spinner{
-								widgetBase: widgetBase{name: "spinner"},
-							},
-							Label{
-								widgetBase: widgetBase{name: "status"},
-								text:       initialMessage,
-							},
-						},
-					},
-				},
-			}
-			spinnerCreated = true
-		} else {
-			c.ui.Actions() <- StartSpinner{name: "spinner"}
-			c.ui.Actions() <- SetText{name: "status", text: initialMessage}
-		}
-		c.ui.Signal()
-
-		if err := c.doCreateAccount(); err != nil {
-			c.ui.Actions() <- StopSpinner{name: "spinner"}
-			c.ui.Actions() <- UIError{err}
-			c.ui.Actions() <- SetText{name: "status", text: err.Error()}
-			c.ui.Actions() <- Sensitive{name: "server", sensitive: true}
-			c.ui.Actions() <- Sensitive{name: "create", sensitive: true}
-			c.ui.Signal()
-			continue
-		}
-
-		break
-	}
-}
-
-func (c *client) ShutdownAndSuspend() {
-	if c.writerChan != nil {
-		c.save()
-	}
-	c.Shutdown()
-	close(c.ui.Actions())
-	select {}
-}
-
-func (c *client) Shutdown() {
-	close(c.pandaShutdownChan)
-	if c.testing {
-		c.pandaWaitGroup.Wait()
-
-	ProcessPANDAUpdates:
-		for {
-			select {
-			case update := <-c.pandaChan:
-				c.processPANDAUpdate(update)
-			default:
-				break ProcessPANDAUpdates
-			}
-		}
-	}
-	if c.writerChan != nil {
-		close(c.writerChan)
-		<-c.writerDone
-	}
-	if c.fetchNowChan != nil {
-		close(c.fetchNowChan)
-	}
-	if c.revocationUpdateChan != nil {
-		close(c.revocationUpdateChan)
-	}
-	if c.stateLock != nil {
-		c.stateLock.Close()
-	}
-}
-
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.
 func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) {
 	var result []byte
@@ -1538,97 +740,9 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) 
 	}
 }
 
-// processPANDAUpdate runs on the main client goroutine and handles messages
-// from a runPANDA goroutine.
-func (c *client) processPANDAUpdate(update pandaUpdate) {
-	contact, ok := c.contacts[update.id]
-	if !ok {
-		return
-	}
-
-	switch {
-	case update.err != nil:
-		contact.pandaResult = update.err.Error()
-		contact.pandaKeyExchange = nil
-		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
-		c.contactsUI.SetSubline(contact.id, "failed")
-	case update.serialised != nil:
-		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
-			return
-		}
-		contact.pandaKeyExchange = update.serialised
-	case update.result != nil:
-		if err := contact.processKeyExchange(update.result, c.dev); err != nil {
-			contact.pandaResult = err.Error()
-			c.contactsUI.SetSubline(contact.id, "failed")
-			contact.pandaKeyExchange = nil
-			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
-		} else {
-			c.unsealPendingMessages(contact)
-			c.contactsUI.SetSubline(contact.id, "")
-			contact.pandaKeyExchange = nil
-			c.log.Printf("Key exchange with %s complete", contact.name)
-			c.ui.Actions() <- UIState{uiStatePANDAComplete}
-			c.ui.Signal()
-		}
-	}
-
-	c.save()
-}
-
-// unsealPendingMessages is run once a key exchange with a contact has
-// completed and unseals any previously unreadable messages from that contact.
-func (c *client) unsealPendingMessages(contact *Contact) {
-	contact.isPending = false
-
-	for _, msg := range c.inbox {
-		if msg.message == nil && msg.from == contact.id {
-			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
-				c.inboxUI.Remove(msg.id)
-				continue
-			}
-			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.SetSubline(msg.id, subline)
-			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
-			c.updateWindowTitle()
-		}
-	}
-}
-
 type pandaUpdate struct {
 	id         uint64
 	err        error
 	result     []byte
 	serialised []byte
-}
-
-func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
-	c := &client{
-		testing:           testing,
-		dev:               testing,
-		autoFetch:         autoFetch,
-		stateFilename:     stateFilename,
-		log:               NewLog(),
-		ui:                ui,
-		rand:              rand,
-		contacts:          make(map[uint64]*Contact),
-		drafts:            make(map[uint64]*Draft),
-		newMessageChan:    make(chan NewMessage),
-		messageSentChan:   make(chan messageSendResult, 1),
-		backgroundChan:    make(chan interface{}, 8),
-		pandaChan:         make(chan pandaUpdate, 1),
-		pandaShutdownChan: make(chan bool),
-	}
-	c.newMeetingPlace = func() panda.MeetingPlace {
-		return &panda.HTTPMeetingPlace{
-			TorAddress: c.torAddress,
-			URL:        "https://panda-key-exchange.appspot.com/exchange",
-		}
-	}
-	c.log.toStderr = true
-	return c
-}
-
-func (c *client) Start() {
-	go c.loadUI()
 }

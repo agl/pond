@@ -36,7 +36,7 @@ const (
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
-func (c *client) sendAck(msg *InboxMessage) {
+func (c *guiClient) sendAck(msg *InboxMessage) {
 	to := c.contacts[msg.from]
 
 	var nextDHPub [32]byte
@@ -58,7 +58,7 @@ func (c *client) sendAck(msg *InboxMessage) {
 }
 
 // send encrypts |message| and enqueues it for transmission.
-func (c *client) send(to *Contact, message *pond.Message) error {
+func (c *guiClient) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -141,7 +141,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 // message before signing in order to give context to the signature.
 var revocationSignaturePrefix = []byte("revocation\x00")
 
-func (c *client) revoke(to *Contact) {
+func (c *guiClient) revoke(to *Contact) {
 	to.revoked = true
 	revocation := c.groupPriv.GenerateRevocation(to.groupKey)
 	now := time.Now()
@@ -269,7 +269,7 @@ func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte,
 	return plaintext, true
 }
 
-func (c *client) processNewMessage(m NewMessage) {
+func (c *guiClient) processNewMessage(m NewMessage) {
 	defer func() { m.ack <- true }()
 
 	if m.fetched != nil {
@@ -279,7 +279,7 @@ func (c *client) processNewMessage(m NewMessage) {
 	}
 }
 
-func (c *client) processFetch(m NewMessage) {
+func (c *guiClient) processFetch(m NewMessage) {
 	f := m.fetched
 
 	sha := sha256.New()
@@ -365,7 +365,7 @@ NextCandidate:
 	c.save()
 }
 
-func (c *client) processServerAnnounce(m NewMessage) {
+func (c *guiClient) processServerAnnounce(m NewMessage) {
 	inboxMsg := &InboxMessage{
 		id:           c.randId(),
 		receivedTime: time.Now(),
@@ -381,7 +381,7 @@ func (c *client) processServerAnnounce(m NewMessage) {
 	c.save()
 }
 
-func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
+func (c *guiClient) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	if from.isPending {
 		panic("was asked to unseal message from pending contact")
 	}
@@ -461,7 +461,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	return true
 }
 
-func (c *client) processMessageSent(msr messageSendResult) {
+func (c *guiClient) processMessageSent(msr messageSendResult) {
 	var msg *queuedMessage
 	for _, m := range c.outbox {
 		if m.id == msr.id {
@@ -535,8 +535,8 @@ func (c *client) processMessageSent(msr messageSendResult) {
 			dupKey, _ := new(bbssig.MemberKey).Unmarshal(to.myGroupKey.Group, to.myGroupKey.Marshal())
 			c.revocationUpdateChan <- revocationUpdate{msg.to, dupKey, to.generation}
 		}
-		c.ui.Actions() <- UIState{uiStateRevocationProcessed}
-		c.ui.Signal()
+		c.gui.Actions() <- UIState{uiStateRevocationProcessed}
+		c.gui.Signal()
 		return
 	}
 
@@ -660,7 +660,7 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 	return conn, nil
 }
 
-func (c *client) doCreateAccount() error {
+func (c *client) doCreateAccount(displayMsg func(string)) error {
 	_, _, err := parseServer(c.server, c.dev)
 	if err != nil {
 		return err
@@ -675,14 +675,12 @@ func (c *client) doCreateAccount() error {
 		testConn.Close()
 	}
 
-	c.ui.Actions() <- SetText{name: "status", text: "Generating keys..."}
-	c.ui.Signal()
+	displayMsg("Generating keys...")
 
 	c.randBytes(c.identity[:])
 	curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
 
-	c.ui.Actions() <- SetText{name: "status", text: "Connecting..."}
-	c.ui.Signal()
+	displayMsg("Connecting...")
 
 	conn, err := c.dialServer(c.server, false)
 	if err != nil {
@@ -690,8 +688,7 @@ func (c *client) doCreateAccount() error {
 	}
 	defer conn.Close()
 
-	c.ui.Actions() <- SetText{name: "status", text: "Requesting new account..."}
-	c.ui.Signal()
+	displayMsg("Requesting new account...")
 
 	c.generation = uint32(c.randId())
 
@@ -712,8 +709,7 @@ func (c *client) doCreateAccount() error {
 		return err
 	}
 
-	c.ui.Actions() <- SetText{name: "status", text: "Done"}
-	c.ui.Signal()
+	displayMsg("Done")
 
 	return nil
 }

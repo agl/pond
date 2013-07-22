@@ -31,9 +31,15 @@ func main() {
 		*stateFile = filepath.Join(configDir, "pond")
 	}
 
-	ui := NewGTKUI()
-	client := NewClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
-	client.dev = dev
-	client.Start()
-	ui.Run()
+	if len(os.Getenv("PONDCLI")) > 0 {
+		client := NewCLIClient(*stateFile, rand.Reader, false /* testing */, true /* autoFetch */)
+		client.dev = dev
+		client.Start()
+	} else {
+		ui := NewGTKUI()
+		client := NewGUIClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+		client.dev = dev
+		client.Start()
+		ui.Run()
+	}
 }

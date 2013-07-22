@@ -8,7 +8,7 @@ import (
 	"github.com/agl/pond/client/tpm"
 )
 
-func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) error {
+func (c *guiClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {
 	var tpmInfo string
 	present := tpm.Present()
 	if present {
@@ -54,10 +54,10 @@ func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) erro
 		},
 	}
 
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "tpm"}
-	c.ui.Actions() <- UIState{uiStateErasureStorage}
-	c.ui.Signal()
+	c.gui.Actions() <- SetBoxContents{name: "body", child: ui}
+	c.gui.Actions() <- SetFocus{name: "tpm"}
+	c.gui.Actions() <- UIState{uiStateErasureStorage}
+	c.gui.Signal()
 
 	var logText string
 
@@ -65,15 +65,15 @@ func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) erro
 		Log: func(format string, args ...interface{}) {
 			c.log.Printf(format, args...)
 			logText += fmt.Sprintf(format, args...) + "\n"
-			c.ui.Actions() <- SetTextView{name: "log", text: logText}
-			c.ui.Signal()
+			c.gui.Actions() <- SetTextView{name: "log", text: logText}
+			c.gui.Signal()
 		},
 		Rand: c.rand,
 	}
 
 NextEvent:
 	for {
-		event, ok := <-c.ui.Events()
+		event, ok := <-c.gui.Events()
 		if !ok {
 			c.ShutdownAndSuspend()
 		}
@@ -89,22 +89,22 @@ NextEvent:
 			return stateFile.Create(pw)
 		case "tpm":
 			if len(logText) > 0 {
-				c.ui.Actions() <- SetTextView{name: "log", text: ""}
-				c.ui.Signal()
+				c.gui.Actions() <- SetTextView{name: "log", text: ""}
+				c.gui.Signal()
 				logText = ""
 				time.Sleep(300 * time.Millisecond)
 			}
 
 			stateFile.Erasure = &tpm
-			c.ui.Actions() <- Sensitive{name: "tpm", sensitive: false}
-			c.ui.Actions() <- Sensitive{name: "continue", sensitive: false}
-			c.ui.Signal()
+			c.gui.Actions() <- Sensitive{name: "tpm", sensitive: false}
+			c.gui.Actions() <- Sensitive{name: "continue", sensitive: false}
+			c.gui.Signal()
 			if err := stateFile.Create(pw); err != nil {
 				tpm.Log("Setup failed with error: %s", err)
 				tpm.Log("You can click the button to try again")
-				c.ui.Actions() <- Sensitive{name: "tpm", sensitive: true}
-				c.ui.Actions() <- Sensitive{name: "continue", sensitive: true}
-				c.ui.Signal()
+				c.gui.Actions() <- Sensitive{name: "tpm", sensitive: true}
+				c.gui.Actions() <- Sensitive{name: "continue", sensitive: true}
+				c.gui.Signal()
 				continue NextEvent
 			}
 			return nil
