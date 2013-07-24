@@ -1371,7 +1371,15 @@ func TestPANDA(t *testing.T) {
 
 	startPANDAKeyExchange(t, client1, server, "client2", "shared secret")
 
-	mpShutdownChan <- true
+WaitToSendMPShutdown:
+	for {
+		select {
+		case mpShutdownChan <- true:
+			break WaitToSendMPShutdown
+		case ack := <-client1.gui.signal:
+			ack <- true
+		}
+	}
 	client1.ReloadWithMeetingPlace(mp)
 
 	startPANDAKeyExchange(t, client2, server, "client1", "shared secret")

@@ -1770,9 +1770,6 @@ Shared secret keying involves anonymously contacting a global, shared service an
 		id:        c.randId(),
 	}
 
-	c.contactsUI.Add(contact.id, name, "pending", indicatorNone)
-	c.contactsUI.Select(contact.id)
-
 	c.gui.Actions() <- SetText{name: "error1", text: ""}
 	c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
 	c.gui.Actions() <- Sensitive{name: "manual", sensitive: true}
@@ -1818,6 +1815,9 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 		c.newKeyExchange(contact)
 		c.contacts[contact.id] = contact
 		c.save()
+
+		c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
+		c.contactsUI.Select(contact.id)
 	}
 
 	var out bytes.Buffer
@@ -1937,7 +1937,6 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 
 func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int) interface{} {
 	c.newKeyExchange(contact)
-	c.contacts[contact.id] = contact
 
 	controls := Grid{
 		widgetBase: widgetBase{name: "controls", margin: 5},
@@ -2142,6 +2141,11 @@ SharedSecretEvent:
 					secret.Minutes = click.spinButtons["minute"]
 				}
 				mp := c.newMeetingPlace()
+
+				c.contacts[contact.id] = contact
+				c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
+				c.contactsUI.Select(contact.id)
+
 				kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
 				if err != nil {
 					panic(err)
