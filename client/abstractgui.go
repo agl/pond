@@ -287,6 +287,11 @@ type SetText struct {
 	text string
 }
 
+type SetButtonText struct {
+	name string
+	text string
+}
+
 type SetEntry struct {
 	name string
 	text string

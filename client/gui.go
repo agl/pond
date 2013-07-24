@@ -1625,6 +1625,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
 
+	revokedArmed := false
+
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
@@ -1637,10 +1639,16 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		}
 
 		if click.name == "revoke" {
-			c.revoke(contact)
-			c.gui.Actions() <- Sensitive{name: "revoke", sensitive: false}
-			c.gui.Signal()
-			c.save()
+			if revokedArmed {
+				c.revoke(contact)
+				c.gui.Actions() <- Sensitive{name: "revoke", sensitive: false}
+				c.gui.Signal()
+				c.save()
+			} else {
+				revokedArmed = true
+				c.gui.Actions() <- SetButtonText{name: "revoke", text: "Confirm"}
+				c.gui.Signal()
+			}
 		}
 	}
 

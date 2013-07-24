@@ -1235,6 +1235,8 @@ func TestRevoke(t *testing.T) {
 	client1.gui.events <- Click{name: client1.contactsUI.entries[0].boxName}
 	client1.AdvanceTo(uiStateShowContact)
 	client1.gui.events <- Click{name: "revoke"}
+	client1.gui.WaitForSignal()  // button changes to "Confirm"
+	client1.gui.events <- Click{name: "revoke"}
 	client1.gui.WaitForSignal()
 
 	if client1.generation != initialGeneration+1 {

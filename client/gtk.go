@@ -585,6 +585,9 @@ func (ui *GTKUI) handle(action interface{}) {
 	case SetText:
 		widget := gtk.GtkLabel{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetText(action.text)
+	case SetButtonText:
+		widget := gtk.GtkButton{gtk.GtkBin{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}}
+		widget.SetLabel(action.text)
 	case SetEntry:
 		widget := ui.getWidget(action.name).(gtk.TextInputLike)
 		widget.SetText(action.text)
