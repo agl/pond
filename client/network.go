@@ -197,7 +197,7 @@ func (c *client) revoke(to *Contact) {
 		request:    request,
 		id:         c.randId(),
 		to:         to.id,
-		server:     to.theirServer,
+		server:     c.server,  // revocations always go to the home server.
 		created:    time.Now(),
 	}
 	c.enqueue(out)
