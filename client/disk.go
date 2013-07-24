@@ -189,6 +189,12 @@ func (c *client) unmarshal(state *disk.State) error {
 			}
 		}
 		msg.revocation = m.GetRevocation()
+		if msg.revocation && len(msg.server) == 0 {
+			// There was a bug in some versions where revoking a
+			// pending contact would result in a revocation message
+			// with an empty server.
+			msg.server = c.server
+		}
 
 		c.outbox = append(c.outbox, msg)
 
