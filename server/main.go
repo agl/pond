@@ -18,17 +18,39 @@ import (
 
 	"github.com/agl/pond/server/protos"
 	"github.com/agl/pond/transport"
+	pond "github.com/agl/pond/protos"
 )
 
 var baseDirectory *string = flag.String("base-directory", "", "directory to store server state and config")
 var initFlag *bool = flag.Bool("init", false, "if true, setup a new base directory")
 var port *int = flag.Int("port", 16333, "TCP port to use when setting up a new base directory")
+var makeAnnounce *string = flag.String("make-announce", "", "If set, the location of a text file containing an announcement message which will be written to stdout in binary.")
 
 const configFilename = "config"
 const identityFilename = "identity"
 
 func main() {
 	flag.Parse()
+
+	if len(*makeAnnounce) > 0 {
+		msgBytes, err := ioutil.ReadFile(*makeAnnounce)
+		if err != nil {
+			panic(err)
+		}
+		announce := &pond.Message{
+			Id:           proto.Uint64(0),
+			Time:         proto.Int64(time.Now().Unix()),
+			Body:         msgBytes,
+			MyNextDh:     []byte{},
+			BodyEncoding: pond.Message_RAW.Enum(),
+		}
+		announceBytes, err := proto.Marshal(announce)
+		if err != nil {
+			panic(err)
+		}
+		os.Stdout.Write(announceBytes)
+		return
+	}
 
 	if len(*baseDirectory) == 0 {
 		log.Fatalf("Must give --base-directory")
