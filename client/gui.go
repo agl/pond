@@ -2366,7 +2366,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 
 	var contactNames []string
 	for _, contact := range c.contacts {
-		if !contact.revokedUs {
+		if !contact.isPending && !contact.revokedUs {
 			contactNames = append(contactNames, contact.name)
 		}
 	}

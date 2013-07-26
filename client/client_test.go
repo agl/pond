@@ -113,6 +113,7 @@ type TestGUI struct {
 	currentStateID int
 	t              *testing.T
 	text           map[string]string
+	combos         map[string][]string
 	fileOpen       FileOpen
 	haveFileOpen   bool
 	panicOnSignal  bool
@@ -126,6 +127,7 @@ func NewTestGUI(t *testing.T) *TestGUI {
 		currentStateID: uiStateInvalid,
 		t:              t,
 		text:           make(map[string]string),
+		combos:         make(map[string][]string),
 	}
 }
 
@@ -173,6 +175,8 @@ func (ui *TestGUI) processWidget(widget interface{}) {
 		ui.text[v.name] = v.text
 	case Label:
 		ui.text[v.name] = v.text
+	case Combo:
+		ui.combos[v.name] = v.labels
 	}
 }
 
@@ -1530,5 +1534,41 @@ func TestCliId(t *testing.T) {
 	t.Log(s)
 	if result, ok := cliIdFromString(s); !ok || result != id {
 		t.Fatalf("CliId parse failed: got %d, want %d", result, id)
+	}
+}
+
+func TestSendToPendingContact(t *testing.T) {
+	// Test that it's not possible to send a message to a pending contact.
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := NewTestClient(t, "client", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	proceedToMainUI(t, client, server)
+
+	client.gui.events <- Click{name: "newcontact"}
+	client.AdvanceTo(uiStateNewContact)
+
+	client.gui.events <- Click{
+		name:    "name",
+		entries: map[string]string{"name": "pendingContact"},
+	}
+	client.gui.events <- Click{name: "manual"}
+	client.AdvanceTo(uiStateNewContact2)
+
+	client.gui.events <- Click{name: "compose"}
+	client.AdvanceTo(uiStateCompose)
+
+	if contacts, ok := client.gui.combos["to"]; !ok || len(contacts) > 0 {
+		t.Error("can send message to pending contact")
 	}
 }
