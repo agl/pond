@@ -196,8 +196,7 @@ func (c *guiClient) revoke(to *Contact) {
 		revocation: true,
 		request:    request,
 		id:         c.randId(),
-		to:         to.id,
-		server:     c.server,  // revocations always go to the home server.
+		server:     c.server, // revocations always go to the home server.
 		created:    time.Now(),
 	}
 	c.enqueue(out)
@@ -827,10 +826,10 @@ func (c *client) transact() {
 			server = c.server
 			c.log.Printf("Starting fetch from home server")
 		} else {
-			// We move the head to the back of the queue so that we
-			// don't get stuck trying to send the same message over
-			// and over.
 			head = c.queue[0]
+			// Move the head of the queue to the end so that we
+			// don't get stuck trying send the same message over
+			// and over.
 			c.queue = append(c.queue[1:], head)
 			req = head.request
 			server = head.server
@@ -858,33 +857,54 @@ func (c *client) transact() {
 			continue
 		}
 
-		if reply.Status == nil {
-			if isFetch && (reply.Fetched != nil || reply.Announce != nil) {
-				ackChan := make(chan bool)
-				c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}
-				<-ackChan
-			} else if !isFetch {
-				c.queueMutex.Lock()
-				c.queue = c.queue[:len(c.queue)-1]
-				if len(c.queue) == 0 {
-					c.queue = nil
+		conn.Close()
+
+		if !isFetch {
+			c.queueMutex.Lock()
+			// Find the index of the message that we just sent (if any) in
+			// the queue. It should be at the end, but another message may
+			// have been enqueued while we were sending it.
+			indexOfSentMessage := -1
+			for i, queuedMsg := range c.queue {
+				if queuedMsg == head {
+					indexOfSentMessage = i
+					break
 				}
+			}
+
+			// If we sent a message that was removed from the queue while
+			// we were processing it then ignore any result.
+			if indexOfSentMessage == -1 {
+				continue
+			}
+
+			if reply.Status == nil {
+				var newQueue []*queuedMessage
+				for i, queuedMsg := range c.queue {
+					if i != indexOfSentMessage {
+						newQueue = append(newQueue, queuedMsg)
+					}
+				}
+				c.queue = newQueue
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
+			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
+				reply.Revocation != nil {
+				c.queueMutex.Unlock()
+				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
+			} else {
+				c.queueMutex.Unlock()
 			}
-		} else if !isFetch &&
-			*reply.Status == pond.Reply_GENERATION_REVOKED &&
-			reply.Revocation != nil {
-			c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
+		} else if reply.Fetched != nil || reply.Announce != nil {
+			ackChan := make(chan bool)
+			c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}
+			<-ackChan
 		}
-
-		conn.Close()
 
 		if err := replyToError(reply); err != nil {
 			c.log.Errorf("Error from server %s: %s", server, err)
 			continue
 		}
-
 	}
 }
 

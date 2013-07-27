@@ -11,7 +11,7 @@ func TestSerialise(t *testing.T) {
 	secret := SharedSecret{
 		Secret: "foo",
 	}
-	mp := NewSimpleMeetingPlace(nil)
+	mp := NewSimpleMeetingPlace()
 	kx, err := NewKeyExchange(rand.Reader, mp, &secret, []byte{1})
 	if err != nil {
 		t.Fatalf("failed to create KeyExchange: %s", err)
@@ -40,7 +40,7 @@ func runKX(resultChan chan interface{}, log func(string, ...interface{}), mp Mee
 
 func TestKeyExchange(t *testing.T) {
 	a, b := make(chan interface{}), make(chan interface{})
-	mp := NewSimpleMeetingPlace(nil)
+	mp := NewSimpleMeetingPlace()
 	secret := SharedSecret{
 		Secret: "foo",
 	}
@@ -70,7 +70,7 @@ func TestKeyExchange(t *testing.T) {
 }
 
 func TestStartStop(t *testing.T) {
-	mp := NewSimpleMeetingPlace(nil)
+	mp := NewSimpleMeetingPlace()
 	secret := SharedSecret{
 		Secret: "foo",
 	}

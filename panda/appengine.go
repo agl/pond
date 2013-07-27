@@ -96,7 +96,7 @@ func (hmp *HTTPMeetingPlace) attemptExchange(log func(string, ...interface{}), i
 	return response, responseBody, err
 }
 
-func (hmp *HTTPMeetingPlace) Exchange(log func(string, ...interface{}), id, message []byte) ([]byte, error) {
+func (hmp *HTTPMeetingPlace) Exchange(log func(string, ...interface{}), id, message []byte, shutdown chan struct{}) ([]byte, error) {
 	delay := 15 * time.Second
 	for {
 		response, body, err := hmp.attemptExchange(log, id, message)
@@ -121,10 +121,14 @@ func (hmp *HTTPMeetingPlace) Exchange(log func(string, ...interface{}), id, mess
 		}
 
 	Sleep:
-		time.Sleep(delay)
-		delay *= 2
-		if delay > time.Hour {
-			delay = time.Hour
+		select {
+		case <-shutdown:
+			return nil, ShutdownErr
+		case <-time.After(delay):
+			delay *= 2
+			if delay > time.Hour {
+				delay = time.Hour
+			}
 		}
 	}
 

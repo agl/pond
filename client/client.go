@@ -180,9 +180,6 @@ type client struct {
 	// pandaChan receives messages from goroutines in runPANDA about
 	// changes to PANDA key exchange state.
 	pandaChan chan pandaUpdate
-	// pandaShutdownChan is used to signal to the PANDA goroutines that the
-	// client is stopping and that they should save state.
-	pandaShutdownChan chan bool
 	// pandaWaitGroup is incremented for each running PANDA goroutine.
 	pandaWaitGroup sync.WaitGroup
 }
@@ -353,6 +350,9 @@ type Contact struct {
 	// pandaKeyExchange contains the serialised PANDA state if a key
 	// exchange is ongoing.
 	pandaKeyExchange []byte
+	// pandaShutdownChan is a channel that can be closed to trigger the
+	// shutdown of an individual PANDA exchange.
+	pandaShutdownChan chan struct{}
 	// pandaResult contains an error message in the event that a PANDA key
 	// exchange failed.
 	pandaResult string
@@ -588,7 +588,8 @@ func (c *client) loadUI() error {
 			continue
 		}
 		c.pandaWaitGroup.Add(1)
-		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
+		contact.pandaShutdownChan = make(chan struct{})
+		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 	}
 
 	c.ui.mainUI()
@@ -707,7 +708,7 @@ func (c *client) newKeyExchange(contact *Contact) {
 }
 
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.
-func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) {
+func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, shutdown chan struct{}) {
 	var result []byte
 	defer c.pandaWaitGroup.Done()
 
@@ -721,9 +722,9 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string) 
 			id:         id,
 			serialised: serialised,
 		}
-		format = "Key exchange with " + name + ": " + format
-		c.log.Printf(format, args...)
+		c.log.Printf("Key exchange with %s: %s", name, fmt.Sprintf(format, args...))
 	}
+	kx.ShutdownChan = shutdown
 
 	if err == nil {
 		result, err = kx.Run()

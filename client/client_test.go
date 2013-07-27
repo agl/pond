@@ -31,6 +31,9 @@ const clientLogToStderr = false
 // constant can be tweaked to enable logging to stderr.
 const debugDeadlock = false
 
+// logActions causes all GUI events to be written to the test log.
+const logActions = false
+
 type TestServer struct {
 	cmd      *exec.Cmd
 	port     int
@@ -191,7 +194,9 @@ ReadActions:
 	for {
 		select {
 		case action := <-ui.actions:
-			ui.t.Logf("%#v", action)
+			if logActions {
+				ui.t.Logf("%#v", action)
+			}
 			if debugDeadlock {
 				fmt.Printf("%#v\n", action)
 			}
@@ -545,6 +550,20 @@ func contactByName(client *TestClient, name string) (id uint64, contact *Contact
 	for id, contact = range client.contacts {
 		if contact.name == name {
 			return
+		}
+	}
+	panic("contact not found: " + name)
+}
+
+func clickOnContact(client *TestClient, name string) {
+	for id, contact := range client.contacts {
+		if contact.name == name {
+			for _, entry := range client.contactsUI.entries {
+				if entry.id == id {
+					client.gui.events <- Click{name: entry.boxName}
+					return
+				}
+			}
 		}
 	}
 	panic("contact not found: " + name)
@@ -1238,10 +1257,10 @@ func TestRevoke(t *testing.T) {
 
 	client1.gui.events <- Click{name: client1.contactsUI.entries[0].boxName}
 	client1.AdvanceTo(uiStateShowContact)
-	client1.gui.events <- Click{name: "revoke"}
-	client1.gui.WaitForSignal()  // button changes to "Confirm"
-	client1.gui.events <- Click{name: "revoke"}
-	client1.gui.WaitForSignal()
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.WaitForSignal() // button changes to "Confirm"
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
 
 	if client1.generation != initialGeneration+1 {
 		t.Errorf("Generation did not advance")
@@ -1367,8 +1386,7 @@ func TestPANDA(t *testing.T) {
 	}
 	defer client2.Close()
 
-	mpShutdownChan := make(chan bool)
-	mp := panda.NewSimpleMeetingPlace(mpShutdownChan)
+	mp := panda.NewSimpleMeetingPlace()
 	newMeetingPlace := func() panda.MeetingPlace {
 		return mp
 	}
@@ -1377,15 +1395,6 @@ func TestPANDA(t *testing.T) {
 
 	startPANDAKeyExchange(t, client1, server, "client2", "shared secret")
 
-WaitToSendMPShutdown:
-	for {
-		select {
-		case mpShutdownChan <- true:
-			break WaitToSendMPShutdown
-		case ack := <-client1.gui.signal:
-			ack <- true
-		}
-	}
 	client1.ReloadWithMeetingPlace(mp)
 
 	startPANDAKeyExchange(t, client2, server, "client1", "shared secret")
@@ -1571,4 +1580,81 @@ func TestSendToPendingContact(t *testing.T) {
 	if contacts, ok := client.gui.combos["to"]; !ok || len(contacts) > 0 {
 		t.Error("can send message to pending contact")
 	}
+}
+
+func TestDelete(t *testing.T) {
+	// Test that deleting contacts works.
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	// Start an incomplete, manual exchange.
+	proceedToKeyExchange(t, client1, server, "client3")
+
+	// Start a PANDA exchange.
+	mp := panda.NewSimpleMeetingPlace()
+	newMeetingPlace := func() panda.MeetingPlace {
+		return mp
+	}
+	client1.newMeetingPlace = newMeetingPlace
+	startPANDAKeyExchange(t, client1, server, "client4", "secret")
+	client1.AdvanceTo(uiStateShowContact)
+
+	clickOnContact(client1, "client2")
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	if len(client1.inbox) > 0 {
+		t.Errorf("still entries in inbox")
+	}
+
+	for _, msg := range client1.outbox {
+		if !msg.revocation {
+			t.Errorf("still entries in outbox")
+			break
+		}
+	}
+
+	clickOnContact(client1, "client3")
+	client1.gui.events <- Click{name: "abort"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	clickOnContact(client1, "client4")
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	if len(client1.contacts) > 0 {
+		t.Errorf("still contacts")
+	}
+
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
 }

@@ -74,7 +74,7 @@ func newSharedSecret(p *panda_proto.KeyExchange_SharedSecret) (*SharedSecret, bo
 
 type MeetingPlace interface {
 	Padding() int
-	Exchange(log func(string, ...interface{}), id, message []byte) ([]byte, error)
+	Exchange(log func(string, ...interface{}), id, message []byte, shutdown chan struct{}) ([]byte, error)
 }
 
 type KeyExchange struct {
@@ -82,7 +82,7 @@ type KeyExchange struct {
 
 	Log          func(string, ...interface{})
 	Testing      bool
-	ShutdownChan chan bool
+	ShutdownChan chan struct{}
 
 	rand         io.Reader
 	status       panda_proto.KeyExchange_Status
@@ -285,7 +285,7 @@ func (kx *KeyExchange) derivePassword() error {
 }
 
 func (kx *KeyExchange) exchange1() error {
-	reply, err := kx.meetingPlace.Exchange(kx.Log, kx.meeting1[:], kx.message1[:])
+	reply, err := kx.meetingPlace.Exchange(kx.Log, kx.meeting1[:], kx.message1[:], kx.ShutdownChan)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func (kx *KeyExchange) exchange1() error {
 }
 
 func (kx *KeyExchange) exchange2() ([]byte, error) {
-	reply, err := kx.meetingPlace.Exchange(kx.Log, kx.meeting2[:], kx.message2[:])
+	reply, err := kx.meetingPlace.Exchange(kx.Log, kx.meeting2[:], kx.message2[:], kx.ShutdownChan)
 	if err != nil {
 		return nil, err
 	}

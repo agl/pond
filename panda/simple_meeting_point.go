@@ -15,14 +15,14 @@ type pair struct {
 type SimpleMeetingPlace struct {
 	sync.Mutex
 	values                 map[string]*pair
-	wakeChan, shutdownChan chan bool
+	wakeChan chan bool
 }
 
 func (smp *SimpleMeetingPlace) Padding() int {
 	return paddingSize
 }
 
-func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, message []byte) ([]byte, error) {
+func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, message []byte, shutdown chan struct{}) ([]byte, error) {
 	i := string(id)
 
 	smp.Lock()
@@ -53,7 +53,7 @@ func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, me
 				select {
 				case <-smp.wakeChan:
 					smp.Lock()
-				case <-smp.shutdownChan:
+				case <-shutdown:
 					return nil, ShutdownErr
 				}
 			}
@@ -63,11 +63,10 @@ func (smp *SimpleMeetingPlace) Exchange(log func(string, ...interface{}), id, me
 	return nil, errors.New("more than two messages for a single id")
 }
 
-func NewSimpleMeetingPlace(shutdownChan chan bool) *SimpleMeetingPlace {
+func NewSimpleMeetingPlace() *SimpleMeetingPlace {
 	s := &SimpleMeetingPlace{
 		values:       make(map[string]*pair),
 		wakeChan:     make(chan bool),
-		shutdownChan: shutdownChan,
 	}
 	return s
 }

@@ -66,6 +66,7 @@ const (
 	uiStateInbox
 	uiStateLog
 	uiStateRevocationProcessed
+	uiStateRevocationComplete
 	uiStatePANDAComplete
 	uiStateErasureStorage
 )
@@ -888,7 +889,11 @@ func (c *guiClient) ShutdownAndSuspend() error {
 }
 
 func (c *guiClient) Shutdown() {
-	close(c.pandaShutdownChan)
+	for _, contact := range c.contacts {
+		if contact.pandaShutdownChan != nil {
+			close(contact.pandaShutdownChan)
+		}
+	}
 	if c.testing {
 		c.pandaWaitGroup.Wait()
 
@@ -1602,17 +1607,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			{
 				{1, 1, Button{
 					widgetBase: widgetBase{
-						name:        "revoke",
-						insensitive: contact.revoked,
-					},
-					text: "Revoke",
-				}},
-			},
-			{
-				{1, 1, Button{
-					widgetBase: widgetBase{
-						name:        "delete",
-						insensitive: true,
+						name: "delete",
 					},
 					text: "Delete",
 				}},
@@ -1625,7 +1620,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
 
-	revokedArmed := false
+	deleteArmed := false
 
 	for {
 		event, wanted := c.nextEvent()
@@ -1638,21 +1633,77 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			continue
 		}
 
-		if click.name == "revoke" {
-			if revokedArmed {
-				c.revoke(contact)
-				c.gui.Actions() <- Sensitive{name: "revoke", sensitive: false}
+		if click.name == "delete" {
+			if deleteArmed {
+				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
+				c.gui.Signal()
+				c.deleteContact(contact)
+				c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+				c.gui.Actions() <- UIState{uiStateRevocationComplete}
 				c.gui.Signal()
 				c.save()
+				return nil
 			} else {
-				revokedArmed = true
-				c.gui.Actions() <- SetButtonText{name: "revoke", text: "Confirm"}
+				deleteArmed = true
+				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
 		}
 	}
 
 	panic("unreachable")
+}
+
+func (c *guiClient) deleteContact(contact *Contact) {
+	var newInbox []*InboxMessage
+	for _, msg := range c.inbox {
+		if msg.from == contact.id {
+			if msg.message == nil || len(msg.message.Body) > 0 {
+				c.inboxUI.Remove(msg.id)
+			}
+			continue
+		}
+		newInbox = append(newInbox, msg)
+	}
+	c.inbox = newInbox
+
+	for _, draft := range c.drafts {
+		if draft.to == contact.id {
+			draft.to = 0
+		}
+	}
+
+	c.queueMutex.Lock()
+	var newQueue []*queuedMessage
+	for _, msg := range c.queue {
+		if msg.to == contact.id && !msg.revocation {
+			continue
+		}
+		newQueue = append(newQueue, msg)
+	}
+	c.queue = newQueue
+	c.queueMutex.Unlock()
+
+	var newOutbox []*queuedMessage
+	for _, msg := range c.outbox {
+		if msg.to == contact.id && !msg.revocation {
+			if msg.revocation || len(msg.message.Body) > 0 {
+				c.outboxUI.Remove(msg.id)
+			}
+			continue
+		}
+		newOutbox = append(newOutbox, msg)
+	}
+	c.outbox = newOutbox
+
+	c.revoke(contact)
+
+	if contact.pandaShutdownChan != nil {
+		close(contact.pandaShutdownChan)
+	}
+
+	c.contactsUI.Remove(contact.id)
+	delete(c.contacts, contact.id)
 }
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
@@ -1878,11 +1929,16 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			{1, 1, nil},
 			{1, 1, Grid{
 				widgetBase: widgetBase{marginTop: 20},
+				colSpacing: 5,
 				rows: [][]GridE{
 					{
 						{1, 1, Button{
 							widgetBase: widgetBase{name: "process"},
 							text:       "Process",
+						}},
+						{1, 1, Button{
+							widgetBase: widgetBase{name: "abort"},
+							text:       "Abort",
 						}},
 						{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
 					},
@@ -1914,6 +1970,18 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 		if !ok {
 			continue
 		}
+
+		if click.name == "abort" {
+			c.gui.Actions() <- Sensitive{name: "abort", sensitive: false}
+			c.gui.Signal()
+			c.deleteContact(contact)
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateRevocationComplete}
+			c.gui.Signal()
+			c.save()
+			return nil
+		}
+
 		if click.name != "process" {
 			continue
 		}
@@ -2168,7 +2236,8 @@ SharedSecretEvent:
 
 	c.save()
 	c.pandaWaitGroup.Add(1)
-	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 	return c.showContact(contact.id)
 }
 
@@ -2898,6 +2967,7 @@ func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
 	case update.err != nil:
 		contact.pandaResult = update.err.Error()
 		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
 		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
 		c.contactsUI.SetSubline(contact.id, "failed")
 	case update.serialised != nil:
@@ -2906,15 +2976,16 @@ func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
 		}
 		contact.pandaKeyExchange = update.serialised
 	case update.result != nil:
+		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
+
 		if err := contact.processKeyExchange(update.result, c.dev); err != nil {
 			contact.pandaResult = err.Error()
 			c.contactsUI.SetSubline(contact.id, "failed")
-			contact.pandaKeyExchange = nil
 			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
 		} else {
 			c.unsealPendingMessages(contact)
 			c.contactsUI.SetSubline(contact.id, "")
-			contact.pandaKeyExchange = nil
 			c.log.Printf("Key exchange with %s complete", contact.name)
 			c.gui.Actions() <- UIState{uiStatePANDAComplete}
 			c.gui.Signal()
@@ -2927,19 +2998,18 @@ func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
 func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool) *guiClient {
 	c := &guiClient{
 		client: client{
-			testing:           testing,
-			dev:               testing,
-			autoFetch:         autoFetch,
-			stateFilename:     stateFilename,
-			log:               NewLog(),
-			rand:              rand,
-			contacts:          make(map[uint64]*Contact),
-			drafts:            make(map[uint64]*Draft),
-			newMessageChan:    make(chan NewMessage),
-			messageSentChan:   make(chan messageSendResult, 1),
-			backgroundChan:    make(chan interface{}, 8),
-			pandaChan:         make(chan pandaUpdate, 1),
-			pandaShutdownChan: make(chan bool),
+			testing:         testing,
+			dev:             testing,
+			autoFetch:       autoFetch,
+			stateFilename:   stateFilename,
+			log:             NewLog(),
+			rand:            rand,
+			contacts:        make(map[uint64]*Contact),
+			drafts:          make(map[uint64]*Draft),
+			newMessageChan:  make(chan NewMessage),
+			messageSentChan: make(chan messageSendResult, 1),
+			backgroundChan:  make(chan interface{}, 8),
+			pandaChan:       make(chan pandaUpdate, 1),
 		},
 		gui: gui,
 	}
