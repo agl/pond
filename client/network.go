@@ -747,7 +747,17 @@ func (c *client) transact() {
 	startup := true
 
 	var ackChan chan bool
+	var head *queuedMessage
+
 	for {
+		if head != nil {
+			// We failed to send a message.
+			c.queueMutex.Lock()
+			head.sending = false
+			c.queueMutex.Unlock()
+			head = nil
+		}
+
 		if !startup || !c.autoFetch {
 			if ackChan != nil {
 				ackChan <- true
@@ -760,12 +770,13 @@ func (c *client) transact() {
 				c.randBytes(seedBytes[:])
 				seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
 				r := mrand.New(mrand.NewSource(seed))
-				delay := r.ExpFloat64() * transactionRateSeconds
+				delaySeconds := r.ExpFloat64() * transactionRateSeconds
 				if c.dev {
-					delay = 5
+					delaySeconds = 5
 				}
-				c.log.Printf("Next network transaction in %d seconds", int(delay))
-				timerChan = time.After(time.Duration(delay*1000) * time.Millisecond)
+				delay := time.Duration(delaySeconds*1000) * time.Millisecond
+				c.log.Printf("Next network transaction in %s seconds", delay)
+				timerChan = time.After(delay)
 			}
 
 			// Revocation updates are always processed first.
@@ -812,7 +823,6 @@ func (c *client) transact() {
 		}
 		startup = false
 
-		var head *queuedMessage
 		var req *pond.Request
 		var server string
 
@@ -827,6 +837,7 @@ func (c *client) transact() {
 			c.log.Printf("Starting fetch from home server")
 		} else {
 			head = c.queue[0]
+			head.sending = true
 			// Move the head of the queue to the end so that we
 			// don't get stuck trying send the same message over
 			// and over.
@@ -840,6 +851,10 @@ func (c *client) transact() {
 			}
 		}
 		c.queueMutex.Unlock()
+
+		// Poke the UI thread so that it knows that a message has
+		// started sending.
+		c.messageSentChan <- messageSendResult{}
 
 		conn, err := c.dialServer(server, useAnonymousIdentity)
 		if err != nil {
@@ -864,13 +879,7 @@ func (c *client) transact() {
 			// Find the index of the message that we just sent (if any) in
 			// the queue. It should be at the end, but another message may
 			// have been enqueued while we were sending it.
-			indexOfSentMessage := -1
-			for i, queuedMsg := range c.queue {
-				if queuedMsg == head {
-					indexOfSentMessage = i
-					break
-				}
-			}
+			indexOfSentMessage := c.indexOfQueuedMessage(head)
 
 			// If we sent a message that was removed from the queue while
 			// we were processing it then ignore any result.
@@ -878,14 +887,10 @@ func (c *client) transact() {
 				continue
 			}
 
+			head.sending = false
+
 			if reply.Status == nil {
-				var newQueue []*queuedMessage
-				for i, queuedMsg := range c.queue {
-					if i != indexOfSentMessage {
-						newQueue = append(newQueue, queuedMsg)
-					}
-				}
-				c.queue = newQueue
+				c.removeQueuedMessage(indexOfSentMessage)
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
 			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
@@ -895,6 +900,8 @@ func (c *client) transact() {
 			} else {
 				c.queueMutex.Unlock()
 			}
+
+			head = nil
 		} else if reply.Fetched != nil || reply.Announce != nil {
 			ackChan := make(chan bool)
 			c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}

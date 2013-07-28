@@ -208,6 +208,9 @@ type UI interface {
 }
 
 type messageSendResult struct {
+	// If the id is zero then a message wasn't actually sent - this is just
+	// the transact goroutine poking the UI because the queue has been
+	// updated.
 	id uint64
 	// revocation optionally contains a revocation update that resulted
 	// from attempting to send a message.
@@ -423,10 +426,43 @@ type queuedMessage struct {
 	revocation bool
 	message    *pond.Message
 
+	// sending is true if the transact goroutine is currently sending this
+	// message. This is protected by the queueMutex.
+	sending bool
+
 	// cliId is a number, assigned by the command-line interface, to
 	// identity this message for the duration of the session. It's not
 	// saved to disk.
 	cliId cliId
+}
+
+// outboxToDraft converts an outbox message back to a Draft. This is used when
+// the user aborts the sending of a message.
+func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
+	draft := &Draft{
+		id:          msg.id,
+		created:     msg.created,
+		to:          msg.to,
+		body:        string(msg.message.Body),
+		attachments: msg.message.Files,
+		detachments: msg.message.DetachedFiles,
+	}
+
+	if irt := msg.message.GetInReplyTo(); irt != 0 {
+		// The inReplyTo value of a draft references *our* id for the
+		// inbox message. But the InReplyTo field of a pond.Message
+		// references's the contact's id for the message. So we need to
+		// enumerate the messages in the inbox from that contact and
+		// find the one with the matching id.
+		for _, inboxMsg := range c.inbox {
+			if inboxMsg.from == msg.to && inboxMsg.message != nil && inboxMsg.message.GetId() == irt {
+				draft.inReplyTo = inboxMsg.id
+				break
+			}
+		}
+	}
+
+	return draft
 }
 
 // detectTor attempts to connect to port 9050 and 9150 on the local host and
@@ -705,6 +741,30 @@ func (c *client) newKeyExchange(contact *Contact) {
 	if contact.kxsBytes, err = proto.Marshal(kxs); err != nil {
 		panic(err)
 	}
+}
+
+func (c *client) indexOfQueuedMessage(msg *queuedMessage) (index int) {
+	// c.queueMutex must be held before calling this function.
+
+	for i, queuedMsg := range c.queue {
+		if queuedMsg == msg {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func (c *client) removeQueuedMessage(index int) {
+	// c.queueMutex must be held before calling this function.
+
+	var newQueue []*queuedMessage
+	for i, queuedMsg := range c.queue {
+		if i != index {
+			newQueue = append(newQueue, queuedMsg)
+		}
+	}
+	c.queue = newQueue
 }
 
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.

@@ -89,7 +89,9 @@ func (c *guiClient) nextEvent() (event interface{}, wanted bool) {
 		c.processNewMessage(newMessage)
 		return
 	case msr := <-c.messageSentChan:
-		c.processMessageSent(msr)
+		if msr.id != 0 {
+			c.processMessageSent(msr)
+		}
 		return
 	case update := <-c.pandaChan:
 		c.processPANDAUpdate(update)
@@ -1402,6 +1404,15 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 		sentTime = formatTime(msg.sent)
 	}
 
+	canAbort := !contact.revokedUs && msg.sent.IsZero()
+	if canAbort {
+		c.queueMutex.Lock()
+		if msg.sending {
+			canAbort = false
+		}
+		c.queueMutex.Unlock()
+	}
+
 	left := Grid{
 		widgetBase: widgetBase{margin: 6},
 		rowSpacing: 3,
@@ -1446,6 +1457,23 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 		},
 	}
 
+	right := Grid{
+		widgetBase: widgetBase{margin: 6},
+		rowSpacing: 3,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        "abort",
+						insensitive: !canAbort,
+					},
+					text: "Abort Send",
+				}},
+			},
+		},
+	}
+
 	main := TextView{
 		widgetBase: widgetBase{vExpand: true, hExpand: true, name: "body"},
 		editable:   false,
@@ -1453,7 +1481,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 		wrap:       true,
 	}
 
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("SENT MESSAGE", left, nil, main)}
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("SENT MESSAGE", left, right, main)}
 	c.gui.Actions() <- UIState{uiStateOutbox}
 	c.gui.Signal()
 
@@ -1466,12 +1494,61 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			return event
 		}
 
+		if click, ok := event.(Click); ok && click.name == "abort" {
+			c.queueMutex.Lock()
+
+			indexOfMessage := c.indexOfQueuedMessage(msg)
+
+			if indexOfMessage == -1 || msg.sending {
+				// Sorry - too late. Can't abort now.
+				c.queueMutex.Unlock()
+
+				canAbort = false
+				c.gui.Actions() <- Sensitive{name: "abort", sensitive: canAbort}
+				c.gui.Signal()
+				continue
+			}
+
+			c.removeQueuedMessage(indexOfMessage)
+			c.queueMutex.Unlock()
+
+			var newOutbox []*queuedMessage
+			for _, outboxMsg := range c.outbox {
+				if outboxMsg == msg {
+					continue
+				}
+				newOutbox = append(newOutbox, outboxMsg)
+			}
+			c.outbox = newOutbox
+			c.outboxUI.Remove(msg.id)
+
+			draft := c.outboxToDraft(msg)
+			c.draftsUI.Add(draft.id, c.contacts[msg.to].name, draft.created.Format(shortTimeFormat), indicatorNone)
+			c.draftsUI.Select(draft.id)
+			c.drafts[draft.id] = draft
+			c.save()
+			return c.composeUI(draft, nil)
+		}
+
 		if !haveSentTime && !msg.sent.IsZero() {
 			c.gui.Actions() <- SetText{name: "sent", text: formatTime(msg.sent)}
 			c.gui.Signal()
 		}
 		if !haveAckTime && !msg.acked.IsZero() {
 			c.gui.Actions() <- SetText{name: "acked", text: formatTime(msg.acked)}
+			c.gui.Signal()
+		}
+
+		canAbortChanged := false
+		c.queueMutex.Lock()
+		if c := !contact.revokedUs && msg.sent.IsZero() && !msg.sending; c != canAbort {
+			canAbort = c
+			canAbortChanged = true
+		}
+		c.queueMutex.Unlock()
+
+		if canAbortChanged {
+			c.gui.Actions() <- Sensitive{name: "abort", sensitive: canAbort}
 			c.gui.Signal()
 		}
 	}

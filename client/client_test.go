@@ -597,7 +597,16 @@ func sendMessage(client *TestClient, to string, message string) {
 	client.AdvanceTo(uiStateOutbox)
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
-	<-ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 }
 
 func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
@@ -732,7 +741,15 @@ func TestACKs(t *testing.T) {
 
 	ackChan := make(chan bool)
 	client2.fetchNowChan <- ackChan
-	<-ackChan
+WaitForAck:
+	for {
+		select {
+		case ack := <-client2.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	from, _ = fetchMessage(client1)
 	if from != "client2" {
@@ -1058,7 +1075,16 @@ func testDetached(t *testing.T, upload bool) {
 	client1.AdvanceTo(uiStateOutbox)
 	ackChan := make(chan bool)
 	client1.fetchNowChan <- ackChan
-	<-ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client1.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	_, msg := fetchMessage(client2)
 	if len(msg.message.DetachedFiles) != 1 {
@@ -1318,7 +1344,15 @@ NextEvent:
 
 	// Have client3 resend.
 	client3.fetchNowChan <- ackChan
-	<-ackChan
+WaitForAck:
+	for {
+		select {
+		case ack := <-client3.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	// Have client1 fetch the resigned message from client3, and the
 	// message from client4 using previousTags.
@@ -1454,7 +1488,7 @@ func TestReadingOldStateFiles(t *testing.T) {
 	client1.AdvanceTo(uiStateMain)
 }
 
-func testReplyACKs(t *testing.T, reloadDraft bool) {
+func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 	// Test that a message is acked by sending a reply. If reloadDraft is
 	// true then the message is reloaded as draft before sending.
 	t.Parallel()
@@ -1509,12 +1543,32 @@ func testReplyACKs(t *testing.T, reloadDraft bool) {
 		combos:    map[string]string{"to": "client1"},
 		textViews: map[string]string{"body": "reply message"},
 	}
-
 	client2.AdvanceTo(uiStateOutbox)
+
+	if abortSend {
+		client2.gui.events <- Click{name: "abort"}
+		client2.AdvanceTo(uiStateCompose)
+
+		client2.gui.events <- Click{
+			name:      "send",
+			combos:    map[string]string{"to": "client1"},
+			textViews: map[string]string{"body": "reply message"},
+		}
+		client2.AdvanceTo(uiStateOutbox)
+	}
 
 	ackChan := make(chan bool)
 	client2.fetchNowChan <- ackChan
-	<-ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client2.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	from, _ = fetchMessage(client1)
 	if from != "client2" {
@@ -1530,11 +1584,15 @@ func testReplyACKs(t *testing.T, reloadDraft bool) {
 }
 
 func TestReplyACKs(t *testing.T) {
-	testReplyACKs(t, false)
+	testReplyACKs(t, false, false)
 }
 
 func TestReplyACKsWithDraft(t *testing.T) {
-	testReplyACKs(t, true)
+	testReplyACKs(t, true, false)
+}
+
+func TestReplyACKsWithDraftAndAbort(t *testing.T) {
+	testReplyACKs(t, true, true)
 }
 
 func TestCliId(t *testing.T) {
@@ -1657,4 +1715,10 @@ func TestDelete(t *testing.T) {
 
 	client1.Reload()
 	client1.AdvanceTo(uiStateMain)
+}
+
+func TestAbortSend(t *testing.T) {
+	t.Parallel()
+
+
 }
