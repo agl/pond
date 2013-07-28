@@ -450,6 +450,9 @@ func (c *guiClient) mainUI() {
 		fromString := "Home Server"
 		if msg.from != 0 {
 			fromString = c.contacts[msg.from].name
+			if i == indicatorNone && !msg.acked {
+				i = indicatorYellow
+			}
 		}
 		c.inboxUI.Add(msg.id, fromString, subline, i)
 	}
@@ -967,13 +970,17 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 	if msg == nil {
 		panic("failed to find message in inbox")
 	}
+	isServerAnnounce := msg.from == 0
 	if msg.message != nil && !msg.read {
 		msg.read = true
-		c.inboxUI.SetIndicator(id, indicatorNone)
+		i := indicatorYellow
+		if isServerAnnounce {
+			i = indicatorNone
+		}
+		c.inboxUI.SetIndicator(id, i)
 		c.updateWindowTitle()
 		c.save()
 	}
-	isServerAnnounce := msg.from == 0
 
 	var contact *Contact
 	var fromString string
@@ -1358,6 +1365,7 @@ NextEvent:
 			c.gui.Signal()
 			msg.acked = true
 			c.sendAck(msg)
+			c.inboxUI.SetIndicator(msg.id, indicatorNone)
 			c.gui.Actions() <- UIState{uiStateInbox}
 			c.gui.Signal()
 		case click.name == "reply":
@@ -2999,6 +3007,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		}
 		if inReplyTo != nil {
 			inReplyTo.acked = true
+			c.inboxUI.SetIndicator(inReplyTo.id, indicatorNone)
 		}
 
 		c.draftsUI.Remove(draft.id)
