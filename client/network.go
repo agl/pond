@@ -748,6 +748,7 @@ func (c *client) transact() {
 
 	var ackChan chan bool
 	var head *queuedMessage
+	lastWasSend := false
 
 	for {
 		if head != nil {
@@ -829,12 +830,13 @@ func (c *client) transact() {
 		useAnonymousIdentity := true
 		isFetch := false
 		c.queueMutex.Lock()
-		if len(c.queue) == 0 {
+		if (!c.testing && lastWasSend) || len(c.queue) == 0 {
 			useAnonymousIdentity = false
 			isFetch = true
 			req = &pond.Request{Fetch: &pond.Fetch{}}
 			server = c.server
 			c.log.Printf("Starting fetch from home server")
+			lastWasSend = false
 		} else {
 			head = c.queue[0]
 			head.sending = true
@@ -849,6 +851,7 @@ func (c *client) transact() {
 			if head.revocation {
 				useAnonymousIdentity = false
 			}
+			lastWasSend = true
 		}
 		c.queueMutex.Unlock()
 
