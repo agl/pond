@@ -1411,6 +1411,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 	} else {
 		sentTime = formatTime(msg.sent)
 	}
+	eraseTime := formatTime(msg.created.Add(messageLifetime))
 
 	canAbort := !contact.revokedUs && msg.sent.IsZero()
 	if canAbort {
@@ -1460,6 +1461,15 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 				{1, 1, Label{
 					widgetBase: widgetBase{name: "acked"},
 					text:       formatTime(msg.acked),
+				}},
+			},
+			{
+				{1, 1, Label{
+					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					text:       "ERASE",
+				}},
+				{1, 1, Label{
+					text: eraseTime,
 				}},
 			},
 		},
