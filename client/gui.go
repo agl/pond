@@ -1844,16 +1844,14 @@ Shared secret keying involves anonymously contacting a global, shared service an
 							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
 							{1, 1, Button{
 								widgetBase: widgetBase{
-									name:        "manual",
-									insensitive: true,
+									name: "manual",
 								},
 								text: "Manual Keying",
 							}},
 							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
 							{1, 1, Button{
 								widgetBase: widgetBase{
-									name:        "shared",
-									insensitive: true,
+									name: "shared",
 								},
 								text: "Shared secret",
 							}},
@@ -1875,6 +1873,8 @@ Shared secret keying involves anonymously contacting a global, shared service an
 		return c.newContactManual(contact, existing, nextRow)
 	}
 
+	var keyAgreementClick interface{}
+
 	for {
 		event, wanted := c.nextEvent()
 		if wanted {
@@ -1885,7 +1885,16 @@ Shared secret keying involves anonymously contacting a global, shared service an
 		if !ok {
 			continue
 		}
-		if click.name != "name" {
+
+		keyAgreementClick = nil
+		switch click.name {
+		case "name":
+		case "manual", "shared":
+			// If the user clicked one of the key-agreement type
+			// buttons then we remember the event for the next
+			// event loop, below.
+			keyAgreementClick = event
+		default:
 			continue
 		}
 
@@ -1916,14 +1925,18 @@ Shared secret keying involves anonymously contacting a global, shared service an
 
 	c.gui.Actions() <- SetText{name: "error1", text: ""}
 	c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
-	c.gui.Actions() <- Sensitive{name: "manual", sensitive: true}
-	c.gui.Actions() <- Sensitive{name: "shared", sensitive: true}
 	c.gui.Signal()
 
 	for {
-		event, wanted := c.nextEvent()
-		if wanted {
-			return event
+		var event interface{}
+		if keyAgreementClick != nil {
+			event, keyAgreementClick = keyAgreementClick, event
+		} else {
+			var wanted bool
+			event, wanted = c.nextEvent()
+			if wanted {
+				return event
+			}
 		}
 
 		click, ok := event.(Click)
