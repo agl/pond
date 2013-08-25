@@ -90,6 +90,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			pandaKeyExchange: cont.PandaKeyExchange,
 			pandaResult:      cont.GetPandaError(),
 		}
+		c.registerId(contact.id)
 		c.contacts[contact.id] = contact
 		if contact.groupKey, ok = new(bbssig.MemberKey).Unmarshal(c.groupPriv.Group, cont.GroupKey); !ok {
 			return errors.New("client: failed to unmarshal group member key")
@@ -153,6 +154,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			read:         *m.Read,
 			sealed:       m.Sealed,
 		}
+		c.registerId(msg.id)
 		if len(m.Message) > 0 {
 			msg.message = new(pond.Message)
 			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
@@ -170,6 +172,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			server:  *m.Server,
 			created: time.Unix(*m.Created, 0),
 		}
+		c.registerId(msg.id)
 		if len(m.Message) > 0 {
 			msg.message = new(pond.Message)
 			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
@@ -212,6 +215,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			detachments: m.Detachments,
 			created:     time.Unix(*m.Created, 0),
 		}
+		c.registerId(draft.id)
 		if m.To != nil {
 			draft.to = *m.To
 		}

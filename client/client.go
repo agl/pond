@@ -182,6 +182,10 @@ type client struct {
 	pandaChan chan pandaUpdate
 	// pandaWaitGroup is incremented for each running PANDA goroutine.
 	pandaWaitGroup sync.WaitGroup
+
+	// usedIds records ID numbers that have been assigned in the current
+	// state file.
+	usedIds map[uint64]bool
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -715,11 +719,25 @@ func (c *client) randId() uint64 {
 	for {
 		c.randBytes(idBytes[:])
 		n := binary.LittleEndian.Uint64(idBytes[:])
-		if n != 0 {
-			return n
+		if n == 0 {
+			continue
 		}
+		if c.usedIds[n] {
+			continue
+		}
+		c.usedIds[n] = true
+		return n
 	}
 	panic("unreachable")
+}
+
+// registerId records that an ID number has been used, typically because we are
+// loading a state file.
+func (c *client) registerId(id uint64) {
+	if c.usedIds[id] {
+		panic("duplicate ID registered")
+	}
+	c.usedIds[id] = true
 }
 
 func (c *client) newKeyExchange(contact *Contact) {

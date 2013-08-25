@@ -3170,6 +3170,7 @@ func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFe
 			messageSentChan: make(chan messageSendResult, 1),
 			backgroundChan:  make(chan interface{}, 8),
 			pandaChan:       make(chan pandaUpdate, 1),
+			usedIds:         make(map[uint64]bool),
 		},
 		gui: gui,
 	}

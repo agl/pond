@@ -502,6 +502,7 @@ func NewCLIClient(stateFilename string, rand io.Reader, testing, autoFetch bool)
 			messageSentChan: make(chan messageSendResult, 1),
 			backgroundChan:  make(chan interface{}, 8),
 			pandaChan:       make(chan pandaUpdate, 1),
+			usedIds:         make(map[uint64]bool),
 		},
 		cliIdsAssigned: make(map[cliId]bool),
 	}
