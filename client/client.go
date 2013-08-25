@@ -184,6 +184,9 @@ type client struct {
 	pandaWaitGroup sync.WaitGroup
 }
 
+// UI abstracts behaviour that is specific to a given interface (GUI or CLI).
+// Generic code can call these functions to perform interface-specific
+// behaviour.
 type UI interface {
 	initUI()
 	// loadingUI shows a basic "loading" prompt while the state file is read.
@@ -203,6 +206,20 @@ type UI interface {
 	createErasureStorage(pw string, stateFile *disk.StateFile) error
 	createAccountUI() error
 	keyPromptUI(stateFile *disk.StateFile) error
+	processFetch(msg *InboxMessage)
+	processServerAnnounce(announce *InboxMessage)
+	processAcknowledgement(ackedMsg *queuedMessage)
+	// processRevocationOfUs is called when a revocation is received that
+	// revokes our group key for a contact.
+	processRevocationOfUs(by *Contact)
+	// processRevocation is called when we have finished processing a
+	// revocation. This includes revocations of others and of this
+	// ourselves. In the latter case, this is called after
+	// processRevocationOfUs.
+	processRevocation(by *Contact)
+	// processMessageSent is called when an outbox message has been
+	// delivered to the destination server.
+	processMessageDelivered(msg *queuedMessage)
 	// mainUI starts the main interface.
 	mainUI()
 }

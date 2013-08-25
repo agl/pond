@@ -268,7 +268,7 @@ func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte,
 	return plaintext, true
 }
 
-func (c *guiClient) processNewMessage(m NewMessage) {
+func (c *client) processNewMessage(m NewMessage) {
 	defer func() { m.ack <- true }()
 
 	if m.fetched != nil {
@@ -278,7 +278,7 @@ func (c *guiClient) processNewMessage(m NewMessage) {
 	}
 }
 
-func (c *guiClient) processFetch(m NewMessage) {
+func (c *client) processFetch(m NewMessage) {
 	f := m.fetched
 
 	sha := sha256.New()
@@ -347,24 +347,16 @@ NextCandidate:
 		sealed:       f.Message,
 	}
 
-	if !from.isPending {
-		if !c.unsealMessage(inboxMsg, from) {
-			return
-		}
-		if len(inboxMsg.message.Body) > 0 {
-			subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.Add(inboxMsg.id, from.name, subline, indicatorBlue)
-		}
-	} else {
-		c.inboxUI.Add(inboxMsg.id, from.name, "pending", indicatorRed)
+	if !from.isPending && !c.unsealMessage(inboxMsg, from) {
+		return
 	}
 
 	c.inbox = append(c.inbox, inboxMsg)
-	c.updateWindowTitle()
+	c.ui.processFetch(inboxMsg)
 	c.save()
 }
 
-func (c *guiClient) processServerAnnounce(m NewMessage) {
+func (c *client) processServerAnnounce(m NewMessage) {
 	inboxMsg := &InboxMessage{
 		id:           c.randId(),
 		receivedTime: time.Now(),
@@ -372,15 +364,13 @@ func (c *guiClient) processServerAnnounce(m NewMessage) {
 		message:      m.announce.Message,
 	}
 
-	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
-
 	c.inbox = append(c.inbox, inboxMsg)
-	c.updateWindowTitle()
+	c.ui.processServerAnnounce(inboxMsg)
+
 	c.save()
 }
 
-func (c *guiClient) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
+func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	if from.isPending {
 		panic("was asked to unseal message from pending contact")
 	}
@@ -443,7 +433,7 @@ func (c *guiClient) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		for _, candidate := range c.outbox {
 			if candidate.id == id {
 				candidate.acked = time.Now()
-				c.outboxUI.SetIndicator(id, indicatorGreen)
+				c.ui.processAcknowledgement(candidate)
 			}
 		}
 	}
@@ -460,7 +450,7 @@ func (c *guiClient) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	return true
 }
 
-func (c *guiClient) processMessageSent(msr messageSendResult) {
+func (c *client) processMessageSent(msr messageSendResult) {
 	var msg *queuedMessage
 	for _, m := range c.outbox {
 		if m.id == msr.id {
@@ -509,17 +499,14 @@ func (c *guiClient) processMessageSent(msr messageSendResult) {
 			// We were revoked.
 			to.revokedUs = true
 			c.log.Printf("Revoked by %s", to.name)
-			c.contactsUI.SetIndicator(to.id, indicatorBlack)
-			c.contactsUI.SetSubline(to.id, "has revoked")
+			c.ui.processRevocationOfUs(to)
 
 			// Mark all pending messages to this contact as
 			// undeliverable.
 			newQueue := make([]*queuedMessage, 0, len(c.queue))
 			c.queueMutex.Lock()
 			for _, m := range c.queue {
-				if m.to == msg.to {
-					c.outboxUI.SetIndicator(m.id, indicatorBlack)
-				} else {
+				if m.to != msg.to {
 					newQueue = append(newQueue, m)
 				}
 			}
@@ -534,17 +521,13 @@ func (c *guiClient) processMessageSent(msr messageSendResult) {
 			dupKey, _ := new(bbssig.MemberKey).Unmarshal(to.myGroupKey.Group, to.myGroupKey.Marshal())
 			c.revocationUpdateChan <- revocationUpdate{msg.to, dupKey, to.generation}
 		}
-		c.gui.Actions() <- UIState{uiStateRevocationProcessed}
-		c.gui.Signal()
+
+		c.ui.processRevocation(to)
 		return
 	}
 
 	msg.sent = time.Now()
-	if msg.revocation {
-		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
-	} else {
-		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
-	}
+	c.ui.processMessageDelivered(msg)
 	c.save()
 }
 

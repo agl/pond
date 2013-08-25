@@ -271,6 +271,57 @@ func (c *guiClient) updateWindowTitle() {
 	c.gui.Signal()
 }
 
+func (c *guiClient) processFetch(inboxMsg *InboxMessage) {
+	from := c.contacts[inboxMsg.from]
+
+	if !from.isPending {
+		if len(inboxMsg.message.Body) > 0 {
+			subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
+			c.inboxUI.Add(inboxMsg.id, from.name, subline, indicatorBlue)
+		}
+	} else {
+		c.inboxUI.Add(inboxMsg.id, from.name, "pending", indicatorRed)
+	}
+
+	c.updateWindowTitle()
+}
+
+func (c *guiClient) processServerAnnounce(inboxMsg *InboxMessage) {
+	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
+	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
+	c.updateWindowTitle()
+}
+
+func (c *guiClient) processAcknowledgement(ackedMsg *queuedMessage) {
+	c.outboxUI.SetIndicator(ackedMsg.id, indicatorGreen)
+}
+
+func (c *guiClient) processRevocationOfUs(by *Contact) {
+	c.contactsUI.SetIndicator(by.id, indicatorBlack)
+	c.contactsUI.SetSubline(by.id, "has revoked")
+
+	c.queueMutex.Lock()
+	for _, m := range c.queue {
+		if m.to == by.id {
+			c.outboxUI.SetIndicator(m.id, indicatorBlack)
+		}
+	}
+	c.queueMutex.Unlock()
+}
+
+func (c *guiClient) processRevocation(by *Contact) {
+	c.gui.Actions() <- UIState{uiStateRevocationProcessed}
+	c.gui.Signal()
+}
+
+func (c *guiClient) processMessageDelivered(msg *queuedMessage) {
+	if msg.revocation {
+		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
+	} else {
+		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
+	}
+}
+
 func (c *guiClient) mainUI() {
 	ui := Paned{
 		left: Scrolled{

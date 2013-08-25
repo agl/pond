@@ -187,6 +187,8 @@ const (
 	termInfoCol3   = "\x1b[38;5;033m"
 	termInfoPrefix = termInfoCol1 + ">" + termInfoCol2 + ">" + termInfoCol3 + ">" + termReset
 
+	termHeaderPrefix =  "  " + termInfoCol3 + "-" + termReset
+
 	termCliIdStart = "\x1b[38;5;045m"
 
 	termReset = "\x1b[0m"
@@ -334,6 +336,32 @@ func (c *cliClient) keyPromptUI(stateFile *disk.StateFile) error {
 	return nil
 }
 
+func (c *cliClient) processFetch(inboxMsg *InboxMessage) {
+	c.Printf("%s New message received from %s\n", termPrefix, terminalEscape(c.contacts[inboxMsg.from].name, false))
+}
+
+func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
+	c.Printf("%s New message received from home server\n", termPrefix)
+}
+
+func (c *cliClient) processAcknowledgement(ackedMsg *queuedMessage) {
+	c.Printf("%s Message acknowledged by %s\n", termPrefix, terminalEscape(c.contacts[ackedMsg.to].name, false))
+}
+
+func (c *cliClient) processRevocationOfUs(by *Contact) {
+	c.Printf("%s Access to contact revoked. All outgoing messages dropped: %s\n", termPrefix, terminalEscape(c.contacts[by.id].name, false))
+}
+
+func (c *cliClient) processRevocation(by *Contact) {
+}
+
+func (c *cliClient) processMessageDelivered(msg *queuedMessage) {
+	if msg.revocation {
+		return
+	}
+	c.Printf("%s Message delivered to %s\n", termPrefix, terminalEscape(c.contacts[msg.to].name, false))
+}
+
 func (c *cliClient) mainUI() {
 	c.term.SetPrompt(fmt.Sprintf("%s>%s ", termCol1, termReset))
 
@@ -369,7 +397,7 @@ func (c *cliClient) mainUI() {
 
 	for _, msg := range c.outbox {
 		if msg.revocation {
-			c.Printf(" %s Revocation : %s\n", msg.indicator().Star(), "Revocation", msg.created.Format(shortTimeFormat))
+			c.Printf(" %s Revocation : %s\n", msg.indicator().Star(), msg.created.Format(shortTimeFormat))
 			continue
 		}
 		if len(msg.message.Body) > 0 {
@@ -407,11 +435,11 @@ func (c *cliClient) mainUI() {
 			}
 			c.processLine(line.line)
 			close(line.ackChan)
-		/*case newMessage := <-c.newMessageChan:
+		case newMessage := <-c.newMessageChan:
 			c.processNewMessage(newMessage)
 		case msr := <-c.messageSentChan:
 			c.processMessageSent(msr)
-		case update := <-c.pandaChan:
+		/*case update := <-c.pandaChan:
 			c.processPANDAUpdate(update) */
 		case <-c.backgroundChan:
 		case <-c.log.updateChan:
@@ -419,18 +447,44 @@ func (c *cliClient) mainUI() {
 	}
 }
 
-func (c *cliClient) processLine(line string) {
+func (c *cliClient) processLine(line string) bool {
 	if cliId, ok := cliIdFromString(line); ok {
 		for _, msg := range c.inbox {
 			if msg.cliId == cliId {
 				c.showInbox(msg)
+				return true
+			}
+		}
+		for _, msg := range c.outbox {
+			if msg.cliId == cliId {
+				c.showOutbox(msg)
+				return true
 			}
 		}
 	}
+
+	return false
 }
 
 func (c *cliClient) showInbox(msg *InboxMessage) {
+}
 
+func (c *cliClient) showOutbox(msg *queuedMessage) {
+	contact := c.contacts[msg.to]
+	var sentTime string
+	if contact.revokedUs {
+		sentTime = "(never - contact has revoked us)"
+	} else {
+		sentTime = formatTime(msg.sent)
+	}
+	eraseTime := formatTime(msg.created.Add(messageLifetime))
+
+	c.Printf("%s To: %s\n", termHeaderPrefix, terminalEscape(contact.name, false))
+	c.Printf("%s Created: %s\n", termHeaderPrefix, formatTime(time.Unix(*msg.message.Time, 0)))
+	c.Printf("%s Sent: %s\n", termHeaderPrefix, sentTime)
+	c.Printf("%s Acknowledged: %s\n", termHeaderPrefix, formatTime(msg.acked))
+	c.Printf("%s Erase: %s\n\n", termHeaderPrefix, eraseTime)
+	c.term.Write([]byte(terminalEscape(string(msg.message.Body), true /* line breaks ok */)))
 }
 
 func NewCLIClient(stateFilename string, rand io.Reader, testing, autoFetch bool) *cliClient {
