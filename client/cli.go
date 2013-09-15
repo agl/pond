@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
 	"code.google.com/p/go.crypto/ssh/terminal"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/system"
 	"github.com/agl/pond/panda"
 )
 
@@ -19,8 +22,10 @@ var errInterrupted = errors.New("cli: interrupt signal")
 type cliClient struct {
 	client
 
-	term      *terminal.Terminal
-	interrupt chan bool
+	term        *terminal.Terminal
+	termWrapper *terminalWrapper
+	input       *cliInput
+	interrupt   chan bool
 	// cliIdsAssigned contains cliIds that have been used in the current
 	// session to avoid giving the same cliId to two different objects.
 	cliIdsAssigned map[cliId]bool
@@ -79,6 +84,7 @@ func (c *cliClient) Start() {
 
 	wrapper, interruptChan := NewTerminalWrapper(os.Stdin)
 	c.interrupt = interruptChan
+	c.termWrapper = wrapper
 
 	c.term = terminal.NewTerminal(wrapper, "> ")
 	if width, height, err := terminal.GetSize(0); err == nil {
@@ -112,11 +118,23 @@ type terminalWrapper struct {
 	err   error
 	chars bytes.Buffer
 	cond  *sync.Cond
+
+	// pauseOnEnter determines whether the goroutine waits on restartChan
+	// after reading a newline. This is to allow a subprocess to take the
+	// terminal.
+	pauseOnEnter bool
+	// restartChan is used to signal to the goroutine that it's ok to start
+	// reading from the terminal again because we aren't going to be
+	// spawning a subprocess that needs the terminal.
+	restartChan chan bool
+	// waitingToRestart is true if the goroutine is waiting on restartChan.
+	waitingToRestart bool
 }
 
-func NewTerminalWrapper(term io.ReadWriter) (io.ReadWriter, chan bool) {
+func NewTerminalWrapper(term io.ReadWriter) (*terminalWrapper, chan bool) {
 	wrapper := &terminalWrapper{
-		Writer: term,
+		Writer:      term,
+		restartChan: make(chan bool, 1),
 	}
 	wrapper.cond = sync.NewCond(&wrapper.Mutex)
 
@@ -125,11 +143,32 @@ func NewTerminalWrapper(term io.ReadWriter) (io.ReadWriter, chan bool) {
 	return wrapper, c
 }
 
+func (wrapper *terminalWrapper) PauseOnEnter() {
+	wrapper.Lock()
+	defer wrapper.Unlock()
+
+	wrapper.pauseOnEnter = true
+}
+
+func (wrapper *terminalWrapper) Restart() {
+	wrapper.Lock()
+	defer wrapper.Unlock()
+
+	if wrapper.waitingToRestart {
+		wrapper.restartChan <- true
+		wrapper.waitingToRestart = false
+	}
+}
+
 func (wrapper *terminalWrapper) Read(buf []byte) (int, error) {
 	wrapper.Lock()
 	defer wrapper.Unlock()
 
 	for wrapper.chars.Len() == 0 && wrapper.err == nil {
+		if wrapper.waitingToRestart {
+			wrapper.waitingToRestart = false
+			wrapper.restartChan <- true
+		}
 		wrapper.cond.Wait()
 	}
 
@@ -161,8 +200,16 @@ func (wrapper *terminalWrapper) run(r io.Reader, interruptChan chan bool) {
 		} else {
 			wrapper.chars.Write(buf[:n])
 		}
-		wrapper.cond.Signal()
-		wrapper.Unlock()
+
+		if err == nil && n == 1 && buf[0] == '\r' && wrapper.pauseOnEnter {
+			wrapper.waitingToRestart = true
+			wrapper.cond.Signal()
+			wrapper.Unlock()
+			<-wrapper.restartChan
+		} else {
+			wrapper.cond.Signal()
+			wrapper.Unlock()
+		}
 	}
 }
 
@@ -187,7 +234,7 @@ const (
 	termInfoCol3   = "\x1b[38;5;033m"
 	termInfoPrefix = termInfoCol1 + ">" + termInfoCol2 + ">" + termInfoCol3 + ">" + termReset
 
-	termHeaderPrefix =  "  " + termInfoCol3 + "-" + termReset
+	termHeaderPrefix = "  " + termInfoCol3 + "-" + termReset
 
 	termCliIdStart = "\x1b[38;5;045m"
 
@@ -410,22 +457,12 @@ func (c *cliClient) mainUI() {
 		}
 	}
 
-	type terminalLine struct {
-		line    string
-		err     error
-		ackChan chan struct{}
+	termChan := make(chan cliTerminalLine)
+	c.input = &cliInput{
+		term: c.term,
 	}
-	termChan := make(chan terminalLine)
-
-	go func() {
-		for {
-			var line terminalLine
-			line.line, line.err = c.term.ReadLine()
-			line.ackChan = make(chan struct{})
-			termChan <- line
-			<-line.ackChan
-		}
-	}()
+	c.termWrapper.PauseOnEnter()
+	go c.input.processInput(termChan)
 
 	for {
 		select {
@@ -433,37 +470,112 @@ func (c *cliClient) mainUI() {
 			if line.err != nil {
 				return
 			}
-			c.processLine(line.line)
+			c.processCommand(line.command)
 			close(line.ackChan)
 		case newMessage := <-c.newMessageChan:
 			c.processNewMessage(newMessage)
 		case msr := <-c.messageSentChan:
-			c.processMessageSent(msr)
+			if msr.id != 0 {
+				c.processMessageSent(msr)
+			}
 		/*case update := <-c.pandaChan:
-			c.processPANDAUpdate(update) */
+		c.processPANDAUpdate(update) */
 		case <-c.backgroundChan:
 		case <-c.log.updateChan:
 		}
 	}
 }
 
-func (c *cliClient) processLine(line string) bool {
-	if cliId, ok := cliIdFromString(line); ok {
+func (c *cliClient) processCommand(cmd interface{}) {
+	// First commands that might start a subprocess that needs terminal
+	// control.
+	switch cmd := cmd.(type) {
+	case composeCommand:
+		var contact *Contact
+		for _, candidate := range c.contacts {
+			if candidate.name == cmd.To {
+				contact = candidate
+				break
+			}
+		}
+		if contact == nil {
+			c.Printf("%s Unknown recipient\n", termWarnPrefix)
+			return
+		}
+		c.compose(contact, nil)
+	}
+
+	// The command won't need to start subprocess with terminal control so
+	// we can start watching for Ctrl-C again.
+	c.termWrapper.Restart()
+
+	switch cmd := cmd.(type) {
+	case tagCommand:
+		cliId, ok := cliIdFromString(cmd.tag)
+		if !ok {
+			c.Printf("%s Bad tag\n", termWarnPrefix)
+			return
+		}
 		for _, msg := range c.inbox {
 			if msg.cliId == cliId {
 				c.showInbox(msg)
-				return true
+				return
 			}
 		}
 		for _, msg := range c.outbox {
 			if msg.cliId == cliId {
 				c.showOutbox(msg)
-				return true
+				return
 			}
 		}
+		c.Printf("%s Unknown tag\n", termWarnPrefix)
+	}
+}
+
+func (c *cliClient) compose(to *Contact, inReplyTo *InboxMessage) {
+	editor := os.Getenv("EDITOR")
+	if len(editor) == 0 {
+		editor = "vi"
 	}
 
-	return false
+	tempDir, err := system.SafeTempDir()
+	if err != nil {
+		c.Printf("%s Failed to get safe temp directory: %s\n", termErrPrefix, err)
+		return
+	}
+
+	tempFile, err := ioutil.TempFile(tempDir, "pond-cli-")
+	if err != nil {
+		c.Printf("%s Failed to create temp file: %s\n", termErrPrefix, err)
+		return
+	}
+	tempFileName := tempFile.Name()
+	defer func() {
+		os.Remove(tempFileName)
+	}()
+
+	fmt.Fprintf(tempFile, "# Pond message. Lines prior to the first blank line are ignored.\nTo: %s\n\n", to.name)
+
+	cmd := exec.Command(editor, tempFileName)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		c.Printf("%s Failed to run editor: %s\n", termErrPrefix, err)
+		return
+	}
+	tempFile.Close()
+	tempFile, err = os.Open(tempFileName)
+	if err != nil {
+		c.Printf("%s Failed to open temp file: %s\n", termErrPrefix, err)
+		return
+	}
+	_, err = ioutil.ReadAll(tempFile)
+	if err != nil {
+		c.Printf("%s Failed to read temp file: %s\n", termErrPrefix, err)
+		return
+	}
 }
 
 func (c *cliClient) showInbox(msg *InboxMessage) {
