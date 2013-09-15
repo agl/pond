@@ -2,13 +2,42 @@ package main
 
 const uiActionsQueueLen = 256
 
+// GUI contains an abstraction layer that models GTK pretty closely.  This is
+// used to allow the GUI to run in a separate goroutine and also to allow
+// unittesting.
 type GUI interface {
+	// Actions returns a channel to which GUI actions can be written for
+	// execution by the GUI.
 	Actions() chan<- interface{}
+	// Events returns a channel from which events from the GUI can be read.
 	Events() <-chan interface{}
+	// Signal causes the GUI to process pending actions that have been
+	// written to the channel returned by Actions(). The GUI may process
+	// actions at any time but calling Signal ensures that all actions
+	// currently pending will be executed. Signal does not wait for
+	// pending actions to complete.
 	Signal()
+	// Run() starts the GUI's main loop and never returns.
 	Run()
 }
 
+const (
+	AlignNone = iota
+	AlignStart
+	AlignEnd
+	AlignFill
+	AlignCenter
+)
+
+// Widgets
+//
+// Widget structures mirror the similar widgets in GTK+ and their members
+// mirror GTK+ properties. The GTK+ documentation is the best source of
+// information.
+
+// Widget is the base type of all widgets. It's sole implementation should be
+// widgetBase, which should itself be embedded in all structs that represent
+// widgets.
 type Widget interface {
 	Name() string
 	Padding() uint
@@ -20,15 +49,9 @@ type Widget interface {
 	Focused() bool
 }
 
-const (
-	AlignNone = iota
-	AlignStart
-	AlignEnd
-	AlignFill
-	AlignCenter
-)
-
 type widgetBase struct {
+	// name contains a freeform identifier for a widget. The name should be
+	// unique across all widgets that are currently live.
 	name                   string
 	padding                uint
 	expand, fill           bool
@@ -186,18 +209,6 @@ type CheckButton struct {
 	text string
 }
 
-type InsertRow struct {
-	name string
-	pos  int
-	row  []GridE
-}
-
-type GridSet struct {
-	name     string
-	col, row int
-	widget   Widget
-}
-
 type Image struct {
 	widgetBase
 	image          Indicator
@@ -213,41 +224,37 @@ type Progress struct {
 	widgetBase
 }
 
+// Actions
+//
+// These structures can be sent on the channel returned by Actions() in order
+// to perform GUI actions.
+
+// InsertRow adds an extra row to a Grid.
+type InsertRow struct {
+	name string
+	pos  int
+	row  []GridE
+}
+
+// GridSet sets the element at the given position in the grid.
+type GridSet struct {
+	name     string
+	col, row int
+	widget   Widget
+}
+
+// Reset replaces the top-level widget with root.
 type Reset struct {
 	root Widget
 }
 
-type Click struct {
-	name        string
-	entries     map[string]string
-	textViews   map[string]string
-	combos      map[string]string
-	checks      map[string]bool
-	radios      map[string]int
-	calendars   map[string]CalendarDate
-	spinButtons map[string]int
-}
-
-type CalendarDate struct {
-	year, month, day int
-}
-
-type Update struct {
-	name string
-	text string
-}
-
-type OpenResult struct {
-	ok   bool
-	path string
-	arg  interface{}
-}
-
+// Append adds widgets to a named, container widget.
 type Append struct {
 	name     string
 	children []Widget
 }
 
+// AddToBox adds a child widget at a specific location in a box widget.
 type AddToBox struct {
 	box   string
 	pos   int
@@ -315,10 +322,13 @@ type Destroy struct {
 	name string
 }
 
+// FileOpen starts a file dialog.
 type FileOpen struct {
 	save  bool
 	title string
-	arg   interface{}
+	// arg is an arbitary value that is passed in the corresponding
+	// OpenResult event.
+	arg interface{}
 }
 
 type SetForeground struct {
@@ -336,10 +346,52 @@ type SetTitle struct {
 	title string
 }
 
+// UIState is a message that is ignored by a real GUI, but is used for
+// synchronisation with unittests.
 type UIState struct {
 	stateID int
 }
 
+// UIError is a message that is ignored by a real GUI, but is used for
+// communication with unittests.
 type UIError struct {
 	err error
+}
+
+// Events
+//
+// Events are received on the channel returned by Events().
+
+// Click is a very generic event that can be triggered by any sort of
+// activation - not just mouse clicks. Because the GUI abstraction is
+// asynchronous, the Click message contains the state of the GUI at the time of
+// the click. Otherwise, further messages to obtain the state of other widgets
+// at the time of the event would return the current values, as opposed to the
+// values at the event time.
+type Click struct {
+	name        string
+	entries     map[string]string
+	textViews   map[string]string
+	combos      map[string]string
+	checks      map[string]bool
+	radios      map[string]int
+	calendars   map[string]CalendarDate
+	spinButtons map[string]int
+}
+
+type CalendarDate struct {
+	year, month, day int
+}
+
+// Update can result when the contents of a text entry are changed.
+type Update struct {
+	name string
+	text string
+}
+
+// OpenResult results from the completion of a file dialog.
+type OpenResult struct {
+	ok   bool
+	path string
+	arg  interface{}
 }
