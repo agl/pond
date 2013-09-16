@@ -68,9 +68,28 @@ go install github.com/agl/pond/client</pre>
 
 <h5>OS X</h5>
 
-<p>It's possible to get Pond building on OS X after spending <i>lots</i> of time with homebrew. I'm afraid that I didn't keep a log of all the commands but, if you get <tt>gtk+3</tt> and <tt>gtkspell3</tt> built, then it should work. See the Fedora section for instructions on fetching and building Go itself.</p>
+<p>It's possible to get Pond building on OS X after spending <i>lots</i> of time with homebrew. Something that's known to have worked,</p>
 
-<p>(Unless you <tt>brew edit gtk+3</tt> and add <tt>--enable-quartz-backend</tt> to the <tt>configure</tt> arguments, you'll need an X server running in order to launch Pond.)</p>
+<pre>
+  brew install go
+  export GOPATH=$HOME/.go
+  export PATH=$PATH:$GOPATH/bin
+
+  // you'll need an X server running in order to launch Pond unless you
+  brew edit gtk+3
+  // then add --enable-quartz-backend to the configure arguments
+  brew install gtk+3
+
+  // gtkspell3 from pull request
+  brew install https://raw.github.com/arlolra/homebrew/5f52b19c79027dcea1d5e785b7ea70abd4ee90fe/Library/Formula/gtkspell3.rb
+  ln -s /usr/local/lib/pkgconfig/gtkspell3-3.0.pc /usr/local/lib/pkgconfig/gtkspell-3.0.pc
+
+  export PKG_CONFIG_PATH=/opt/X11/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+
+  go get -tags fedora github.com/agl/pond/client
+  go install github.com/agl/pond/client
+  // now `client` should be in your path
+</pre>
 
 <p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point.</p>
 
