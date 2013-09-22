@@ -71,6 +71,7 @@ const (
 	uiStateRevocationComplete
 	uiStatePANDAComplete
 	uiStateErasureStorage
+	uiStateTimerComplete
 )
 
 type guiClient struct {
@@ -80,7 +81,15 @@ type guiClient struct {
 	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
 }
 
-func (c *guiClient) nextEvent() (event interface{}, wanted bool) {
+// nextEvent polls a number of event sources and returns a GUI event and a bool
+// which indicates whether this is a global event or not. Global events are
+// events like clicks on the lists on the left-hand-side, which cause the
+// currently running interaction to be aborted.
+//
+// It takes the id of the currently active message (be it inbox or outbox),
+// which can be zero if no message is currently being viewed. This id is used
+// to prevent the deletion of those messages.
+func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bool) {
 	var ok bool
 	select {
 	case event, ok = <-c.gui.Events():
@@ -101,6 +110,9 @@ func (c *guiClient) nextEvent() (event interface{}, wanted bool) {
 	case event = <-c.backgroundChan:
 		break
 	case <-c.log.updateChan:
+		return
+	case <-c.timerChan:
+		c.processTimer(currentMsgId)
 		return
 	}
 
@@ -123,6 +135,29 @@ func (c *guiClient) nextEvent() (event interface{}, wanted bool) {
 		wanted = wanted || click.name == "newcontact" || click.name == "compose"
 	}
 	return
+}
+
+func (c *guiClient) processTimer(currentMsgId uint64) {
+	now := c.Now()
+
+RestartInboxIteration:
+	for {
+		for _, msg := range c.inbox {
+			if msg.id != currentMsgId && !msg.retained && now.Sub(msg.receivedTime) > messageLifetime && now.Sub(msg.exposureTime) > messageGraceTime {
+				c.inboxUI.Remove(msg.id)
+				c.deleteInboxMsg(msg.id)
+				// c.inbox will have been updated by this
+				// deletion so we start from the beginning
+				// again.
+				continue RestartInboxIteration
+			}
+			c.updateInboxBackgroundColor(msg)
+		}
+		break
+	}
+
+	c.gui.Actions() <- UIState{uiStateTimerComplete}
+	c.gui.Signal()
 }
 
 // torPromptUI displays a prompt to start Tor and tries once a second until it
@@ -562,7 +597,7 @@ func (c *guiClient) mainUI() {
 		event := nextEvent
 		nextEvent = nil
 		if event == nil {
-			event, _ = c.nextEvent()
+			event, _ = c.nextEvent(0)
 		}
 		if event == nil {
 			continue
@@ -618,13 +653,15 @@ func (c *guiClient) mainUI() {
 // in the listUI. For example, if a message is marked as "retain" then the
 // background color may go from a warning indication to a normal color.
 func (c *guiClient) updateInboxBackgroundColor(msg *InboxMessage) {
+	now := c.Now()
+
 	if !msg.retained {
-		if time.Since(msg.receivedTime) > messageLifetime {
+		if now.Sub(msg.receivedTime) > messageLifetime {
 			// The message will be deleted imminently.
 			c.inboxUI.SetBackground(msg.id, colorImminently)
 			return
 		}
-		if time.Since(msg.receivedTime) > messagePreIndicationLifetime {
+		if now.Sub(msg.receivedTime) > messagePreIndicationLifetime {
 			// The message will be deleted soon.
 			c.inboxUI.SetBackground(msg.id, colorDeleteSoon)
 			return
@@ -1286,7 +1323,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 
 NextEvent:
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(msg.id)
 		if wanted {
 			return event
 		}
@@ -1456,14 +1493,7 @@ NextEvent:
 			return c.composeUI(nil, msg)
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
-			newInbox := make([]*InboxMessage, 0, len(c.inbox))
-			for _, inboxMsg := range c.inbox {
-				if inboxMsg == msg {
-					continue
-				}
-				newInbox = append(newInbox, inboxMsg)
-			}
-			c.inbox = newInbox
+			c.deleteInboxMsg(msg.id)
 			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
@@ -1471,8 +1501,13 @@ NextEvent:
 			return nil
 		case click.name == "retain":
 			msg.retained = click.checks["retain"]
+			if !msg.retained {
+				msg.exposureTime = c.Now()
+			}
 			c.updateInboxBackgroundColor(msg)
 			c.save()
+			c.gui.Actions() <- UIState{uiStateInbox}
+			c.gui.Signal()
 		}
 	}
 
@@ -1594,7 +1629,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 	haveAckTime := !msg.acked.IsZero()
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(msg.id)
 		if wanted {
 			return event
 		}
@@ -1805,7 +1840,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	deleteArmed := false
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}
@@ -1973,7 +2008,7 @@ Shared secret keying involves anonymously contacting a global, shared service an
 	var keyAgreementClick interface{}
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}
@@ -2030,7 +2065,7 @@ Shared secret keying involves anonymously contacting a global, shared service an
 			event, keyAgreementClick = keyAgreementClick, event
 		} else {
 			var wanted bool
-			event, wanted = c.nextEvent()
+			event, wanted = c.nextEvent(0)
 			if wanted {
 				return event
 			}
@@ -2156,7 +2191,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 	c.gui.Signal()
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}
@@ -2318,7 +2353,7 @@ When entering the cards enter the number or face of the card first, and then the
 
 SharedSecretEvent:
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}
@@ -2682,7 +2717,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			id:        c.randId(),
 			inReplyTo: replyToId,
 			to:        contactId,
-			created:   time.Now(),
+			created:   c.Now(),
 		}
 
 		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
@@ -2847,7 +2882,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	c.gui.Signal()
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}
@@ -3100,7 +3135,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		id := c.randId()
 		err := c.send(to, &pond.Message{
 			Id:               proto.Uint64(id),
-			Time:             proto.Int64(time.Now().Unix()),
+			Time:             proto.Int64(c.Now().Unix()),
 			Body:             []byte(body),
 			BodyEncoding:     pond.Message_RAW.Enum(),
 			InReplyTo:        replyToId,
@@ -3211,6 +3246,10 @@ func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFe
 		gui: gui,
 	}
 	c.ui = c
+
+	if !testing {
+		c.timerChan = time.Tick(60 * time.Second)
+	}
 
 	c.newMeetingPlace = func() panda.MeetingPlace {
 		return &panda.HTTPMeetingPlace{

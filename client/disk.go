@@ -25,8 +25,8 @@ func (c *client) loadState(stateFile *disk.StateFile, pw string) error {
 
 func (c *client) save() {
 	c.log.Printf("Saving state")
-	now := time.Now()
-	rotateErasureStorage := time.Now().Before(c.lastErasureStorageTime) || time.Now().Sub(c.lastErasureStorageTime) > erasureRotationTime
+	now := c.Now()
+	rotateErasureStorage := now.Before(c.lastErasureStorageTime) || now.Sub(c.lastErasureStorageTime) > erasureRotationTime
 	if rotateErasureStorage {
 		c.log.Printf("Rotating erasure storage key")
 		c.lastErasureStorageTime = now
@@ -145,6 +145,7 @@ func (c *client) unmarshal(state *disk.State) error {
 		}
 	}
 
+	now := c.Now()
 	for _, m := range state.Inbox {
 		msg := &InboxMessage{
 			id:           *m.Id,
@@ -154,6 +155,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			read:         *m.Read,
 			sealed:       m.Sealed,
 			retained:     m.GetRetained(),
+			exposureTime: now,
 		}
 		c.registerId(msg.id)
 		if len(m.Message) > 0 {

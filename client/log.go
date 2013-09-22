@@ -148,7 +148,7 @@ func (c *guiClient) logUI() interface{} {
 	c.gui.Signal()
 
 	for {
-		event, wanted := c.nextEvent()
+		event, wanted := c.nextEvent(0)
 		if wanted {
 			return event
 		}

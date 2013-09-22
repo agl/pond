@@ -86,6 +86,10 @@ const (
 	// remains before the background color changes to indicate that it will
 	// be deleted soon.
 	messagePreIndicationLifetime = 6 * 24 * time.Hour
+	// messageGraceTime is the amount of time that we'll leave a message
+	// before deletion after it has been marked as not-retained, or after
+	// startup.
+	messageGraceTime = 5 * time.Minute
 	// The current protocol version implemented by this code.
 	protoVersion = 1
 )
@@ -190,6 +194,12 @@ type client struct {
 	// usedIds records ID numbers that have been assigned in the current
 	// state file.
 	usedIds map[uint64]bool
+
+	// timerChan fires every two minutes so that messages can be erased.
+	timerChan <-chan time.Time
+	// nowFunc is a function that, if not nil, will be used by the GUI to
+	// get the current time. This is used in testing.
+	nowFunc func() time.Time
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -329,6 +339,14 @@ type InboxMessage struct {
 	// retained is true if the user has chosen to retain this message -
 	// i.e. to opt it out of the usual, time-based, auto-deletion.
 	retained bool
+	// exposureTime contains the time when the message was last "exposed".
+	// This is used to allow a small period of time for the user to mark a
+	// message as retained (messageGraceTime). For example, if a message is
+	// loaded at startup and has expired then it's a candidate for
+	// deletion, but the exposureTime will be the startup time, which
+	// ensures that we leave it a few minutes before deletion. Setting
+	// retained to false also resets the exposureTime.
+	exposureTime time.Time
 
 	decryptions map[uint64]*pendingDecryption
 }
@@ -738,6 +756,15 @@ func (c *client) randId() uint64 {
 	panic("unreachable")
 }
 
+// Now is a wrapper around time.Now() that allows unittests to override the
+// current time.
+func (c *client) Now() time.Time {
+	if c.nowFunc == nil {
+		return time.Now()
+	}
+	return c.nowFunc()
+}
+
 // registerId records that an ID number has been used, typically because we are
 // loading a state file.
 func (c *client) registerId(id uint64) {
@@ -783,6 +810,17 @@ func (c *client) newKeyExchange(contact *Contact) {
 	if contact.kxsBytes, err = proto.Marshal(kxs); err != nil {
 		panic(err)
 	}
+}
+
+func (c *client) deleteInboxMsg(id uint64) {
+	newInbox := make([]*InboxMessage, 0, len(c.inbox))
+	for _, inboxMsg := range c.inbox {
+		if inboxMsg.id == id {
+			continue
+		}
+		newInbox = append(newInbox, inboxMsg)
+	}
+	c.inbox = newInbox
 }
 
 func (c *client) indexOfQueuedMessage(msg *queuedMessage) (index int) {

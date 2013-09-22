@@ -244,10 +244,11 @@ func (ui *TestGUI) WaitForFileOpen() FileOpen {
 
 type TestClient struct {
 	*guiClient
-	stateDir   string
-	gui        *TestGUI
-	mainUIDone bool
-	name       string
+	stateDir      string
+	gui           *TestGUI
+	mainUIDone    bool
+	name          string
+	testTimerChan chan time.Time
 }
 
 type TestClientOptions struct {
@@ -256,8 +257,9 @@ type TestClientOptions struct {
 
 func NewTestClient(t *testing.T, name string, options *TestClientOptions) (*TestClient, error) {
 	tc := &TestClient{
-		gui:  NewTestGUI(t),
-		name: name,
+		gui:           NewTestGUI(t),
+		name:          name,
+		testTimerChan: make(chan time.Time),
 	}
 	var err error
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
@@ -276,6 +278,7 @@ func NewTestClient(t *testing.T, name string, options *TestClientOptions) (*Test
 	tc.guiClient = NewGUIClient(stateFilePath, tc.gui, rand.Reader, true, false)
 	tc.guiClient.log.name = name
 	tc.guiClient.log.toStderr = clientLogToStderr
+	tc.guiClient.timerChan = tc.testTimerChan
 	tc.guiClient.Start()
 	return tc, nil
 }
@@ -317,10 +320,13 @@ func (tc *TestClient) Reload() {
 
 func (tc *TestClient) ReloadWithMeetingPlace(mp panda.MeetingPlace) {
 	tc.Shutdown()
+	oldNowFunc := tc.nowFunc
 	tc.gui = NewTestGUI(tc.gui.t)
 	tc.guiClient = NewGUIClient(filepath.Join(tc.stateDir, "state"), tc.gui, rand.Reader, true /* testing */, false /* autoFetch */)
 	tc.guiClient.log.name = tc.name
 	tc.guiClient.log.toStderr = clientLogToStderr
+	tc.guiClient.timerChan = tc.testTimerChan
+	tc.nowFunc = oldNowFunc
 	if mp != nil {
 		tc.guiClient.newMeetingPlace = func() panda.MeetingPlace {
 			return mp
@@ -1717,7 +1723,247 @@ func TestDelete(t *testing.T) {
 	client1.AdvanceTo(uiStateMain)
 }
 
-func TestAbortSend(t *testing.T) {
+func TestExpireMessage(t *testing.T) {
 	t.Parallel()
 
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad initial number of inbox messages: %d", n)
+	}
+
+	baseTime := time.Now()
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad number of messages after first timer: %d", n)
+	}
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after first timer: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorGray {
+		t.Fatalf("Bad message background after first timer")
+	}
+
+	// Advance the clock so that the message should be indicated as near
+	// deletion.
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messagePreIndicationLifetime + 10*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorDeleteSoon {
+		t.Fatalf("Bad message background after second timer")
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after reload: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorDeleteSoon {
+		t.Fatalf("Bad message background after second reload")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after second reload: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorImminently {
+		t.Fatalf("Bad message background after second reload")
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after grace period timer: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorImminently {
+		t.Fatalf("Bad message background after grace period timer")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second + messageGraceTime)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after expiry: %d", n)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad number of messages in inbox after expiry: %d", n)
+	}
+}
+
+func TestRetainMessage(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad initial number of inbox messages: %d", n)
+	}
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad initial number of messages in listUI: %d", n)
+	}
+
+	msg := client2.inbox[0]
+	if msg.retained {
+		t.Fatalf("Retained flag is initially set")
+	}
+
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name:   "retain",
+		checks: map[string]bool{"retain": true},
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	if !msg.retained {
+		t.Fatalf("Retained flag not set")
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	msg = client2.inbox[0]
+	if !msg.retained {
+		t.Fatalf("Retained flag lost")
+	}
+
+	baseTime := time.Now()
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message was deleted while retain flag set")
+	}
+
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name:   "retain",
+		checks: map[string]bool{"retain": false},
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	if msg.retained {
+		t.Fatalf("Retain flag not cleared")
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message was deleted while in grace period")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + messageGraceTime + 20*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message deleted while selected")
+	}
+
+	client2.gui.events <- Click{
+		name: "compose",
+	}
+	client2.AdvanceTo(uiStateCompose)
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 0 {
+		t.Fatalf("Message not deleted")
+	}
 }
