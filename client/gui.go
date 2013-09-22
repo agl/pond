@@ -34,6 +34,8 @@ const (
 	colorBlack                 = 1
 	colorRed                   = 0xff0000
 	colorError                 = 0xff0000
+	colorImminently            = 0xffdddd
+	colorDeleteSoon            = 0xdddddd
 )
 
 const (
@@ -506,6 +508,7 @@ func (c *guiClient) mainUI() {
 			}
 		}
 		c.inboxUI.Add(msg.id, fromString, subline, i)
+		c.updateInboxBackgroundColor(msg)
 	}
 	c.updateWindowTitle()
 
@@ -609,6 +612,26 @@ func (c *guiClient) mainUI() {
 			nextEvent = c.composeUI(nil, nil)
 		}
 	}
+}
+
+// updateInboxBackgroundColor updates the background color of an inbox message
+// in the listUI. For example, if a message is marked as "retain" then the
+// background color may go from a warning indication to a normal color.
+func (c *guiClient) updateInboxBackgroundColor(msg *InboxMessage) {
+	if !msg.retained {
+		if time.Since(msg.receivedTime) > messageLifetime {
+			// The message will be deleted imminently.
+			c.inboxUI.SetBackground(msg.id, colorImminently)
+			return
+		}
+		if time.Since(msg.receivedTime) > messagePreIndicationLifetime {
+			// The message will be deleted soon.
+			c.inboxUI.SetBackground(msg.id, colorDeleteSoon)
+			return
+		}
+	}
+
+	c.inboxUI.SetBackground(msg.id, colorGray)
 }
 
 func (qm *queuedMessage) indicator() Indicator {
@@ -1448,6 +1471,7 @@ NextEvent:
 			return nil
 		case click.name == "retain":
 			msg.retained = click.checks["retain"]
+			c.updateInboxBackgroundColor(msg)
 			c.save()
 		}
 	}

@@ -82,6 +82,10 @@ const (
 	// messageLifetime is the default amount of time for which we'll keep a
 	// message. (Counting from the time that it was received.)
 	messageLifetime = 7 * 24 * time.Hour
+	// messagePreIndicationLifetime is the amount of time that a message
+	// remains before the background color changes to indicate that it will
+	// be deleted soon.
+	messagePreIndicationLifetime = 6 * 24 * time.Hour
 	// The current protocol version implemented by this code.
 	protoVersion = 1
 )

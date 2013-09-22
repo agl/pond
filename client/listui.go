@@ -18,6 +18,7 @@ type listItem struct {
 	id                                                           uint64
 	name, sepName, boxName, imageName, lineName, sublineTextName string
 	insensitive                                                  bool
+	background                                                   uint32
 }
 
 func (cs *listUI) Event(event interface{}) (uint64, bool) {
@@ -44,6 +45,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		imageName:       cs.newIdent(),
 		lineName:        cs.newIdent(),
 		sublineTextName: cs.newIdent(),
+		background:      colorGray,
 	}
 	cs.entries = append(cs.entries, c)
 	index := len(cs.entries) - 1
@@ -108,7 +110,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		box: cs.vboxName,
 		pos: index * 2,
 		child: EventBox{
-			widgetBase: widgetBase{name: c.boxName, background: colorGray},
+			widgetBase: widgetBase{name: c.boxName, background: c.background},
 			child:      VBox{children: children},
 		},
 	}
@@ -146,16 +148,16 @@ func (cs *listUI) Deselect() {
 		return
 	}
 
-	var currentlySelected string
+	var currentlySelected *listItem
 
-	for _, entry := range cs.entries {
+	for i, entry := range cs.entries {
 		if entry.id == cs.selected {
-			currentlySelected = entry.boxName
+			currentlySelected = &cs.entries[i]
 			break
 		}
 	}
 
-	cs.gui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
+	cs.gui.Actions() <- SetBackground{name: currentlySelected.boxName, color: currentlySelected.background}
 	cs.selected = 0
 	cs.gui.Signal()
 }
@@ -165,28 +167,28 @@ func (cs *listUI) Select(id uint64) {
 		return
 	}
 
-	var currentlySelected, newSelected string
+	var currentlySelected, newSelected *listItem
 
-	for _, entry := range cs.entries {
+	for i, entry := range cs.entries {
 		if entry.id == cs.selected {
-			currentlySelected = entry.boxName
+			currentlySelected = &cs.entries[i]
 		} else if entry.id == id {
-			newSelected = entry.boxName
+			newSelected = &cs.entries[i]
 		}
 
-		if len(currentlySelected) > 0 && len(newSelected) > 0 {
+		if currentlySelected != nil && newSelected != nil {
 			break
 		}
 	}
 
-	if len(newSelected) == 0 {
+	if newSelected == nil {
 		panic("internal error")
 	}
 
-	if len(currentlySelected) > 0 {
-		cs.gui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
+	if currentlySelected != nil {
+		cs.gui.Actions() <- SetBackground{name: currentlySelected.boxName, color: currentlySelected.background}
 	}
-	cs.gui.Actions() <- SetBackground{name: newSelected, color: colorHighlight}
+	cs.gui.Actions() <- SetBackground{name: newSelected.boxName, color: colorHighlight}
 	cs.selected = id
 	cs.gui.Signal()
 }
@@ -211,6 +213,7 @@ func (cs *listUI) SetLine(id uint64, line string) {
 	}
 }
 
+// SetSubline sets the second row of text in an entry.
 func (cs *listUI) SetSubline(id uint64, subline string) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
@@ -220,6 +223,19 @@ func (cs *listUI) SetSubline(id uint64, subline string) {
 				cs.gui.Actions() <- Destroy{name: entry.sublineTextName}
 			}
 			cs.gui.Signal()
+			break
+		}
+	}
+}
+
+func (cs *listUI) SetBackground(id uint64, color uint32) {
+	for i, entry := range cs.entries {
+		if entry.id == id {
+			cs.entries[i].background = color
+			if cs.selected != id {
+				cs.gui.Actions() <- SetBackground{name: entry.boxName, color: color}
+				cs.gui.Signal()
+			}
 			break
 		}
 	}
