@@ -206,7 +206,8 @@ type SpinButton struct {
 
 type CheckButton struct {
 	widgetBase
-	text string
+	checked bool
+	text    string
 }
 
 type Image struct {

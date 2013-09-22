@@ -494,6 +494,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 	case CheckButton:
 		check := gtk.CheckButtonWithLabel(v.text)
 		configureWidget(&check.GtkWidget, v.widgetBase)
+		check.SetActive(v.checked)
 		if len(v.name) > 0 {
 			check.Connect("toggled", func() {
 				ui.clicked(v.name)

@@ -322,6 +322,9 @@ type InboxMessage struct {
 	// identity this message for the duration of the session. It's not
 	// saved to disk.
 	cliId cliId
+	// retained is true if the user has chosen to retain this message -
+	// i.e. to opt it out of the usual, time-based, auto-deletion.
+	retained bool
 
 	decryptions map[uint64]*pendingDecryption
 }

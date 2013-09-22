@@ -1122,6 +1122,15 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 					text: "Delete Now",
 				}},
 			},
+			{
+				{1, 1, CheckButton{
+					widgetBase: widgetBase{
+						name: "retain",
+					},
+					checked: msg.retained,
+					text:    "Retain",
+				}},
+			},
 		},
 	}
 
@@ -1437,6 +1446,9 @@ NextEvent:
 			c.gui.Signal()
 			c.save()
 			return nil
+		case click.name == "retain":
+			msg.retained = click.checks["retain"]
+			c.save()
 		}
 	}
 

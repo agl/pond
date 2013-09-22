@@ -310,12 +310,15 @@ type Inbox struct {
 	Message          []byte  `protobuf:"bytes,5,opt,name=message" json:"message,omitempty"`
 	Read             *bool   `protobuf:"varint,6,req,name=read" json:"read,omitempty"`
 	Sealed           []byte  `protobuf:"bytes,7,opt,name=sealed" json:"sealed,omitempty"`
+	Retained         *bool   `protobuf:"varint,8,opt,name=retained,def=0" json:"retained,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
 func (this *Inbox) Reset()         { *this = Inbox{} }
 func (this *Inbox) String() string { return proto.CompactTextString(this) }
 func (*Inbox) ProtoMessage()       {}
+
+const Default_Inbox_Retained bool = false
 
 func (this *Inbox) GetId() uint64 {
 	if this != nil && this.Id != nil {
@@ -364,6 +367,13 @@ func (this *Inbox) GetSealed() []byte {
 		return this.Sealed
 	}
 	return nil
+}
+
+func (this *Inbox) GetRetained() bool {
+	if this != nil && this.Retained != nil {
+		return *this.Retained
+	}
+	return Default_Inbox_Retained
 }
 
 type Outbox struct {

@@ -153,6 +153,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			acked:        *m.Acked,
 			read:         *m.Read,
 			sealed:       m.Sealed,
+			retained:     m.GetRetained(),
 		}
 		c.registerId(msg.id)
 		if len(m.Message) > 0 {
@@ -270,7 +271,7 @@ func (c *client) marshal() []byte {
 
 	var inbox []*disk.Inbox
 	for _, msg := range c.inbox {
-		if time.Since(msg.receivedTime) > messageLifetime {
+		if time.Since(msg.receivedTime) > messageLifetime && !msg.retained {
 			continue
 		}
 		m := &disk.Inbox{
@@ -280,6 +281,7 @@ func (c *client) marshal() []byte {
 			Acked:        proto.Bool(msg.acked),
 			Read:         proto.Bool(msg.read),
 			Sealed:       msg.sealed,
+			Retained:     proto.Bool(msg.retained),
 		}
 		if msg.message != nil {
 			if m.Message, err = proto.Marshal(msg.message); err != nil {

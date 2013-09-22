@@ -71,6 +71,7 @@ message Inbox {
 	optional bytes message = 5;
 	required bool read = 6;
 	optional bytes sealed = 7;
+	optional bool retained = 8 [ default = false ];
 }
 
 message Outbox {
