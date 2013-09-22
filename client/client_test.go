@@ -259,7 +259,7 @@ func NewTestClient(t *testing.T, name string, options *TestClientOptions) (*Test
 	tc := &TestClient{
 		gui:           NewTestGUI(t),
 		name:          name,
-		testTimerChan: make(chan time.Time),
+		testTimerChan: make(chan time.Time, 1),
 	}
 	var err error
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
@@ -1965,5 +1965,54 @@ func TestRetainMessage(t *testing.T) {
 
 	if n := len(client2.inbox); n != 0 {
 		t.Fatalf("Message not deleted")
+	}
+}
+
+func TestOutboxDeletion(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+
+	client1.gui.events <- Click{
+		name: "compose",
+	}
+	client1.AdvanceTo(uiStateCompose)
+
+	if n := len(client1.outbox); n != 1 {
+		t.Fatalf("Bad initial number of outbox messages: %d", n)
+	}
+
+	baseTime := time.Now()
+	client1.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client1.testTimerChan <- baseTime
+	client1.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client1.outbox); n != 0 {
+		t.Fatalf("Outbox message not deleted")
 	}
 }

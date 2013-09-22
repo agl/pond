@@ -823,6 +823,17 @@ func (c *client) deleteInboxMsg(id uint64) {
 	c.inbox = newInbox
 }
 
+func (c *client) deleteOutboxMsg(id uint64) {
+	newOutbox := make([]*queuedMessage, 0, len(c.outbox))
+	for _, outboxMsg := range c.outbox {
+		if outboxMsg.id == id {
+			continue
+		}
+		newOutbox = append(newOutbox, outboxMsg)
+	}
+	c.outbox = newOutbox
+}
+
 func (c *client) indexOfQueuedMessage(msg *queuedMessage) (index int) {
 	// c.queueMutex must be held before calling this function.
 

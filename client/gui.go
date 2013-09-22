@@ -139,6 +139,7 @@ func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bo
 
 func (c *guiClient) processTimer(currentMsgId uint64) {
 	now := c.Now()
+	haveDeleted := false
 
 RestartInboxIteration:
 	for {
@@ -150,10 +151,28 @@ RestartInboxIteration:
 				// deletion so we start from the beginning
 				// again.
 				continue RestartInboxIteration
+				haveDeleted = true
 			}
 			c.updateInboxBackgroundColor(msg)
 		}
 		break
+	}
+
+RestartOutboxIteration:
+	for {
+		for _, msg := range c.outbox {
+			if msg.id != currentMsgId && now.Sub(msg.created) > messageLifetime {
+				c.outboxUI.Remove(msg.id)
+				c.deleteOutboxMsg(msg.id)
+				haveDeleted = true
+				continue RestartOutboxIteration
+			}
+		}
+		break
+	}
+
+	if haveDeleted {
+		c.save()
 	}
 
 	c.gui.Actions() <- UIState{uiStateTimerComplete}
