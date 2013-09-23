@@ -145,7 +145,9 @@ RestartInboxIteration:
 	for {
 		for _, msg := range c.inbox {
 			if msg.id != currentMsgId && !msg.retained && now.Sub(msg.receivedTime) > messageLifetime && now.Sub(msg.exposureTime) > messageGraceTime {
-				c.inboxUI.Remove(msg.id)
+				if len(msg.message.Body) > 0 {
+					c.inboxUI.Remove(msg.id)
+				}
 				c.deleteInboxMsg(msg.id)
 				// c.inbox will have been updated by this
 				// deletion so we start from the beginning
@@ -162,7 +164,9 @@ RestartOutboxIteration:
 	for {
 		for _, msg := range c.outbox {
 			if msg.id != currentMsgId && now.Sub(msg.created) > messageLifetime {
-				c.outboxUI.Remove(msg.id)
+				if msg.revocation || len(msg.message.Body) > 0 {
+					c.outboxUI.Remove(msg.id)
+				}
 				c.deleteOutboxMsg(msg.id)
 				haveDeleted = true
 				continue RestartOutboxIteration
