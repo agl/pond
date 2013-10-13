@@ -401,12 +401,12 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 
 	msg := new(pond.Message)
 	if err := proto.Unmarshal(plaintext, msg); err != nil {
-		c.log.Errorf("Failed to parse mesage from %s: %s", from, err)
+		c.log.Errorf("Failed to parse mesage from %s: %s", from.name, err)
 		return false
 	}
 
 	if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
-		c.log.Errorf("Message from %s with bad DH length %d", from, l)
+		c.log.Errorf("Message from %s with bad DH length %d", from.name, l)
 		return false
 	}
 

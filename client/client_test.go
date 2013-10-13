@@ -678,7 +678,7 @@ func TestMessageExchange(t *testing.T) {
 			t.Fatalf("message from %s, expected client1", from)
 		}
 		if string(msg.message.Body) != testMsg {
-			t.Fatalf("Incorrect message contents: %s", msg)
+			t.Fatalf("Incorrect message contents: %#v", msg)
 		}
 
 		sendMessage(client2, "client1", testMsg)
@@ -687,7 +687,7 @@ func TestMessageExchange(t *testing.T) {
 			t.Fatalf("message from %s, expected client2", from)
 		}
 		if string(msg.message.Body) != testMsg {
-			t.Fatalf("Incorrect message contents: %s", msg)
+			t.Fatalf("Incorrect message contents: %#v", msg)
 		}
 	}
 
@@ -731,7 +731,7 @@ func TestACKs(t *testing.T) {
 		t.Fatalf("message from %s, expected client1", from)
 	}
 	if string(msg.message.Body) != testMsg {
-		t.Fatalf("Incorrect message contents: %s", msg)
+		t.Fatalf("Incorrect message contents: %#v", msg)
 	}
 	if !client1.outbox[0].acked.IsZero() {
 		t.Fatalf("client1 incorrectly believes that its message has been acked")
@@ -1371,7 +1371,7 @@ WaitForAck:
 				t.Fatalf("client3 message observed twice")
 			}
 			if string(msg.message.Body) != "test2" {
-				t.Fatalf("Incorrect message contents from client3: %s", msg)
+				t.Fatalf("Incorrect message contents from client3: %#v", msg)
 			}
 			seenClient3 = true
 		case "client4":
@@ -1379,7 +1379,7 @@ WaitForAck:
 				t.Fatalf("client4 message observed twice")
 			}
 			if string(msg.message.Body) != beforeRevocationMsg {
-				t.Fatalf("Incorrect message contents client4: %s", msg)
+				t.Fatalf("Incorrect message contents client4: %#v", msg)
 			}
 			seenClient4 = true
 		}
