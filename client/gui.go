@@ -1230,11 +1230,25 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 	// generate names for the dynamic parts of the UI.
 	const (
 		detachmentDecryptPrefix  = "detachment-decrypt-"
+		detachmentVBoxPrefix     = "detachment-decrypt-"
 		detachmentProgressPrefix = "detachment-progress-"
 		detachmentDownloadPrefix = "detachment-download-"
 		detachmentSavePrefix     = "detachment-save-"
 		attachmentPrefix         = "attachment-"
 	)
+
+	widgetForDetachmentProcess := func(index int) Widget {
+		return VBox{
+			widgetBase: widgetBase{name: fmt.Sprintf("detachment-vbox-%d", index)},
+			children: []Widget{
+				Progress{
+					widgetBase: widgetBase{
+						name: fmt.Sprintf("%s%d", detachmentProgressPrefix, index),
+					},
+				},
+			},
+		}
+	}
 
 	if msg.message != nil && len(msg.message.Files) != 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
@@ -1311,13 +1325,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 			}
 			var progressRow []GridE
 			if pending != nil {
-				progressRow = append(progressRow, GridE{4, 1,
-					Progress{
-						widgetBase: widgetBase{
-							name: fmt.Sprintf("%s%d", detachmentProgressPrefix, i),
-						},
-					},
-				})
+				progressRow = append(progressRow, GridE{4, 1, widgetForDetachmentProcess(i)})
 			}
 			grid.rows = append(grid.rows, row)
 			grid.rows = append(grid.rows, progressRow)
@@ -1380,8 +1388,9 @@ NextEvent:
 			case detachmentDecryptIndex:
 				// Decrypt a local file with a detachment key.
 				c.gui.Actions() <- FileOpen{
-					save:  true,
-					title: "Save decrypted file",
+					save:     true,
+					title:    "Save decrypted file",
+					filename: filepath.Base(open.path),
 					arg: detachmentDecryptInput{
 						index:  int(i),
 						inPath: open.path,
@@ -1408,13 +1417,7 @@ NextEvent:
 				c.gui.Actions() <- InsertRow{
 					name: "detachment-grid",
 					pos:  i.index*2 + 1,
-					row: []GridE{
-						{4, 1, Progress{
-							widgetBase: widgetBase{
-								name: fmt.Sprintf("%s%d", detachmentProgressPrefix, i.index),
-							},
-						}},
-					},
+					row:  []GridE{{4, 1, widgetForDetachmentProcess(i.index)}},
 				}
 				id := c.randId()
 				msg.decryptions[id] = &pendingDecryption{
@@ -1440,13 +1443,7 @@ NextEvent:
 				c.gui.Actions() <- InsertRow{
 					name: "detachment-grid",
 					pos:  int(i)*2 + 1,
-					row: []GridE{
-						{4, 1, Progress{
-							widgetBase: widgetBase{
-								name: fmt.Sprintf("%s%d", detachmentProgressPrefix, int(i)),
-							},
-						}},
-					},
+					row:  []GridE{{4, 1, widgetForDetachmentProcess(int(i))}},
 				}
 				id := c.randId()
 				msg.decryptions[id] = &pendingDecryption{
@@ -1472,18 +1469,20 @@ NextEvent:
 		case strings.HasPrefix(click.name, attachmentPrefix):
 			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
 			c.gui.Actions() <- FileOpen{
-				save:  true,
-				title: "Save Attachment",
-				arg:   attachmentSaveIndex(i),
+				save:     true,
+				title:    "Save Attachment",
+				filename: msg.message.Files[i].GetFilename(),
+				arg:      attachmentSaveIndex(i),
 			}
 			c.gui.Signal()
 			continue
 		case strings.HasPrefix(click.name, detachmentSavePrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentSavePrefix):])
 			c.gui.Actions() <- FileOpen{
-				save:  true,
-				title: "Save Key",
-				arg:   detachmentSaveIndex(i),
+				save:     true,
+				title:    "Save Key",
+				filename: msg.message.DetachedFiles[i].GetFilename() + ".key",
+				arg:      detachmentSaveIndex(i),
 			}
 			c.gui.Signal()
 			continue
@@ -1498,8 +1497,10 @@ NextEvent:
 		case strings.HasPrefix(click.name, detachmentDownloadPrefix):
 			i, _ := strconv.Atoi(click.name[len(detachmentDownloadPrefix):])
 			c.gui.Actions() <- FileOpen{
-				title: "Save to",
-				arg:   detachmentDownloadIndex(i),
+				save:     true,
+				title:    "Save to",
+				filename: msg.message.DetachedFiles[i].GetFilename(),
+				arg:      detachmentDownloadIndex(i),
 			}
 			c.gui.Signal()
 			continue
@@ -3096,9 +3097,10 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 				panic(click.name)
 			}
 			c.gui.Actions() <- FileOpen{
-				save:  true,
-				title: "Save encrypted file",
-				arg:   id,
+				save:     true,
+				title:    "Save encrypted file",
+				filename: filepath.Base(draft.pendingDetachments[id].path) + ".pondencrypted",
+				arg:      id,
 			}
 			c.gui.Signal()
 		}

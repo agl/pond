@@ -327,6 +327,9 @@ type Destroy struct {
 type FileOpen struct {
 	save  bool
 	title string
+	// filename contains the suggested filename in the case that save is
+	// true.
+	filename string
 	// arg is an arbitary value that is passed in the corresponding
 	// OpenResult event.
 	arg interface{}

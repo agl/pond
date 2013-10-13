@@ -609,12 +609,19 @@ func (ui *GTKUI) handle(action interface{}) {
 		delete(ui.widgets, action.name)
 	case FileOpen:
 		fileAction := gtk.GTK_FILE_CHOOSER_ACTION_OPEN
-		but := gtk.GTK_STOCK_OPEN
+		button := gtk.GTK_STOCK_OPEN
 		if action.save {
 			fileAction = gtk.GTK_FILE_CHOOSER_ACTION_SAVE
-			but = gtk.GTK_STOCK_SAVE
+			button = gtk.GTK_STOCK_SAVE
 		}
-		dialog := gtk.FileChooserDialog(action.title, ui.window, fileAction, gtk.GTK_STOCK_CANCEL, int(gtk.GTK_RESPONSE_CANCEL), but, int(gtk.GTK_RESPONSE_ACCEPT))
+		dialog := gtk.FileChooserDialog(action.title, ui.window, fileAction, gtk.GTK_STOCK_CANCEL, int(gtk.GTK_RESPONSE_CANCEL), button, int(gtk.GTK_RESPONSE_ACCEPT))
+		if action.save {
+			if len(action.filename) > 0 {
+				dialog.SetCurrentName(action.filename)
+			} else {
+				panic("save dialog without filename")
+			}
+		}
 		switch gtk.GtkResponseType(dialog.Run()) {
 		case gtk.GTK_RESPONSE_ACCEPT:
 			ui.events <- OpenResult{
