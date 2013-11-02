@@ -564,6 +564,7 @@ type KeyExchange struct {
 	IdentityPublic   []byte  `protobuf:"bytes,2,req,name=identity_public" json:"identity_public,omitempty"`
 	Server           *string `protobuf:"bytes,3,req,name=server" json:"server,omitempty"`
 	Dh               []byte  `protobuf:"bytes,4,req,name=dh" json:"dh,omitempty"`
+	Dh1              []byte  `protobuf:"bytes,8,opt,name=dh1" json:"dh1,omitempty"`
 	Group            []byte  `protobuf:"bytes,5,req,name=group" json:"group,omitempty"`
 	GroupKey         []byte  `protobuf:"bytes,6,req,name=group_key" json:"group_key,omitempty"`
 	Generation       *uint32 `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
@@ -598,6 +599,13 @@ func (this *KeyExchange) GetServer() string {
 func (this *KeyExchange) GetDh() []byte {
 	if this != nil {
 		return this.Dh
+	}
+	return nil
+}
+
+func (this *KeyExchange) GetDh1() []byte {
+	if this != nil {
+		return this.Dh1
 	}
 	return nil
 }
