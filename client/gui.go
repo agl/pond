@@ -1989,7 +1989,7 @@ func (c *guiClient) newContactUI(contact *Contact) interface{} {
 				{1, 1, nil},
 				{1, 1, Label{text: `Shared secret keying involves anonymously contacting a global, shared service and performing key agreement with another party who holds the same shared secret.
 
-If other other party is someone who you are in email or IM contact with, then a button is provided to generate a secret, which can then be sent to the other party. Neither Email nor IM ensures that someone didn't change the secret during transmission but you can verify the other party's fingerprint later and, as always, have to weigh convenience against security.
+If the other party is someone who you are in email or IM contact with, then a button is provided to generate a secret, which can then be sent to the other party. Neither Email nor IM ensures that someone didn't change the secret during transmission but you can verify the other party's fingerprint later and, as always, have to weigh convenience against security.
 
 If, for example, you met your contact in real life, you could agree on a shared secret and the time (to the minute). Later you can both use this function to bootstrap Pond communication. The security of this scheme rests on the secret being unguessable, which is very hard for humans to manage. So there is also a scheme whereby a deck of cards can be shuffled and split between you.
 
