@@ -1,6 +1,5 @@
 package protos
 
-import "code.google.com/p/go.crypto/nacl/box"
 import "code.google.com/p/go.crypto/nacl/secretbox"
 
 // TransportSize is the number of bytes that all payloads are padded to before
@@ -14,9 +13,15 @@ const MessageOverhead = 512
 
 // MaxSerializedMessage is the maximum size of the serialized Message protobuf.
 // The message will end up looking like this:
-//    [nonce - 24 bytes       ]             -|
-//    [box.Overhead - 16 bytes] -|           |
 //    [length - 4 bytes       ]  | NaCl box  | Message that server sees.
-//    [serialized message     ]  |           |
-//    [padding                ] -|          -|
-const MaxSerializedMessage = TransportSize - box.Overhead - MessageOverhead - 24 - 4
+//    [nonce - 24 bytes               ]
+//
+//      [secretbox.Overhead - 16 bytes]
+//      [message count - 4 bytes      ]
+//      [prev message count - 4 bytes ]
+//      [ratchet public - 32 bytes    ]
+//      [inner nonce - 32 bytes       ]
+//
+//      [secretbox.Overhead - 16 bytes]
+//      [serialized message           ]
+const MaxSerializedMessage = TransportSize - (secretbox.Overhead + 4 + 4 + 32 + 24) - secretbox.Overhead - MessageOverhead

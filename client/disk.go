@@ -97,6 +97,14 @@ func (c *client) unmarshal(state *disk.State) error {
 		}
 		copy(contact.lastDHPrivate[:], cont.LastPrivate)
 		copy(contact.currentDHPrivate[:], cont.CurrentPrivate)
+
+		if cont.Ratchet != nil {
+			contact.ratchet = c.newRatchet(contact)
+			if err := contact.ratchet.Unmarshal(cont.Ratchet); err != nil {
+				return err
+			}
+		}
+
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
 			continue
@@ -254,10 +262,14 @@ func (c *client) marshal() []byte {
 			cont.TheirGroup = contact.myGroupKey.Group.Marshal()
 			cont.TheirServer = proto.String(contact.theirServer)
 			cont.TheirPub = contact.theirPub[:]
+			cont.Generation = proto.Uint32(contact.generation)
+
 			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
-			cont.Generation = proto.Uint32(contact.generation)
+		}
+		if contact.ratchet != nil {
+			cont.Ratchet = contact.ratchet.Marshal(time.Now(), messageLifetime)
 		}
 		for _, prevTag := range contact.previousTags {
 			if time.Since(prevTag.expired) > previousTagLifetime {

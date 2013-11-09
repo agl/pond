@@ -205,7 +205,7 @@ message Message {
 	}
 	optional Encoding body_encoding = 4;
 	// my_next_dh contains a Curve25519 public value for future messages.
-	required bytes my_next_dh = 5;
+	optional bytes my_next_dh = 5;
 	// in_reply_to, if set, contains the |id| value of a previous message
 	// sent by the recipient.
 	optional uint64 in_reply_to = 6;

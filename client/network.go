@@ -39,8 +39,12 @@ const (
 func (c *guiClient) sendAck(msg *InboxMessage) {
 	to := c.contacts[msg.from]
 
-	var nextDHPub [32]byte
-	curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+	var myNextDH []byte
+	if to.ratchet == nil {
+		var nextDHPub [32]byte
+		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+		myNextDH = nextDHPub[:]
+	}
 
 	id := c.randId()
 	err := c.send(to, &pond.Message{
@@ -48,7 +52,7 @@ func (c *guiClient) sendAck(msg *InboxMessage) {
 		Time:             proto.Int64(time.Now().Unix()),
 		Body:             make([]byte, 0),
 		BodyEncoding:     pond.Message_RAW.Enum(),
-		MyNextDh:         nextDHPub[:],
+		MyNextDh:         myNextDH,
 		InReplyTo:        msg.message.Id,
 		SupportedVersion: proto.Int32(protoVersion),
 	})
@@ -74,34 +78,39 @@ func (c *guiClient) send(to *Contact, message *pond.Message) error {
 	copy(plaintext[4:], messageBytes)
 	c.randBytes(plaintext[4+len(messageBytes):])
 
-	// The message is encrypted to an ephemeral key so that the sending
-	// client can choose not to store it and then cannot decrypt it once
-	// sent.
+	var sealed []byte
+	if to.ratchet != nil {
+		sealed = to.ratchet.Encrypt(sealed, plaintext)
+	} else {
+		// The message is encrypted to an ephemeral key so that the sending
+		// client can choose not to store it and then cannot decrypt it once
+		// sent.
 
-	//            +---------------------+            +---...
-	// outerNonce | ephemeral DH public | innerNonce | message
-	// (24 bytes) |                     | (24 bytes) |
-	//            +---------------------+            +---....
+		//            +---------------------+            +---...
+		// outerNonce | ephemeral DH public | innerNonce | message
+		// (24 bytes) |                     | (24 bytes) |
+		//            +---------------------+            +---....
 
-	sealedLen := ephemeralBlockLen + nonceLen + len(plaintext) + box.Overhead
-	sealed := make([]byte, sealedLen)
-	var outerNonce [24]byte
-	c.randBytes(outerNonce[:])
-	copy(sealed, outerNonce[:])
-	x := sealed[nonceLen:]
+		sealedLen := ephemeralBlockLen + nonceLen + len(plaintext) + box.Overhead
+		sealed = make([]byte, sealedLen)
+		var outerNonce [24]byte
+		c.randBytes(outerNonce[:])
+		copy(sealed, outerNonce[:])
+		x := sealed[nonceLen:]
 
-	public, private, err := box.GenerateKey(c.rand)
-	if err != nil {
-		return err
+		public, private, err := box.GenerateKey(c.rand)
+		if err != nil {
+			return err
+		}
+		box.Seal(x[:0], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
+		x = x[len(public)+box.Overhead:]
+
+		var innerNonce [24]byte
+		c.randBytes(innerNonce[:])
+		copy(x, innerNonce[:])
+		x = x[nonceLen:]
+		box.Seal(x[:0], plaintext, &innerNonce, &to.theirCurrentDHPublic, private)
 	}
-	box.Seal(x[:0], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
-	x = x[len(public)+box.Overhead:]
-
-	var innerNonce [24]byte
-	c.randBytes(innerNonce[:])
-	copy(x, innerNonce[:])
-	x = x[nonceLen:]
-	box.Seal(x[:0], plaintext, &innerNonce, &to.theirCurrentDHPublic, private)
 
 	sha := sha256.New()
 	sha.Write(sealed)
@@ -205,15 +214,27 @@ func (c *guiClient) revoke(to *Contact) {
 	c.outbox = append(c.outbox, out)
 }
 
-func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
-	// The message starts with an ephemeral block, the nonce of which has
-	// already been split off. See the commends in send.
+func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
+	if from.ratchet != nil {
+		plaintext, err := from.ratchet.Decrypt(sealed)
+		if err != nil {
+			return nil, false
+		}
+		return plaintext, true
+	}
+
+	var nonce [24]byte
+	if len(sealed) < len(nonce) {
+		return nil, false
+	}
+	copy(nonce[:], sealed)
+	sealed = sealed[24:]
 	headerLen := ephemeralBlockLen - len(nonce)
 	if len(sealed) < headerLen {
 		return nil, false
 	}
 
-	publicBytes, ok := decryptMessageInner(sealed[:headerLen], nonce, from)
+	publicBytes, ok := decryptMessageInner(sealed[:headerLen], &nonce, from)
 	if !ok || len(publicBytes) != 32 {
 		return nil, false
 	}
@@ -376,10 +397,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	}
 
 	sealed := inboxMsg.sealed
-	var nonce [24]byte
-	copy(nonce[:], sealed)
-	sealed = sealed[24:]
-	plaintext, ok := decryptMessage(sealed, &nonce, from)
+	plaintext, ok := decryptMessage(sealed, from)
 
 	if !ok {
 		c.log.Errorf("Failed to decrypt message from %s", from.name)
@@ -405,11 +423,6 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		return false
 	}
 
-	if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
-		c.log.Errorf("Message from %s with bad DH length %d", from.name, l)
-		return false
-	}
-
 	// Check for duplicate message.
 	for _, candidate := range c.inbox {
 		if candidate.from == from.id &&
@@ -421,10 +434,17 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		}
 	}
 
-	if !bytes.Equal(from.theirCurrentDHPublic[:], msg.MyNextDh) {
-		// We have a new DH value from them.
-		copy(from.theirLastDHPublic[:], from.theirCurrentDHPublic[:])
-		copy(from.theirCurrentDHPublic[:], msg.MyNextDh)
+	if from.ratchet == nil {
+		if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
+			c.log.Errorf("Message from %s with bad DH length %d", from.name, l)
+			return false
+		}
+
+		if !bytes.Equal(from.theirCurrentDHPublic[:], msg.MyNextDh) {
+			// We have a new DH value from them.
+			copy(from.theirLastDHPublic[:], from.theirCurrentDHPublic[:])
+			copy(from.theirCurrentDHPublic[:], msg.MyNextDh)
+		}
 	}
 
 	if msg.InReplyTo != nil {

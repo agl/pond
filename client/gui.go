@@ -2252,7 +2252,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			c.gui.Signal()
 			continue
 		}
-		if err := contact.processKeyExchange(block.Bytes, c.dev); err != nil {
+		if err := contact.processKeyExchange(block.Bytes, c.dev, c.simulateOldClient); err != nil {
 			c.gui.Actions() <- SetText{name: "error2", text: err.Error()}
 			c.gui.Actions() <- UIError{err}
 			c.gui.Signal()
@@ -3164,8 +3164,12 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			}
 		}
 
-		var nextDHPub [32]byte
-		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+		var myNextDH []byte
+		if to.ratchet == nil {
+			var nextDHPub [32]byte
+			curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+			myNextDH = nextDHPub[:]
+		}
 
 		var replyToId *uint64
 		if inReplyTo != nil {
@@ -3185,7 +3189,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			Body:             []byte(body),
 			BodyEncoding:     pond.Message_RAW.Enum(),
 			InReplyTo:        replyToId,
-			MyNextDh:         nextDHPub[:],
+			MyNextDh:         myNextDH,
 			Files:            draft.attachments,
 			DetachedFiles:    draft.detachments,
 			SupportedVersion: proto.Int32(protoVersion),
@@ -3256,7 +3260,7 @@ func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
 		contact.pandaKeyExchange = nil
 		contact.pandaShutdownChan = nil
 
-		if err := contact.processKeyExchange(update.result, c.dev); err != nil {
+		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient); err != nil {
 			contact.pandaResult = err.Error()
 			c.contactsUI.SetSubline(contact.id, "failed")
 			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)

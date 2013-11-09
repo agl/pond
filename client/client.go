@@ -69,11 +69,11 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/ratchet"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
@@ -200,6 +200,10 @@ type client struct {
 	// nowFunc is a function that, if not nil, will be used by the GUI to
 	// get the current time. This is used in testing.
 	nowFunc func() time.Time
+
+	// simulateOldClient causes the client to act like a pre-ratchet client
+	// for testing purposes.
+	simulateOldClient bool
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -406,11 +410,14 @@ type Contact struct {
 	// exchange failed.
 	pandaResult string
 
-	lastDHPrivate    [32]byte
-	currentDHPrivate [32]byte
-
+	// Members for the old ratchet.
+	lastDHPrivate        [32]byte
+	currentDHPrivate     [32]byte
 	theirLastDHPublic    [32]byte
 	theirCurrentDHPublic [32]byte
+
+	// New ratchet support.
+	ratchet *ratchet.Ratchet
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -679,7 +686,7 @@ func (c *client) loadUI() error {
 	return nil
 }
 
-func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error {
+func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient bool) error {
 	var kxs pond.SignedKeyExchange
 	if err := proto.Unmarshal(kxsBytes, &kxs); err != nil {
 		return err
@@ -723,10 +730,25 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error 
 	}
 	copy(contact.theirIdentityPublic[:], kx.IdentityPublic)
 
-	if len(kx.Dh) != len(contact.theirCurrentDHPublic) {
-		return errors.New("invalid public DH value")
+	if simulateOldClient {
+		kx.Dh1 = nil
 	}
-	copy(contact.theirCurrentDHPublic[:], kx.Dh)
+
+	if len(kx.Dh1) == 0 {
+		// They are using an old-style ratchet. We have to extract the
+		// private value from the Ratchet in order to use it with the
+		// old code.
+		contact.lastDHPrivate = contact.ratchet.GetKXPrivateForTransition()
+		if len(kx.Dh) != len(contact.theirCurrentDHPublic) {
+			return errors.New("invalid public DH value")
+		}
+		copy(contact.theirCurrentDHPublic[:], kx.Dh)
+		contact.ratchet = nil
+	} else {
+		if err := contact.ratchet.CompleteKeyExchange(&kx); err != nil {
+			return err
+		}
+	}
 
 	contact.generation = *kx.Generation
 
@@ -774,25 +796,33 @@ func (c *client) registerId(id uint64) {
 	c.usedIds[id] = true
 }
 
+func (c *client) newRatchet(contact *Contact) *ratchet.Ratchet {
+	r := ratchet.New(c.rand)
+	r.MyIdentityPrivate = &c.identity
+	r.MySigningPublic = &c.pub
+	r.TheirIdentityPublic = &contact.theirIdentityPublic
+	r.TheirSigningPublic = &contact.theirPub
+	return r
+}
+
 func (c *client) newKeyExchange(contact *Contact) {
 	var err error
-	c.randBytes(contact.lastDHPrivate[:])
-	c.randBytes(contact.currentDHPrivate[:])
-
-	var pub [32]byte
-	curve25519.ScalarBaseMult(&pub, &contact.lastDHPrivate)
 	if contact.groupKey, err = c.groupPriv.NewMember(c.rand); err != nil {
 		panic(err)
 	}
+	contact.ratchet = c.newRatchet(contact)
 
 	kx := &pond.KeyExchange{
 		PublicKey:      c.pub[:],
 		IdentityPublic: c.identityPublic[:],
 		Server:         proto.String(c.server),
-		Dh:             pub[:],
 		Group:          contact.groupKey.Group.Marshal(),
 		GroupKey:       contact.groupKey.Marshal(),
 		Generation:     proto.Uint32(c.generation),
+	}
+	contact.ratchet.FillKeyExchange(kx)
+	if c.simulateOldClient {
+		kx.Dh1 = nil
 	}
 
 	kxBytes, err := proto.Marshal(kx)

@@ -12,6 +12,8 @@ import (
 
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/go.crypto/nacl/secretbox"
+	"code.google.com/p/goprotobuf/proto"
+	"github.com/agl/pond/client/disk"
 	pond "github.com/agl/pond/protos"
 )
 
@@ -138,6 +140,13 @@ var (
 	chainKeyStepLabel      = []byte("chain key step")
 )
 
+// GetKXPrivateForTransition returns the DH private key used in the key
+// exchange. This exists in order to support the transition to the new ratchet
+// format.
+func (r *Ratchet) GetKXPrivateForTransition() [32]byte {
+	return *r.kxPrivate0
+}
+
 // CompleteKeyExchange takes a KeyExchange message from the other party and
 // establishes the ratchet.
 func (r *Ratchet) CompleteKeyExchange(kx *pond.KeyExchange) error {
@@ -165,13 +174,13 @@ func (r *Ratchet) CompleteKeyExchange(kx *pond.KeyExchange) error {
 		return errors.New("ratchet: peer echoed our own DH values back")
 	}
 
-	keyMaterial := make([]byte, 0, 32*5)
-	var sharedKey [32]byte
-	curve25519.ScalarMult(&sharedKey, r.MyIdentityPrivate, r.TheirIdentityPublic)
-	keyMaterial = append(keyMaterial, sharedKey[:]...)
-
 	var theirDH [32]byte
 	copy(theirDH[:], kx.Dh)
+
+	keyMaterial := make([]byte, 0, 32*5)
+	var sharedKey [32]byte
+	curve25519.ScalarMult(&sharedKey, r.kxPrivate0, &theirDH)
+	keyMaterial = append(keyMaterial, sharedKey[:]...)
 
 	if amAlice {
 		curve25519.ScalarMult(&sharedKey, r.MyIdentityPrivate, &theirDH)
@@ -472,4 +481,113 @@ func (r *Ratchet) Decrypt(ciphertext []byte) ([]byte, error) {
 	r.ratchet = true
 
 	return msg, nil
+}
+
+func dup(key *[32]byte) []byte {
+	if key == nil {
+		return nil
+	}
+
+	ret := make([]byte, 32)
+	copy(ret, key[:])
+	return ret
+}
+
+func (r *Ratchet) Marshal(now time.Time, lifetime time.Duration) *disk.RatchetState {
+	s := &disk.RatchetState{
+		RootKey:            dup(&r.rootKey),
+		SendHeaderKey:      dup(&r.sendHeaderKey),
+		RecvHeaderKey:      dup(&r.recvHeaderKey),
+		NextSendHeaderKey:  dup(&r.nextSendHeaderKey),
+		NextRecvHeaderKey:  dup(&r.nextRecvHeaderKey),
+		SendChainKey:       dup(&r.sendChainKey),
+		RecvChainKey:       dup(&r.recvChainKey),
+		SendRatchetPrivate: dup(&r.sendRatchetPrivate),
+		RecvRatchetPublic:  dup(&r.recvRatchetPublic),
+		SendCount:          proto.Uint32(r.sendCount),
+		RecvCount:          proto.Uint32(r.recvCount),
+		PrevSendCount:      proto.Uint32(r.prevSendCount),
+		Ratchet:            proto.Bool(r.ratchet),
+		Private0:           dup(r.kxPrivate0),
+		Private1:           dup(r.kxPrivate1),
+	}
+
+	for headerKey, messageKeys := range r.saved {
+		keys := make([]*disk.RatchetState_SavedKeys_MessageKey, 0, len(messageKeys))
+		for messageNum, savedKey := range messageKeys {
+			if now.Sub(savedKey.timestamp) > lifetime {
+				continue
+			}
+			keys = append(keys, &disk.RatchetState_SavedKeys_MessageKey{
+				Num:          proto.Uint32(messageNum),
+				Key:          dup(&savedKey.key),
+				CreationTime: proto.Int64(savedKey.timestamp.Unix()),
+			})
+		}
+		s.SavedKeys = append(s.SavedKeys, &disk.RatchetState_SavedKeys{
+			HeaderKey:   dup(&headerKey),
+			MessageKeys: keys,
+		})
+	}
+
+	return s
+}
+
+func unmarshalKey(dst *[32]byte, src []byte) bool {
+	if len(src) != 32 {
+		return false
+	}
+	copy(dst[:], src)
+	return true
+}
+
+var badSerialisedKeyLengthErr = errors.New("ratchet: bad serialised key length")
+
+func (r *Ratchet) Unmarshal(s *disk.RatchetState) error {
+	if !unmarshalKey(&r.rootKey, s.RootKey) ||
+		!unmarshalKey(&r.sendHeaderKey, s.SendHeaderKey) ||
+		!unmarshalKey(&r.recvHeaderKey, s.RecvHeaderKey) ||
+		!unmarshalKey(&r.nextSendHeaderKey, s.NextSendHeaderKey) ||
+		!unmarshalKey(&r.nextRecvHeaderKey, s.NextRecvHeaderKey) ||
+		!unmarshalKey(&r.sendChainKey, s.SendChainKey) ||
+		!unmarshalKey(&r.recvChainKey, s.RecvChainKey) ||
+		!unmarshalKey(&r.sendRatchetPrivate, s.SendRatchetPrivate) ||
+		!unmarshalKey(&r.recvRatchetPublic, s.RecvRatchetPublic) {
+		return badSerialisedKeyLengthErr
+	}
+
+	r.sendCount = *s.SendCount
+	r.recvCount = *s.RecvCount
+	r.prevSendCount = *s.PrevSendCount
+	r.ratchet = *s.Ratchet
+
+	if len(s.Private0) > 0 {
+		if !unmarshalKey(r.kxPrivate0, s.Private0) ||
+			!unmarshalKey(r.kxPrivate1, s.Private1) {
+			return badSerialisedKeyLengthErr
+		}
+	} else {
+		r.kxPrivate0 = nil
+		r.kxPrivate1 = nil
+	}
+
+	for _, saved := range s.SavedKeys {
+		var headerKey [32]byte
+		if !unmarshalKey(&headerKey, saved.HeaderKey) {
+			return badSerialisedKeyLengthErr
+		}
+		messageKeys := make(map[uint32]savedKey)
+		for _, messageKey := range saved.MessageKeys {
+			var savedKey savedKey
+			if !unmarshalKey(&savedKey.key, messageKey.Key) {
+				return badSerialisedKeyLengthErr
+			}
+			savedKey.timestamp = time.Unix(messageKey.GetCreationTime(), 0)
+			messageKeys[messageKey.GetNum()] = savedKey
+		}
+
+		r.saved[headerKey] = messageKeys
+	}
+
+	return nil
 }

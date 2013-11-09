@@ -49,10 +49,13 @@ message Contact {
 	optional string their_server = 8;
 	optional bytes their_pub = 9;
 	optional bytes their_identity_public = 10;
+
 	optional bytes last_private = 11;
 	optional bytes current_private = 12;
 	optional bytes their_last_public = 13;
 	optional bytes their_current_public = 14;
+
+	optional RatchetState ratchet = 20;
 
 	message PreviousTag {
 		required bytes tag = 1;
@@ -61,6 +64,36 @@ message Contact {
 	repeated PreviousTag previous_tags = 17;
 
 	optional bool is_pending = 15 [ default = false ];
+}
+
+message RatchetState {
+	required bytes root_key = 1;
+	required bytes send_header_key = 2;
+	required bytes recv_header_key = 3;
+	required bytes next_send_header_key = 4;
+	required bytes next_recv_header_key = 5;
+	required bytes send_chain_key = 6;
+	required bytes recv_chain_key = 7;
+	required bytes send_ratchet_private = 8;
+	required bytes recv_ratchet_public = 9;
+	required uint32 send_count = 10;
+	required uint32 recv_count = 11;
+	required uint32 prev_send_count = 12;
+	required bool ratchet = 13;
+
+	optional bytes private0 = 14;
+	optional bytes private1 = 15;
+
+	message SavedKeys {
+		required bytes header_key = 1;
+		message MessageKey {
+			required uint32 num = 1;
+			required bytes key = 2;
+			required int64 creation_time = 3;
+		}
+		repeated MessageKey message_keys = 2;
+	}
+	repeated SavedKeys saved_keys = 16;
 }
 
 message Inbox {

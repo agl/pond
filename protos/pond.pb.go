@@ -660,7 +660,7 @@ type Message struct {
 	Time             *int64                `protobuf:"varint,2,req,name=time" json:"time,omitempty"`
 	Body             []byte                `protobuf:"bytes,3,req,name=body" json:"body,omitempty"`
 	BodyEncoding     *Message_Encoding     `protobuf:"varint,4,opt,name=body_encoding,enum=protos.Message_Encoding" json:"body_encoding,omitempty"`
-	MyNextDh         []byte                `protobuf:"bytes,5,req,name=my_next_dh" json:"my_next_dh,omitempty"`
+	MyNextDh         []byte                `protobuf:"bytes,5,opt,name=my_next_dh" json:"my_next_dh,omitempty"`
 	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
 	DetachedFiles    []*Message_Detachment `protobuf:"bytes,8,rep,name=detached_files" json:"detached_files,omitempty"`

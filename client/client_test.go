@@ -31,6 +31,8 @@ const clientLogToStderr = false
 // constant can be tweaked to enable logging to stderr.
 const debugDeadlock = false
 
+const parallel = true
+
 // logActions causes all GUI events to be written to the test log.
 const logActions = false
 
@@ -336,7 +338,9 @@ func (tc *TestClient) ReloadWithMeetingPlace(mp panda.MeetingPlace) {
 }
 
 func TestOpenClose(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
@@ -346,7 +350,9 @@ func TestOpenClose(t *testing.T) {
 }
 
 func TestAccountCreation(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -480,7 +486,17 @@ func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestSer
 }
 
 func TestKeyExchange(t *testing.T) {
-	t.Parallel()
+	testKeyExchange(t, false)
+}
+
+func TestKeyExchangeCrossVersion(t *testing.T) {
+	testKeyExchange(t, true)
+}
+
+func testKeyExchange(t *testing.T, crossVersion bool) {
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -493,6 +509,8 @@ func TestKeyExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client1.Close()
+
+	client1.simulateOldClient = crossVersion
 
 	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
@@ -617,8 +635,8 @@ WaitForAck:
 
 func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
 	ackChan := make(chan bool)
-	client.fetchNowChan <- ackChan
 	initialInboxLen := len(client.inbox)
+	client.fetchNowChan <- ackChan
 
 WaitForAck:
 	for {
@@ -641,7 +659,17 @@ WaitForAck:
 }
 
 func TestMessageExchange(t *testing.T) {
-	t.Parallel()
+	testMessageExchange(t, false)
+}
+
+func TestMessageExchangeCrossVersion(t *testing.T) {
+	testMessageExchange(t, true)
+}
+
+func testMessageExchange(t *testing.T, crossVersion bool) {
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -654,6 +682,7 @@ func TestMessageExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client1.Close()
+	client1.simulateOldClient = crossVersion
 
 	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
@@ -664,9 +693,11 @@ func TestMessageExchange(t *testing.T) {
 	proceedToPaired(t, client1, client2, server)
 
 	var initialCurrentDH [32]byte
-	for _, contact := range client1.contacts {
-		if contact.name == "client2" {
-			copy(initialCurrentDH[:], contact.currentDHPrivate[:])
+	if crossVersion {
+		for _, contact := range client1.contacts {
+			if contact.name == "client2" {
+				copy(initialCurrentDH[:], contact.currentDHPrivate[:])
+			}
 		}
 	}
 
@@ -691,18 +722,22 @@ func TestMessageExchange(t *testing.T) {
 		}
 	}
 
-	// Ensure that the DH secrets are advancing.
-	for _, contact := range client1.contacts {
-		if contact.name == "client2" {
-			if bytes.Equal(initialCurrentDH[:], contact.currentDHPrivate[:]) {
-				t.Fatalf("DH secrets aren't advancing!")
+	if crossVersion {
+		// Ensure that the DH secrets are advancing.
+		for _, contact := range client1.contacts {
+			if contact.name == "client2" {
+				if bytes.Equal(initialCurrentDH[:], contact.currentDHPrivate[:]) {
+					t.Fatalf("DH secrets aren't advancing!")
+				}
 			}
 		}
 	}
 }
 
 func TestACKs(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -768,7 +803,9 @@ WaitForAck:
 }
 
 func TestHalfPairedMessageExchange(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -845,7 +882,9 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 }
 
 func TestDraft(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -974,7 +1013,9 @@ func TestDraft(t *testing.T) {
 }
 
 func TestDraftDiscard(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1005,7 +1046,9 @@ func TestDraftDiscard(t *testing.T) {
 }
 
 func testDetached(t *testing.T, upload bool) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1154,7 +1197,9 @@ func TestUploadDownload(t *testing.T) {
 }
 
 func TestLogOverflow(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1226,7 +1271,9 @@ func TestServerAnnounce(t *testing.T) {
 }
 
 func TestRevoke(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1406,7 +1453,9 @@ func startPANDAKeyExchange(t *testing.T, client *TestClient, server *TestServer,
 }
 
 func TestPANDA(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1473,7 +1522,9 @@ func TestPANDA(t *testing.T) {
 }
 
 func TestReadingOldStateFiles(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1497,7 +1548,9 @@ func TestReadingOldStateFiles(t *testing.T) {
 func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 	// Test that a message is acked by sending a reply. If reloadDraft is
 	// true then the message is reloaded as draft before sending.
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1612,7 +1665,9 @@ func TestCliId(t *testing.T) {
 
 func TestSendToPendingContact(t *testing.T) {
 	// Test that it's not possible to send a message to a pending contact.
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1648,7 +1703,9 @@ func TestSendToPendingContact(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	// Test that deleting contacts works.
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1724,7 +1781,9 @@ func TestDelete(t *testing.T) {
 }
 
 func TestExpireMessage(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1846,7 +1905,9 @@ func TestExpireMessage(t *testing.T) {
 }
 
 func TestRetainMessage(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1969,7 +2030,9 @@ func TestRetainMessage(t *testing.T) {
 }
 
 func TestOutboxDeletion(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {

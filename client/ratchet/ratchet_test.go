@@ -5,10 +5,16 @@ import (
 	"crypto/rand"
 	"io"
 	"testing"
+	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
 	pond "github.com/agl/pond/protos"
 )
+
+func nowFunc() time.Time {
+	var t time.Time
+	return t
+}
 
 func pairedRatchet() (a, b *Ratchet) {
 	var privA, pubA, privB, pubB [32]byte
@@ -25,6 +31,8 @@ func pairedRatchet() (a, b *Ratchet) {
 	io.ReadFull(rand.Reader, bSigningPublic[:])
 
 	a, b = New(rand.Reader), New(rand.Reader)
+	a.Now = nowFunc
+	b.Now = nowFunc
 	a.MyIdentityPrivate = &privA
 	b.MyIdentityPrivate = &privB
 	a.TheirIdentityPublic = &pubB
@@ -87,6 +95,22 @@ const (
 	delay
 )
 
+func reinitRatchet(t *testing.T, r *Ratchet) *Ratchet {
+	state := r.Marshal(nowFunc(), 1 * time.Hour)
+	newR := New(rand.Reader)
+	newR.Now = nowFunc
+	newR.MyIdentityPrivate = r.MyIdentityPrivate
+	newR.TheirIdentityPublic = r.TheirIdentityPublic
+	newR.MySigningPublic = r.MySigningPublic
+	newR.TheirSigningPublic = r.TheirSigningPublic
+	if err := newR.Unmarshal(state); err != nil {
+		t.Fatalf("Failed to unmarshal: %s", err)
+	}
+
+	return newR
+
+}
+
 func testScript(t *testing.T, script []scriptAction) {
 	type delayedMessage struct {
 		msg       []byte
@@ -143,6 +167,9 @@ func testScript(t *testing.T, script []scriptAction) {
 				t.Fatalf("#%d: bad message: got %x, not %x", i, result, delayed.msg)
 			}
 		}
+
+		a = reinitRatchet(t, a)
+		b = reinitRatchet(t, b)
 	}
 }
 
