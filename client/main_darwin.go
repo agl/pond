@@ -14,7 +14,7 @@ func main() {
 
 	home := os.Getenv("HOME")
 	if len(home) == 0 {
-		fmt.Fprintf(os.Stderr, "$HOME not set. Please either export $HOME or use --state-file to set the location of the state file explicitly.\n")
+		fmt.Fprintf(os.Stderr, "$HOME not set. Please export $HOME to set the directory for the state file.\n")
 		os.Exit(1)
 	}
 	stateFile := filepath.Join(home, ".pond")
