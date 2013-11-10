@@ -24,7 +24,7 @@ func main() {
 	}
 
 	ui := NewGTKUI()
-	client := NewClient(stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+	client := NewGUIClient(stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
 	client.dev = dev
 	client.Start()
 	ui.Run()

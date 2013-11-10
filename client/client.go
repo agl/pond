@@ -559,6 +559,8 @@ func formatTime(t time.Time) string {
 	return t.Format(time.RFC1123)
 }
 
+var errInterrupted = errors.New("cli: interrupt signal")
+
 func (c *client) loadUI() error {
 	c.ui.initUI()
 

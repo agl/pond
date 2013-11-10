@@ -1,8 +1,9 @@
+// +build !darwin
+
 package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,8 +17,6 @@ import (
 	"github.com/agl/pond/client/system"
 	"github.com/agl/pond/panda"
 )
-
-var errInterrupted = errors.New("cli: interrupt signal")
 
 type cliClient struct {
 	client
