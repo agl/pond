@@ -11,7 +11,7 @@ title: Pond
 
 <p>So Pond is not email. Pond is forward secure, asynchronous messaging for the discerning. Pond messages are asynchronous, but are not a record; they expire automatically a week after they are received. Pond seeks to prevent leaking traffic information against everyone except a global passive attacker.</p>
 
-<p><b>Dear God, please don't use Pond for anything real yet. I've hammered out nearly 20K lines of code that have never been reviewed. There are no binaries here for a good reason. Unless you're looking to experiment you should go use something that <a href="http://gnupg.org/">actually works</a>.</b></p>
+<p><b>Dear God, please don't use Pond for anything real yet. I've hammered out nearly 20K lines of code that have never been reviewed. Unless you're looking to experiment you should go use something that <a href="http://gnupg.org/">actually works</a>.</b></p>
 
 <p>Please email any feedback to <tt>agl at imperialviolet dot org</tt> or else use GitHub's tools.</p>
 
@@ -26,6 +26,20 @@ title: Pond
 
 <p>&nbsp;</p>
 
+<h4>Installation</h4>
+
+<p>One can either build from source or use the prebuilt binaries. For building from source, see the section below.</p>
+
+<p>The following binaries are all 64-bit and are distributed in signed, OpenPGP form. You can obtain my key with <tt>gpg --recv-key C92172384F387DBAED4D420165EB9636F02C5704</tt> or from <a href="https://www.imperialviolet.org/key.asc">https://www.imperialviolet.org/key.asc</a>.</p>
+
+<table>
+  <tr><th>Distribution</th><th>Binary</th><th>Notes<th></tr>
+
+  <tr><td>Ubuntu 13.10</td><td><a href="binary/ubuntu/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
+  <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
+  <tr><td>Fedora 19</td><td><a href="binary/fedora/pond.gpg">pond.gpg</a></td><td><tt>sudo yum install trousers gtkspell3</tt></td></tr>
+  <tr><td>OS X 10.9</td><td><a href="binary/osx/Pond.tar.gpg">Pond.tar.gpg</a></td><td>WARNING: no support for erasure storage yet</td></tr>
+</table>
 
 <h4>Building</h4>
 
@@ -33,9 +47,7 @@ title: Pond
 
 <p>You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
 
-<h5>Ubuntu 13.04</h5>
-
-<p>Ubuntu only has Go 1.0, but that's sufficient (although future commits may accidently break compatibility because I develop with 1.1).</p>
+<h5>Ubuntu 13.10</h5>
 
 <pre>sudo apt-get install golang git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers tor mercurial
 cd
@@ -44,6 +56,10 @@ export GOPATH=$HOME/gopkg
 go get github.com/agl/pond/client
 go install github.com/agl/pond/client
 $GOPATH/bin/client</pre>
+
+<h5>Debian</h5>
+
+<p>Same as Ubuntu, above, but on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL.</p>
 
 <h5>Fedora 19</h5>
 
@@ -59,7 +75,7 @@ cd
 export PATH=$PATH:$HOME/go/bin
 mkdir gopkg
 export GOPATH=$HOME/gopkg
-go get -tags fedora github.com/agl/pond/client
+go get github.com/agl/pond/client
 go install github.com/agl/pond/client</pre>
 
 <h5>Arch</h5>
@@ -86,7 +102,7 @@ go install github.com/agl/pond/client</pre>
 
   export PKG_CONFIG_PATH=/opt/X11/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 
-  go get -tags fedora github.com/agl/pond/client
+  go get github.com/agl/pond/client
   go install github.com/agl/pond/client
   // now `client` should be in your path
 </pre>
