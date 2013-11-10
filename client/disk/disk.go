@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -121,7 +120,6 @@ func (sf *StateFile) Create(pw string) error {
 		if _, err := io.ReadFull(sf.Rand, sf.mask[:]); err != nil {
 			return err
 		}
-		fmt.Printf("ERASURE: %x\n", sf.mask)
 		if err := sf.Erasure.Write(&sf.key, &sf.mask); err != nil {
 			return err
 		}
@@ -194,10 +192,8 @@ func (sf *StateFile) Read(pw string) (*State, error) {
 
 		mask, err := sf.Erasure.Read(&sf.key)
 		if err != nil {
-			fmt.Printf("ERASURE ERROR: %s\n", err)
 			return nil, err
 		}
-		fmt.Printf("ERASURE: %x\n", mask)
 		copy(sf.mask[:], mask[:])
 	}
 
