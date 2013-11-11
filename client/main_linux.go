@@ -12,9 +12,11 @@ import (
 var stateFile *string = flag.String("state-file", "", "File in which to save persistent state")
 
 func main() {
-	dev := os.Getenv("POND") == "dev"
-	runtime.GOMAXPROCS(4)
+	devFlag := flag.Bool("dev", false, "Is this a development environment?")
 	flag.Parse()
+
+	dev := os.Getenv("POND") == "dev" || *devFlag
+	runtime.GOMAXPROCS(4)
 
 	if len(*stateFile) == 0 && dev {
 		*stateFile = "state"
