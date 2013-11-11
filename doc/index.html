@@ -43,9 +43,7 @@ title: Pond
 
 <h4>Building</h4>
 
-<p>These are very simple build instructions that will get Pond running from source. There are no binaries because that would suggest that it's reasonable for non-experts to be playing with Pond and that's not currently the case.</p>
-
-<p>You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
+<p>These are very simple build instructions that will get Pond running from source. You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
 
 <h5>Ubuntu 13.10</h5>
 
@@ -107,6 +105,6 @@ go install github.com/agl/pond/client</pre>
   // now `client` should be in your path
 </pre>
 
-<p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point.</p>
+<p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
 
 <p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
