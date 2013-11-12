@@ -2060,6 +2060,10 @@ Manual keying (not generally recommended) involves exchanging key material with 
 
 		name = click.entries["name"]
 
+		if len(name) == 0 {
+			continue
+		}
+
 		nameIsUnique := true
 		for _, contact := range c.contacts {
 			if contact.name == name {
