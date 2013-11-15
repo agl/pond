@@ -114,6 +114,10 @@ cat > Pond.app/Contents/Info.plist << EOF
     <string>Pond</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>pond.icns</string>
 </dict>
 </plist>
 EOF
+
+cp pond.icns $resources
