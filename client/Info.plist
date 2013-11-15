@@ -20,8 +20,8 @@
     <string>????</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
-    <!--<key>CFBundleIconFile</key>
-    <string>pond.icns</string>-->
+    <key>CFBundleIconFile</key>
+    <string>pond.icns</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright Pond developers 2013</string>
     <key>CFBundleGetInfoString</key>
