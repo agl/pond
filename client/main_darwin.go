@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+
+	"github.com/agl/pond/client/system"
 )
 
 func main() {
@@ -21,6 +24,16 @@ func main() {
 
 	if dev {
 		stateFile = "state"
+	}
+
+	exePath := system.GetExecutablePath()
+	if strings.HasSuffix(exePath, "Pond") {
+		exeDir := filepath.Dir(exePath)
+		os.Setenv("GDK_PIXBUF_MODULE_FILE", filepath.Join(exeDir, "../Resources/gdk-pixbuf/loaders.cache"))
+		os.Setenv("GDK_PIXBUF_MODULEDIR", filepath.Join(exeDir, "../F"))
+		os.Setenv("PANGO_SYSCONFDIR", filepath.Join(exeDir, "../Resources/etc"))
+		os.Setenv("PANGO_LIBDIR", filepath.Join(exeDir, "../Resources/lib"))
+		os.Chdir(exeDir)
 	}
 
 	ui := NewGTKUI()

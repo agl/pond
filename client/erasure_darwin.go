@@ -6,5 +6,5 @@ import (
 
 func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) error {
 	// No NVRAM support on OS X yet.
-	return nil
+	return stateFile.Create(pw)
 }
