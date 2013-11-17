@@ -37,8 +37,8 @@ cp -a $(dirname $pango_lib) $resources
 
 sed -i -e 's![^ ]*/\([^/ ]*\) !\1 !' $(find $resources -name pango.modules)
 
-mkdir -p $resources/gdk-pixbuf
-cat > $resources/gdk-pixbuf/loaders.cache << EOF
+mkdir -p $resources/lib/gdk-pixbuf-2.0/2.10.0
+cat > $resources/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache << EOF
 "../F/libpixbufloader-png.so"
 "png" 5 "gdk-pixbuf" "The PNG image format" "LGPL"
 "image/png" ""

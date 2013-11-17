@@ -7,15 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
-
-	"github.com/agl/pond/client/system"
 )
 
 func main() {
 	devFlag := flag.Bool("dev", false, "Is this a development environment?")
 	stateFile := flag.String("state-file", "", "File in which to save persistent state")
 	flag.Parse()
+
+	runtime.LockOSThread()
 
 	dev := os.Getenv("POND") == "dev" || *devFlag
 	runtime.GOMAXPROCS(4)
@@ -31,16 +30,6 @@ func main() {
 			os.Exit(1)
 		}
 		*stateFile = filepath.Join(home, ".pond")
-	}
-
-	exePath := system.GetExecutablePath()
-	if strings.HasSuffix(exePath, "Pond") {
-		exeDir := filepath.Dir(exePath)
-		os.Setenv("GDK_PIXBUF_MODULE_FILE", filepath.Join(exeDir, "../Resources/gdk-pixbuf/loaders.cache"))
-		os.Setenv("GDK_PIXBUF_MODULEDIR", filepath.Join(exeDir, "../F"))
-		os.Setenv("PANGO_SYSCONFDIR", filepath.Join(exeDir, "../Resources/etc"))
-		os.Setenv("PANGO_LIBDIR", filepath.Join(exeDir, "../Resources/lib"))
-		os.Chdir(exeDir)
 	}
 
 	ui := NewGTKUI()
