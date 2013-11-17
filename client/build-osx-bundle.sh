@@ -4,9 +4,19 @@ frameworks=Pond.app/Contents/F
 resources=Pond.app/Contents/Resources
 mkdir -p $frameworks
 mkdir $resources
-binary=Pond.app/Contents/MacOS/Pond
+macos=Pond.app/Contents/MacOS
+binary=$macos/Pond.bin
+wrapper=$macos/Pond
 cellar=/usr/local/Cellar
+
 cp -av client $binary
+cat > $wrapper << EOF
+#!/bin/bash
+
+cd \$(dirname \$0)
+exec ./Pond.bin
+EOF
+chmod a+x $wrapper
 
 rewrite_library() {
   for lib in $(otool -L $1 | grep '^\t/usr/local' | sed -e 's/^[^\/]*//' -e 's/ .*//'); do
