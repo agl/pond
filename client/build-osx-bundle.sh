@@ -66,6 +66,11 @@ for dir in $(find $cellar -name locale -type d); do
   cp -a $dir/* $resources/share/locale
 done
 
+(
+  cd $resources/share/locale
+  find . -type d -maxdepth 1 | grep -v '^\./en' | xargs rm -Rf
+)
+
 mkdir -p $resources/share/enchant
 cp -a $cellar/enchant/1.6.0/share/enchant/* $resources/share/enchant
 mkdir -p $resources/lib/enchant
@@ -90,8 +95,22 @@ cat > $resources/etc/gtk-3.0/settings.ini << EOF
 gtk-theme-name=Adwaita
 EOF
 
-cp -a ~/.themes/Adwaita $resources/share/themes
+cp -a ~/Adwaita $resources/share/themes
 
+cat >> $resources/share/themes/Adwaita/gtk-3.0/gtk.css << EOF
+
+@binding-set AppleClipboard {
+  bind "<Meta>V" { "paste-clipboard" ( ) };
+  bind "<Meta>X" { "cut-clipboard" ( ) };
+  bind "<Meta>C" { "copy-clipboard" ( ) };
+};
+GtkTextView {
+  gtk-key-bindings: AppleClipboard;
+}
+GtkEntry {
+  gtk-key-bindings: AppleClipboard;
+}
+EOF
 
 for lib in $(ls -1 $frameworks); do
   ../pathrewrite/pathrewrite $frameworks/$lib
