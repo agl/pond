@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -528,14 +527,7 @@ func (c *guiClient) mainUI() {
 	}
 
 	for id, contact := range c.contacts {
-		subline := ""
-		if contact.isPending {
-			subline = "pending"
-		}
-		if len(contact.pandaResult) > 0 {
-			subline = "failed"
-		}
-		c.contactsUI.Add(id, contact.name, subline, indicatorNone)
+		c.contactsUI.Add(id, contact.name, contact.subline(), indicatorNone)
 	}
 
 	c.inboxUI = &listUI{
@@ -1105,6 +1097,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		panic("failed to find message in inbox")
 	}
 	isServerAnnounce := msg.from == 0
+	isPending := msg.message == nil
 	if msg.message != nil && !msg.read {
 		msg.read = true
 		i := indicatorYellow
@@ -1116,30 +1109,15 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		c.save()
 	}
 
+	fromString, sentTimeText, eraseTimeText, msgText := msg.Strings()
+
 	var contact *Contact
-	var fromString string
-	if isServerAnnounce {
-		fromString = "<Home Server>"
-	} else {
+	if !isServerAnnounce {
 		contact = c.contacts[msg.from]
+	}
+	if len(fromString) == 0 && contact != nil {
 		fromString = contact.name
 	}
-	isPending := msg.message == nil
-	var msgText, sentTimeText string
-	if isPending {
-		msgText = "(cannot display message as key exchange is still pending)"
-		sentTimeText = "(unknown)"
-	} else {
-		sentTimeText = time.Unix(*msg.message.Time, 0).Format(time.RFC1123)
-		msgText = "(cannot display message as encoding is not supported)"
-		if msg.message.BodyEncoding != nil {
-			switch *msg.message.BodyEncoding {
-			case pond.Message_RAW:
-				msgText = string(msg.message.Body)
-			}
-		}
-	}
-	eraseTimeText := msg.receivedTime.Add(messageLifetime).Format(time.RFC1123)
 
 	left := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
@@ -2520,36 +2498,6 @@ SharedSecretEvent:
 	return c.showContact(contact.id)
 }
 
-// usageString returns a description of the amount of space taken up by a body
-// with the given contents and a bool indicating overflow.
-func usageString(draft *Draft) (string, bool) {
-	var replyToId *uint64
-	if draft.inReplyTo != 0 {
-		replyToId = proto.Uint64(1)
-	}
-	var dhPub [32]byte
-
-	msg := &pond.Message{
-		Id:               proto.Uint64(0),
-		Time:             proto.Int64(1 << 62),
-		Body:             []byte(draft.body),
-		BodyEncoding:     pond.Message_RAW.Enum(),
-		InReplyTo:        replyToId,
-		MyNextDh:         dhPub[:],
-		Files:            draft.attachments,
-		DetachedFiles:    draft.detachments,
-		SupportedVersion: proto.Int32(protoVersion),
-	}
-
-	serialized, err := proto.Marshal(msg)
-	if err != nil {
-		panic("error while serialising candidate Message: " + err.Error())
-	}
-
-	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
-	return s, len(serialized) > pond.MaxSerializedMessage
-}
-
 func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
 	var labelName string
 	var labelColor uint32
@@ -2694,7 +2642,7 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 }
 
 func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
-	usageMessage, over := usageString(draft)
+	usageMessage, over := draft.usageString()
 	c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
 	color := uint32(colorBlack)
 	if over {
@@ -2774,7 +2722,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		c.drafts[draft.id] = draft
 	}
 
-	initialUsageMessage, overSize := usageString(draft)
+	initialUsageMessage, overSize := draft.usageString()
 	validContactSelected := len(preSelected) > 0
 
 	lhs := VBox{
@@ -2945,26 +2893,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 
 		if open, ok := event.(OpenResult); ok && open.ok && open.arg == nil {
 			// Opening a file for an attachment.
-			contents, size, err := func(path string) (contents []byte, size int64, err error) {
-				file, err := os.Open(path)
-				if err != nil {
-					return
-				}
-				defer file.Close()
-
-				fi, err := file.Stat()
-				if err != nil {
-					return
-				}
-				if fi.Size() < pond.MaxSerializedMessage-500 {
-					contents, err = ioutil.ReadAll(file)
-					size = -1
-				} else {
-					size = fi.Size()
-				}
-				return
-			}(open.path)
-
+			contents, size, err := openAttachment(open.path)
 			base := filepath.Base(open.path)
 			id := c.randId()
 
@@ -3013,7 +2942,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			} else {
 				label = fmt.Sprintf("%s (%d bytes)", base, len(contents))
 				a := &pond.Message_Attachment{
-					Filename: proto.String(filepath.Base(open.path)),
+					Filename: proto.String(base),
 					Contents: contents,
 				}
 				attachments[id] = len(draft.attachments)
@@ -3187,9 +3116,10 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		}
 
 		id := c.randId()
+		created := c.Now()
 		err := c.send(to, &pond.Message{
 			Id:               proto.Uint64(id),
-			Time:             proto.Int64(c.Now().Unix()),
+			Time:             proto.Int64(created.Unix()),
 			Body:             []byte(body),
 			BodyEncoding:     pond.Message_RAW.Enum(),
 			InReplyTo:        replyToId,
@@ -3204,6 +3134,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			c.log.Errorf("Error sending message: %s", err)
 			continue
 		}
+		c.outboxUI.Add(id, to.name, created.Format(shortTimeFormat), indicatorRed)
 		if inReplyTo != nil {
 			inReplyTo.acked = true
 			c.inboxUI.SetIndicator(inReplyTo.id, indicatorNone)

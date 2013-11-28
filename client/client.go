@@ -64,6 +64,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"sync"
@@ -355,6 +356,30 @@ type InboxMessage struct {
 	decryptions map[uint64]*pendingDecryption
 }
 
+func (msg *InboxMessage) Strings() (from, sentTime, eraseTime, body string) {
+	isServerAnnounce := msg.from == 0
+
+	if isServerAnnounce {
+		from = "<Home Server>"
+	}
+	isPending := msg.message == nil
+	if isPending {
+		body = "(cannot display message as key exchange is still pending)"
+		sentTime = "(unknown)"
+	} else {
+		sentTime = time.Unix(*msg.message.Time, 0).Format(time.RFC1123)
+		body = "(cannot display message as encoding is not supported)"
+		if msg.message.BodyEncoding != nil {
+			switch *msg.message.BodyEncoding {
+			case pond.Message_RAW:
+				body = string(msg.message.Body)
+			}
+		}
+	}
+	eraseTime = msg.receivedTime.Add(messageLifetime).Format(time.RFC1123)
+	return
+}
+
 // NewMessage is sent from the network goroutine to the client goroutine and
 // contains messages fetched from the home server.
 type NewMessage struct {
@@ -418,6 +443,8 @@ type Contact struct {
 
 	// New ratchet support.
 	ratchet *ratchet.Ratchet
+
+	cliId cliId
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -466,6 +493,36 @@ type Draft struct {
 	cliId cliId
 
 	pendingDetachments map[uint64]*pendingDetachment
+}
+
+// usageString returns a description of the amount of space taken up by a body
+// with the given contents and a bool indicating overflow.
+func (draft *Draft) usageString() (string, bool) {
+	var replyToId *uint64
+	if draft.inReplyTo != 0 {
+		replyToId = proto.Uint64(1)
+	}
+	var dhPub [32]byte
+
+	msg := &pond.Message{
+		Id:               proto.Uint64(0),
+		Time:             proto.Int64(1 << 62),
+		Body:             []byte(draft.body),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		InReplyTo:        replyToId,
+		MyNextDh:         dhPub[:],
+		Files:            draft.attachments,
+		DetachedFiles:    draft.detachments,
+		SupportedVersion: proto.Int32(protoVersion),
+	}
+
+	serialized, err := proto.Marshal(msg)
+	if err != nil {
+		panic("error while serialising candidate Message: " + err.Error())
+	}
+
+	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
+	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
 type queuedMessage struct {
@@ -686,6 +743,15 @@ func (c *client) loadUI() error {
 	c.ui.mainUI()
 
 	return nil
+}
+
+func (contact *Contact) subline() string {
+	if contact.isPending {
+		return "pending"
+	} else if len(contact.pandaResult) > 0 {
+		return "failed"
+	}
+	return ""
 }
 
 func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient bool) error {
@@ -929,4 +995,24 @@ type pandaUpdate struct {
 	err        error
 	result     []byte
 	serialised []byte
+}
+
+func openAttachment(path string) (contents []byte, size int64, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	fi, err := file.Stat()
+	if err != nil {
+		return
+	}
+	if fi.Size() < pond.MaxSerializedMessage-500 {
+		contents, err = ioutil.ReadAll(file)
+		size = -1
+	} else {
+		size = fi.Size()
+	}
+	return
 }

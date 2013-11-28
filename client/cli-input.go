@@ -5,7 +5,10 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,15 +22,27 @@ type cliCommand struct {
 }
 
 var cliCommands = []cliCommand{
+	{"acknowledge", ackCommand{}, "Acknowledge the inbox message"},
 	{"compose", composeCommand{}, "Compose a new message"},
+	{"delete", deleteCommand{}, "Delete a message"},
+	{"edit", editCommand{}, "Edit the draft message"},
 	{"help", helpCommand{}, "List known commands"},
+	{"send", sendCommand{}, "Send the current draft"},
+	{"show", showCommand{}, "Show the current object"},
+	{"attach", attachCommand{}, "Attach a file to the current draft"},
 }
 
-type composeCommand struct {
-	To string "contact"
-}
-
+type ackCommand struct{}
+type composeCommand struct{}
+type deleteCommand struct{}
+type editCommand struct{}
 type helpCommand struct{}
+type sendCommand struct{}
+type showCommand struct{}
+
+type attachCommand struct {
+	Filename string `cli:"filename"`
+}
 
 type tagCommand struct {
 	tag string
@@ -43,21 +58,20 @@ func numPositionalFields(t reflect.Type) int {
 }
 
 func parseCommandForCompletion(commands []cliCommand, line string) (before, prefix string, isCommand, ok bool) {
-	if len(line) == 0 || line[0] != '/' {
+	if len(line) == 0 {
 		return
 	}
 
 	spacePos := strings.IndexRune(line, ' ')
 	if spacePos == -1 {
-		// We're completing a command name.
-		before = line[:1]
-		prefix = line[1:]
+		// We're completing a command or tag name.
+		prefix = line
 		isCommand = true
 		ok = true
 		return
 	}
 
-	command := line[1:spacePos]
+	command := line[:spacePos]
 	var prototype interface{}
 
 	for _, cmd := range commands {
@@ -114,7 +128,7 @@ func parseCommandForCompletion(commands []cliCommand, line string) (before, pref
 		return
 	}
 	f := t.Field(fieldNum)
-	if f.Tag != "contact" {
+	if f.Tag.Get("cli") != "filename" {
 		return
 	}
 	ok = true
@@ -145,15 +159,11 @@ func setOption(v reflect.Value, t reflect.Type, option string) bool {
 }
 
 func parseCommand(commands []cliCommand, line []byte) (interface{}, string) {
-	if len(line) == 0 || line[0] != '/' {
-		panic("not a command")
-	}
-
 	spacePos := bytes.IndexByte(line, ' ')
 	if spacePos == -1 {
 		spacePos = len(line)
 	}
-	command := string(line[1:spacePos])
+	command := string(line[:spacePos])
 	var prototype interface{}
 
 	for _, cmd := range commands {
@@ -163,6 +173,10 @@ func parseCommand(commands []cliCommand, line []byte) (interface{}, string) {
 		}
 	}
 	if prototype == nil {
+		if len(command) == 0 || len(command) == 3 {
+			// Very likely a tag or a blank line.
+			return tagCommand{string(line)}, ""
+		}
 		return nil, "Unknown command: " + command
 	}
 
@@ -237,8 +251,6 @@ func parseCommand(commands []cliCommand, line []byte) (interface{}, string) {
 
 type cliInput struct {
 	term                 *terminal.Terminal
-	contactComplete      *priorityList
-	contactNames         []string
 	commands             *priorityList
 	lastKeyWasCompletion bool
 }
@@ -253,11 +265,6 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 	i.commands = new(priorityList)
 	for _, command := range cliCommands {
 		i.commands.Insert(command.name)
-	}
-
-	i.contactComplete = new(priorityList)
-	for _, contactName := range i.contactNames {
-		i.contactComplete.Insert(contactName)
 	}
 
 	autoCompleteCallback := func(line string, pos int, key rune) (string, int, bool) {
@@ -279,29 +286,21 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 			commandsChan <- cliTerminalLine{err: err, ackChan: ackChan}
 			continue
 		}
-		if len(line) == 0 {
+		cmd, errStr := parseCommand(cliCommands, []byte(line))
+		if len(errStr) != 0 {
+			fmt.Fprintf(i.term, "%s %s\n", termWarnPrefix, errStr)
 			ackChan = nil
 			continue
 		}
-		if line[0] == '/' {
-			cmd, err := parseCommand(cliCommands, []byte(line))
-			if len(err) != 0 {
-				fmt.Fprintf(i.term, "%s %s\n", termWarnPrefix, err)
-				ackChan = nil
-				continue
-			}
-			if _, ok := cmd.(helpCommand); ok {
-				i.showHelp()
-				ackChan = nil
-				continue
-			}
-			if cmd != nil {
-				commandsChan <- cliTerminalLine{command: cmd, ackChan: ackChan}
-			}
+		if _, ok := cmd.(helpCommand); ok {
+			i.showHelp()
+			ackChan = nil
 			continue
 		}
-
-		commandsChan <- cliTerminalLine{command: tagCommand{string(line)}, ackChan: ackChan}
+		if cmd != nil {
+			commandsChan <- cliTerminalLine{command: cmd, ackChan: ackChan}
+		}
+		continue
 	}
 }
 
@@ -336,6 +335,59 @@ func (input *cliInput) showHelp() {
 	}
 }
 
+func pathComplete(path string) (completedPath string, isComplete, ok bool) {
+	if strings.HasPrefix(path, "~/") {
+		if home := os.Getenv("HOME"); len(home) > 0 {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	path = filepath.Clean(path)
+	dirName := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	dir, err := os.Open(dirName)
+	if err != nil {
+		return "", false, false
+	}
+	defer dir.Close()
+
+	ents, err := dir.Readdirnames(-1)
+	if err != nil {
+		return "", false, false
+	}
+
+	var candidates []string
+	for _, ent := range ents {
+		if strings.HasPrefix(ent, base) {
+			candidates = append(candidates, ent)
+		}
+	}
+	switch len(candidates) {
+	case 0:
+		return "", false, false
+	case 1:
+		completedPath = filepath.Join(dirName, candidates[0])
+		fi, err := os.Stat(completedPath)
+		if err == nil && fi.IsDir() {
+			return completedPath + "/", false, true
+		}
+		return completedPath, true, true
+	}
+
+	sort.Strings(candidates)
+	first := []rune(candidates[0])
+	last := []rune(candidates[len(candidates)-1])
+
+	for i, r := range first {
+		if last[i] != r {
+			return filepath.Join(dirName, string(first[:i])), false, true
+		}
+	}
+
+	// Duplicate entries in the directory?
+	return filepath.Join(dirName, candidates[0]), true, true
+}
+
 func (i *cliInput) AutoComplete(line string, pos int, key rune) (string, int, bool) {
 	const keyTab = 9
 
@@ -348,40 +400,37 @@ func (i *cliInput) AutoComplete(line string, pos int, key rune) (string, int, bo
 	if i.lastKeyWasCompletion {
 		// The user hit tab right after a completion, so we got
 		// it wrong.
-		if len(prefix) > 0 && prefix[0] == '/' {
-			if strings.IndexRune(prefix, ' ') == len(prefix)-1 {
-				// We just completed a command.
-				newCommand := i.commands.Next()
-				newLine := "/" + string(newCommand) + " " + line[pos:]
-				return newLine, len(newCommand) + 2, true
-			} else if prefix[len(prefix)-1] == ' ' {
-				// We just completed a uid in a command.
-				newUser := i.contactComplete.Next()
-				spacePos := strings.LastIndex(prefix[:len(prefix)-1], " ")
-
-				newLine := prefix[:spacePos] + " " + string(newUser) + " " + line[pos:]
-				return newLine, spacePos + 1 + len(newUser) + 1, true
-			}
+		if strings.IndexRune(prefix, ' ') == len(prefix)-1 {
+			// We just completed a command.
+			newCommand := i.commands.Next()
+			newLine := string(newCommand) + " " + line[pos:]
+			return newLine, len(newCommand) + 1, true
 		}
 	} else {
-		if len(prefix) > 0 && prefix[0] == '/' {
+		if len(prefix) > 0 {
 			a, b, isCommand, ok := parseCommandForCompletion(cliCommands, prefix)
 			if !ok {
 				return "", -1, false
 			}
 			var newValue string
+			var spacer string
 			if isCommand {
 				newValue, ok = i.commands.Find(b)
+				spacer = " "
 			} else {
-				newValue, ok = i.contactComplete.Find(b)
+				var complete bool
+				newValue, complete, ok = pathComplete(b)
+				if complete {
+					spacer = " "
+				}
 			}
 			if !ok {
 				return "", -1, false
 			}
 
-			newLine := string(a) + newValue + " " + line[pos:]
+			newLine := string(a) + newValue + spacer + line[pos:]
 			i.lastKeyWasCompletion = true
-			return newLine, len(a) + len(newValue) + 1, true
+			return newLine, len(a) + len(newValue) + len(spacer), true
 		}
 	}
 

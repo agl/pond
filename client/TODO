@@ -1,9 +1,10 @@
 Short-term TODOs:
 
-Allow for immediate deletion.
-Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
+
+Update ratchet
+Use single point for both signing and ECDH.
 
 
 Minor, non-urgent:

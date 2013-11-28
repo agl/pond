@@ -36,7 +36,7 @@ const (
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
-func (c *guiClient) sendAck(msg *InboxMessage) {
+func (c *client) sendAck(msg *InboxMessage) {
 	to := c.contacts[msg.from]
 
 	var myNextDH []byte
@@ -62,7 +62,7 @@ func (c *guiClient) sendAck(msg *InboxMessage) {
 }
 
 // send encrypts |message| and enqueues it for transmission.
-func (c *guiClient) send(to *Contact, message *pond.Message) error {
+func (c *client) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -138,9 +138,6 @@ func (c *guiClient) send(to *Contact, message *pond.Message) error {
 		created: time.Unix(*message.Time, 0),
 	}
 	c.enqueue(out)
-	if len(message.Body) > 0 {
-		c.outboxUI.Add(*message.Id, to.name, out.created.Format(shortTimeFormat), indicatorRed)
-	}
 	c.outbox = append(c.outbox, out)
 
 	return nil
