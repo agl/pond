@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"syscall"
 
 	"github.com/agl/go-gtk/gdk"
@@ -209,13 +208,13 @@ func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 	w.SetSensitive(!b.insensitive)
 
 	if color := b.Foreground(); color != 0 {
-		w.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(color))
+		w.OverrideColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(color))
 	}
 	if color := b.Background(); color != 0 {
-		w.ModifyBG(gtk.GTK_STATE_NORMAL, toColor(color))
+		w.OverrideBackgroundColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(color))
 	}
 	if len(b.font) != 0 {
-		w.ModifyFontEasy(b.font)
+		w.OverrideFont(b.font)
 	}
 	if b.hExpand {
 		w.SetHExpand(true)
@@ -573,7 +572,7 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.window.ShowAll()
 	case SetBackground:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
-		widget.ModifyBG(gtk.GTK_STATE_NORMAL, toColor(action.color))
+		widget.OverrideBackgroundColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(action.color))
 	case Sensitive:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.SetSensitive(action.sensitive)
@@ -635,7 +634,7 @@ func (ui *GTKUI) handle(action interface{}) {
 		dialog.Destroy()
 	case SetForeground:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
-		widget.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(action.foreground))
+		widget.OverrideColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(action.foreground))
 	case SetProgress:
 		widget := gtk.GtkProgressBar{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetFraction(action.fraction)
@@ -665,6 +664,6 @@ func (ui *GTKUI) handle(action interface{}) {
 	}
 }
 
-func toColor(color uint32) *gdk.GdkColor {
-	return gdk.Color("#" + strconv.FormatUint(uint64(color), 16))
+func toColor(color uint32) *gdk.GdkRGBA {
+	return gdk.RGBA(1, 2, 3, 4)
 }
