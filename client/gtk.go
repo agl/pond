@@ -664,6 +664,10 @@ func (ui *GTKUI) handle(action interface{}) {
 	}
 }
 
+func colComponent(component uint32) float64 {
+	return float64(component & 0xff) / 255
+}
+
 func toColor(color uint32) *gdk.GdkRGBA {
-	return gdk.RGBA(1, 2, 3, 4)
+	return gdk.RGBA(colComponent(color), colComponent(color >> 8), colComponent(color >> 16), 1)
 }
