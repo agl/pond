@@ -77,8 +77,18 @@ go get github.com/agl/pond/client
 go install github.com/agl/pond/client</pre>
 
 <h5>Arch</h5>
+<pre>
+yaourt -S trousers mercurial tor go
+cd
+mkdir gopkg
+export GOPATH=$HOME/gopkg
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client
+systemctl start tor.service
+$GOPATH/bin/client
+</pre>
 
-<p>I don't have tested instructions for Arch, but one thing that will go wrong is that Arch's Trousers build enables a GTK-2 based UI. Pond uses GTK-3 and one cannot link GTK 2 and 3 into the same binary. You'll need the <a href="https://aur.archlinux.org/packages.php?ID=14330">trousers package from AUR</a> and you'll need to edit the <tt>PKGBUILD</tt> so that the <tt>configure</tt> command has <tt>--with-gui=openssl</tt>, not <tt>--with-gui=gtk</tt>. Then <tt>makepkg</tt> and <tt>pacman -U</tt> as normal. In order to actually use the TPM, you'll need to <tt>systemctl start tcsd</tt>.</p>
+<p>In order to actually use the TPM, you'll need to <tt>systemctl start tcsd</tt>.</p>
 
 <h5>OS X</h5>
 
