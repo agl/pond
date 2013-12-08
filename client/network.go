@@ -147,7 +147,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 // message before signing in order to give context to the signature.
 var revocationSignaturePrefix = []byte("revocation\x00")
 
-func (c *guiClient) revoke(to *Contact) {
+func (c *client) revoke(to *Contact) *queuedMessage {
 	to.revoked = true
 	revocation := c.groupPriv.GenerateRevocation(to.groupKey)
 	now := time.Now()
@@ -206,9 +206,8 @@ func (c *guiClient) revoke(to *Contact) {
 		created:    time.Now(),
 	}
 	c.enqueue(out)
-	c.outboxUI.Add(out.id, "Revocation", out.created.Format(shortTimeFormat), indicatorRed)
-	c.outboxUI.SetInsensitive(out.id)
 	c.outbox = append(c.outbox, out)
+	return out
 }
 
 func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
@@ -1108,6 +1107,9 @@ func (c *client) transferDetachmentConn(sendStatus func(s string, done, total in
 	}
 
 	if err := replyToError(reply); err != nil {
+		if reply.GetStatus() == pond.Reply_OVER_QUOTA {
+			return fmt.Errorf("server reports that the upload would exceed allowed quota"), true
+		}
 		return fmt.Errorf("request failed: %s", err), false
 	}
 

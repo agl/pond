@@ -1,3 +1,5 @@
+// +build !nogui
+
 package main
 
 import (
@@ -18,6 +20,8 @@ import (
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
+
+const haveGUI = true
 
 const (
 	colorDefault               = 0
@@ -684,21 +688,6 @@ func (c *guiClient) updateInboxBackgroundColor(msg *InboxMessage) {
 	}
 
 	c.inboxUI.SetBackground(msg.id, colorGray)
-}
-
-func (qm *queuedMessage) indicator() Indicator {
-	switch {
-	case !qm.acked.IsZero():
-		return indicatorGreen
-	case !qm.sent.IsZero():
-		if qm.revocation {
-			// Revocations are never acked so they are green as
-			// soon as they are sent.
-			return indicatorGreen
-		}
-		return indicatorYellow
-	}
-	return indicatorRed
 }
 
 func (c *guiClient) errorUI(errorText string, fatal bool) {
@@ -1915,7 +1904,9 @@ func (c *guiClient) deleteContact(contact *Contact) {
 	}
 	c.outbox = newOutbox
 
-	c.revoke(contact)
+	revocationMessage := c.revoke(contact)
+	c.outboxUI.Add(revocationMessage.id, "Revocation", revocationMessage.created.Format(shortTimeFormat), indicatorRed)
+	c.outboxUI.SetInsensitive(revocationMessage.id)
 
 	if contact.pandaShutdownChan != nil {
 		close(contact.pandaShutdownChan)
@@ -2245,6 +2236,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 	}
 
 	// Unseal all pending messages from this new contact.
+	contact.isPending = false
 	c.unsealPendingMessages(contact)
 	c.contactsUI.SetSubline(contact.id, "")
 	c.save()
@@ -3155,8 +3147,6 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 // unsealPendingMessages is run once a key exchange with a contact has
 // completed and unseals any previously unreadable messages from that contact.
 func (c *guiClient) unsealPendingMessages(contact *Contact) {
-	contact.isPending = false
-
 	for _, msg := range c.inbox {
 		if msg.message == nil && msg.from == contact.id {
 			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
@@ -3171,44 +3161,123 @@ func (c *guiClient) unsealPendingMessages(contact *Contact) {
 	}
 }
 
-// processPANDAUpdate runs on the main client goroutine and handles messages
-// from a runPANDA goroutine.
-func (c *guiClient) processPANDAUpdate(update pandaUpdate) {
-	contact, ok := c.contacts[update.id]
-	if !ok {
-		return
-	}
+func (c *guiClient) processPANDAUpdateUI(update pandaUpdate) {
+	contact := c.contacts[update.id]
 
 	switch {
 	case update.err != nil:
-		contact.pandaResult = update.err.Error()
-		contact.pandaKeyExchange = nil
-		contact.pandaShutdownChan = nil
-		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
 		c.contactsUI.SetSubline(contact.id, "failed")
 	case update.serialised != nil:
-		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
-			return
-		}
-		contact.pandaKeyExchange = update.serialised
 	case update.result != nil:
-		contact.pandaKeyExchange = nil
-		contact.pandaShutdownChan = nil
+		c.contactsUI.SetSubline(contact.id, "")
+		c.unsealPendingMessages(contact)
+		c.gui.Actions() <- UIState{uiStatePANDAComplete}
+		c.gui.Signal()
+	}
+}
 
-		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient); err != nil {
-			contact.pandaResult = err.Error()
-			c.contactsUI.SetSubline(contact.id, "failed")
-			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
-		} else {
-			c.unsealPendingMessages(contact)
-			c.contactsUI.SetSubline(contact.id, "")
-			c.log.Printf("Key exchange with %s complete", contact.name)
-			c.gui.Actions() <- UIState{uiStatePANDAComplete}
-			c.gui.Signal()
-		}
+func (c *guiClient) logUI() interface{} {
+	ui := VBox{
+		children: []Widget{
+			EventBox{
+				widgetBase: widgetBase{background: colorHeaderBackground},
+				child: VBox{
+					children: []Widget{
+						HBox{
+							widgetBase: widgetBase{padding: 10},
+							children: []Widget{
+								Label{
+									widgetBase: widgetBase{font: "Arial 16", padding: 10, foreground: colorHeaderForeground},
+									text:       "ACTIVITY LOG",
+								},
+							},
+						},
+					},
+				},
+			},
+			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			HBox{
+				children: []Widget{
+					VBox{
+						widgetBase: widgetBase{
+							expand: true,
+							fill:   true,
+						},
+					},
+					VBox{
+						widgetBase: widgetBase{
+							padding: 10,
+						},
+						children: []Widget{
+							Button{
+								widgetBase: widgetBase{
+									name:    "transact",
+									padding: 2,
+								},
+								text: "Transact Now",
+							},
+						},
+					},
+				},
+			},
+			Scrolled{
+				horizontal: true,
+				widgetBase: widgetBase{expand: true, fill: true},
+				child: TextView{
+					widgetBase: widgetBase{expand: true, fill: true, name: "log"},
+					editable:   true,
+				},
+			},
+		},
 	}
 
-	c.save()
+	log := ""
+	lastProcessedIndex := -1
+
+	c.log.Lock()
+	logEpoch := c.log.epoch
+	for _, entry := range c.log.entries {
+		log += fmt.Sprintf("%s: %s\n", entry.Format(logTimeFormat), entry.s)
+		lastProcessedIndex++
+	}
+	c.log.Unlock()
+
+	c.gui.Actions() <- SetChild{name: "right", child: ui}
+	c.gui.Actions() <- SetTextView{name: "log", text: log}
+	c.gui.Actions() <- UIState{uiStateLog}
+	c.gui.Signal()
+
+	for {
+		event, wanted := c.nextEvent(0)
+		if wanted {
+			return event
+		}
+
+		if click, ok := event.(Click); ok && click.name == "transact" {
+			select {
+			case c.fetchNowChan <- nil:
+			default:
+			}
+			continue
+		}
+
+		c.log.Lock()
+		if logEpoch != c.log.epoch {
+			logEpoch = c.log.epoch
+			lastProcessedIndex = -1
+			log = ""
+		}
+		for _, entry := range c.log.entries[lastProcessedIndex+1:] {
+			log += fmt.Sprintf("%s: %s\n", entry.Format(logTimeFormat), entry.s)
+			lastProcessedIndex++
+		}
+		c.log.Unlock()
+
+		c.gui.Actions() <- SetTextView{name: "log", text: log}
+		c.gui.Signal()
+	}
+
+	return nil
 }
 
 func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool) *guiClient {

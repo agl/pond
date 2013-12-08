@@ -23,13 +23,20 @@ type cliCommand struct {
 
 var cliCommands = []cliCommand{
 	{"acknowledge", ackCommand{}, "Acknowledge the inbox message"},
+	{"attach", attachCommand{}, "Attach a file to the current draft"},
 	{"compose", composeCommand{}, "Compose a new message"},
 	{"delete", deleteCommand{}, "Delete a message"},
+	{"download", downloadCommand{}, "Download a numbered detachment to disk"},
 	{"edit", editCommand{}, "Edit the draft message"},
 	{"help", helpCommand{}, "List known commands"},
+	{"log", logCommand{}, "Show recent log entries"},
+	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact"},
+	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message"},
+	{"reply", replyCommand{}, "Reply to the current message"},
+	{"save", saveCommand{}, "Save a numbered attachment to disk"},
 	{"send", sendCommand{}, "Send the current draft"},
 	{"show", showCommand{}, "Show the current object"},
-	{"attach", attachCommand{}, "Attach a file to the current draft"},
+	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft"},
 }
 
 type ackCommand struct{}
@@ -37,11 +44,35 @@ type composeCommand struct{}
 type deleteCommand struct{}
 type editCommand struct{}
 type helpCommand struct{}
+type logCommand struct{}
+type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
 
+type newContactCommand struct {
+	Name string
+}
+
 type attachCommand struct {
 	Filename string `cli:"filename"`
+}
+
+type uploadCommand struct {
+	Filename string `cli:"filename"`
+}
+
+type saveCommand struct {
+	Number   string
+	Filename string `cli:"filename"`
+}
+
+type downloadCommand struct {
+	Number   string
+	Filename string `cli:"filename"`
+}
+
+type removeCommand struct {
+	Number string
 }
 
 type tagCommand struct {
@@ -336,6 +367,14 @@ func (input *cliInput) showHelp() {
 }
 
 func pathComplete(path string) (completedPath string, isComplete, ok bool) {
+	quoted := len(path) > 0 && path[0] == '"'
+	if quoted {
+		path = path[1:]
+		if len(path) > 0 && path[len(path)-1] == '"' {
+			path = path[:len(path)-1]
+		}
+	}
+
 	if strings.HasPrefix(path, "~/") {
 		if home := os.Getenv("HOME"); len(home) > 0 {
 			path = filepath.Join(home, path[2:])
@@ -367,9 +406,16 @@ func pathComplete(path string) (completedPath string, isComplete, ok bool) {
 		return "", false, false
 	case 1:
 		completedPath = filepath.Join(dirName, candidates[0])
+		quoted = quoted || strings.IndexRune(candidates[0], ' ') != -1
 		fi, err := os.Stat(completedPath)
+		if quoted {
+			completedPath = "\"" + completedPath
+		}
 		if err == nil && fi.IsDir() {
 			return completedPath + "/", false, true
+		}
+		if quoted {
+			completedPath += "\""
 		}
 		return completedPath, true, true
 	}
@@ -380,7 +426,14 @@ func pathComplete(path string) (completedPath string, isComplete, ok bool) {
 
 	for i, r := range first {
 		if last[i] != r {
-			return filepath.Join(dirName, string(first[:i])), false, true
+			completedPath = filepath.Join(dirName, string(first[:i]))
+			if quoted {
+				completedPath = "\"" + completedPath
+			}
+			return completedPath, false, true
+		}
+		if last[i] == ' ' {
+			quoted = true
 		}
 	}
 

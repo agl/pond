@@ -59,6 +59,7 @@ package main
 // the tests can fully synchonise and avoid non-determinism.
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -243,6 +244,9 @@ type UI interface {
 	// processMessageSent is called when an outbox message has been
 	// delivered to the destination server.
 	processMessageDelivered(msg *queuedMessage)
+	// processPANDAUpdateUI is called on each PANDA update to update the
+	// UI and unseal pending messages.
+	processPANDAUpdateUI(update pandaUpdate)
 	// mainUI starts the main interface.
 	mainUI()
 }
@@ -544,6 +548,21 @@ type queuedMessage struct {
 	// identity this message for the duration of the session. It's not
 	// saved to disk.
 	cliId cliId
+}
+
+func (qm *queuedMessage) indicator() Indicator {
+	switch {
+	case !qm.acked.IsZero():
+		return indicatorGreen
+	case !qm.sent.IsZero():
+		if qm.revocation {
+			// Revocations are never acked so they are green as
+			// soon as they are sent.
+			return indicatorGreen
+		}
+		return indicatorYellow
+	}
+	return indicatorRed
 }
 
 // outboxToDraft converts an outbox message back to a Draft. This is used when
@@ -988,6 +1007,43 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, 
 		err:    err,
 		result: result,
 	}
+}
+
+// processPANDAUpdate runs on the main client goroutine and handles messages
+// from a runPANDA goroutine.
+func (c *client) processPANDAUpdate(update pandaUpdate) {
+	contact, ok := c.contacts[update.id]
+	if !ok {
+		return
+	}
+
+	switch {
+	case update.err != nil:
+		contact.pandaResult = update.err.Error()
+		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
+		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
+	case update.serialised != nil:
+		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
+			return
+		}
+		contact.pandaKeyExchange = update.serialised
+	case update.result != nil:
+		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
+		contact.isPending = false
+
+		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient); err != nil {
+			contact.pandaResult = err.Error()
+			update.err = err
+			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
+		} else {
+			c.log.Printf("Key exchange with %s complete", contact.name)
+		}
+	}
+
+	c.ui.processPANDAUpdateUI(update)
+	c.save()
 }
 
 type pandaUpdate struct {

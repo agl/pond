@@ -33,7 +33,7 @@ func main() {
 		*stateFile = filepath.Join(configDir, "pond")
 	}
 
-	if len(os.Getenv("PONDCLI")) > 0 {
+	if !haveGUI || len(os.Getenv("PONDCLI")) > 0 {
 		client := NewCLIClient(*stateFile, rand.Reader, false /* testing */, true /* autoFetch */)
 		client.dev = dev
 		client.Start()

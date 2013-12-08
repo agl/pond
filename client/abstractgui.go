@@ -1,3 +1,5 @@
+// +build !nogui
+
 package main
 
 const uiActionsQueueLen = 256

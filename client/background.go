@@ -209,9 +209,10 @@ func saveEncrypted(rand io.Reader, c chan interface{}, out io.Writer, id uint64,
 			lastUpdate = now
 			select {
 			case c <- DetachmentProgress{
-				id:    id,
-				done:  fileSize,
-				total: uint64(size),
+				id:     id,
+				done:   fileSize,
+				total:  uint64(size),
+				status: "encrypting",
 			}:
 				break
 			default:
@@ -301,9 +302,10 @@ BlockLoop:
 			lastUpdate = now
 			select {
 			case c <- DetachmentProgress{
-				id:    id,
-				done:  bytesIn,
-				total: *detachment.PaddedSize,
+				id:     id,
+				done:   bytesIn,
+				total:  *detachment.PaddedSize,
+				status: "decrypting",
 			}:
 				break
 			default:
