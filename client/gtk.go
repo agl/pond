@@ -669,5 +669,5 @@ func colComponent(component uint32) float64 {
 }
 
 func toColor(color uint32) *gdk.GdkRGBA {
-	return gdk.RGBA(colComponent(color), colComponent(color>>8), colComponent(color>>16), 1)
+	return gdk.RGBA(colComponent(color>>16), colComponent(color>>8), colComponent(color), 1)
 }
