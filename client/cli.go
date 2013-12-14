@@ -905,6 +905,9 @@ Handle:
 			c.Printf("%s Cannot show the current object\n", termWarnPrefix)
 		}
 
+	case statusCommand:
+		c.showState()
+
 	case attachCommand:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {

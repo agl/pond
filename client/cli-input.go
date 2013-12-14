@@ -37,6 +37,7 @@ var cliCommands = []cliCommand{
 	{"save", saveCommand{}, "Save a numbered attachment to disk"},
 	{"send", sendCommand{}, "Send the current draft"},
 	{"show", showCommand{}, "Show the current object"},
+	{"status", statusCommand{}, "Show overall Pond status"},
 	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft"},
 }
 
@@ -50,6 +51,7 @@ type quit struct{}
 type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
+type statusCommand struct{}
 
 type newContactCommand struct {
 	Name string
