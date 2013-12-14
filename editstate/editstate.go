@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	crypto_rand "crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -24,7 +25,10 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-var stateFileName *string = flag.String("state-file", "state", "File in which to save persistent state")
+var (
+	stateFileName *string = flag.String("state-file", "state", "File in which to save persistent state")
+	skipChecks    *bool   = flag.Bool("skip-checks", false, "If true, system sanity checks are skipped")
+)
 
 func main() {
 	flag.Parse()
@@ -113,7 +117,8 @@ func serialiseValue(out io.Writer, name string, v reflect.Value, t reflect.Type,
 		var msg pond.Message
 		if err := proto.Unmarshal(v.Bytes(), &msg); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to unmarshal Message: %s\n", err)
-			panic("deserialisation error")
+			fmt.Fprintf(out, "BAD MESSAGE: \"%x\"\n", v.Bytes())
+			return
 		}
 		v = reflect.ValueOf(msg)
 		serialiseValue(out, name, v, v.Type(), context, level, entities)
@@ -405,9 +410,11 @@ func parseValue(v reflect.Value, t reflect.StructField, context string, in *Toke
 }
 
 func do() bool {
-	if err := system.IsSafe(); err != nil {
-		fmt.Fprintf(os.Stderr, "System checks failed: %s\n", err)
-		return false
+	if !*skipChecks {
+		if err := system.IsSafe(); err != nil {
+			fmt.Fprintf(os.Stderr, "System checks failed: %s\n", err)
+			return false
+		}
 	}
 
 	editor := os.Getenv("EDITOR")
@@ -416,37 +423,29 @@ func do() bool {
 		return false
 	}
 
-	stateFile, err := os.Open(*stateFileName)
+	stateFile := &disk.StateFile{
+		Path: *stateFileName,
+		Rand: crypto_rand.Reader,
+		Log: func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		},
+	}
+
+	stateLock, err := stateFile.Lock(false /* don't create */)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open state file: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Cannot open state file: %s\n", err)
 		return false
 	}
-	defer stateFile.Close()
-
-	stateLock, ok := disk.LockStateFile(stateFile)
-	if !ok {
+	if stateLock == nil {
 		fmt.Fprintf(os.Stderr, "Cannot obtain lock on state file\n")
 		return false
 	}
 	defer stateLock.Close()
 
-	encrypted, err := ioutil.ReadAll(stateFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read state file: %s\n", err)
-		return false
-	}
-
-	salt, ok := disk.GetSCryptSaltFromState(encrypted)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "State file is too short to be valid\n")
-		return false
-	}
-
 	var state *disk.State
-	var key [32]byte
-
+	var passphrase string
 	for {
-		state, err = disk.LoadState(encrypted, &key)
+		state, err = stateFile.Read(passphrase)
 		if err == nil {
 			break
 		}
@@ -456,14 +455,13 @@ func do() bool {
 		}
 
 		fmt.Fprintf(os.Stderr, "Passphrase: ")
-		password, err := terminal.ReadPassword(0)
+		passphraseBytes, err := terminal.ReadPassword(0)
 		fmt.Fprintf(os.Stderr, "\n")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to read password\n")
 			return false
 		}
-		keySlice, err := disk.DeriveKey(string(password), &salt)
-		copy(key[:], keySlice)
+		passphrase = string(passphraseBytes)
 	}
 
 	tempDir, err := system.SafeTempDir()
@@ -527,10 +525,10 @@ func do() bool {
 		os.Stdin.Read(buf[:])
 	}
 
-	states := make(chan []byte)
-	done := make(chan bool)
-	go disk.StateWriter(*stateFileName, &key, &salt, states, done)
-	states <- newStateSerialized
+	states := make(chan disk.NewState)
+	done := make(chan struct{})
+	go stateFile.StartWriter(states, done)
+	states <- disk.NewState{newStateSerialized, false}
 	close(states)
 	<-done
 

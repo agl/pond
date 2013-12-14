@@ -1,8 +1,9 @@
+// +build !nogui
+
 package main
 
 import (
 	"fmt"
-	"strconv"
 	"syscall"
 
 	"github.com/agl/go-gtk/gdk"
@@ -12,15 +13,19 @@ import (
 )
 
 type GTKUI struct {
-	window    *gtk.GtkWindow
-	actions   chan interface{}
-	events    chan interface{}
-	pipe      [2]int
-	topWidget gtk.WidgetLike
-	widgets   map[string]gtk.WidgetLike
-	entries   map[string]*gtk.GtkEntry
-	textViews map[string]*gtk.GtkTextView
-	combos    map[string]*gtk.GtkComboBoxText
+	window      *gtk.GtkWindow
+	actions     chan interface{}
+	events      chan interface{}
+	pipe        [2]int
+	topWidget   gtk.WidgetLike
+	widgets     map[string]gtk.WidgetLike
+	entries     map[string]*gtk.GtkEntry
+	textViews   map[string]*gtk.GtkTextView
+	combos      map[string]*gtk.GtkComboBoxText
+	checks      map[string]*gtk.GtkCheckButton
+	radioGroups map[string]int
+	calendars   map[string]*gtk.GtkCalendar
+	spinButtons map[string]*gtk.GtkSpinButton
 }
 
 func NewGTKUI() *GTKUI {
@@ -28,7 +33,7 @@ func NewGTKUI() *GTKUI {
 	window := gtk.Window(gtk.GTK_WINDOW_TOPLEVEL)
 	window.SetPosition(gtk.GTK_WIN_POS_CENTER)
 	window.SetTitle("Pond")
-	window.SetDefaultSize(640, 480)
+	window.SetDefaultSize(1000, 800)
 
 	ui := &GTKUI{
 		window:  window,
@@ -105,10 +110,34 @@ func (ui *GTKUI) updated(name string) {
 	ui.events <- Update{name, contents}
 }
 
+func (ui *GTKUI) updatedEntry(name string) {
+	ui.events <- Update{name, ui.entries[name].GetText()}
+}
+
 func (ui *GTKUI) clicked(name string) {
 	entries := make(map[string]string)
 	textViews := make(map[string]string)
-	combos := make(map[string]string)
+	var combos map[string]string
+	var checks map[string]bool
+	var radios map[string]int
+	var calendars map[string]CalendarDate
+	var spins map[string]int
+
+	if len(ui.combos) > 0 {
+		combos = make(map[string]string)
+	}
+	if len(ui.checks) > 0 {
+		checks = make(map[string]bool)
+	}
+	if len(ui.radioGroups) > 0 {
+		radios = make(map[string]int)
+	}
+	if len(ui.calendars) > 0 {
+		calendars = make(map[string]CalendarDate)
+	}
+	if len(ui.spinButtons) > 0 {
+		spins = make(map[string]int)
+	}
 
 	for ename, entry := range ui.entries {
 		entries[ename] = entry.GetText()
@@ -123,8 +152,21 @@ func (ui *GTKUI) clicked(name string) {
 	for comboName, combo := range ui.combos {
 		combos[comboName] = combo.GetActiveText()
 	}
+	for checkName, check := range ui.checks {
+		checks[checkName] = check.GetActive()
+	}
+	for radioName, val := range ui.radioGroups {
+		radios[radioName] = val
+	}
+	for calName, cal := range ui.calendars {
+		year, month, day := cal.GetDate()
+		calendars[calName] = CalendarDate{year, month, day}
+	}
+	for spinName, spin := range ui.spinButtons {
+		spins[spinName] = spin.GetInt()
+	}
 
-	ui.events <- Click{name, entries, textViews, combos}
+	ui.events <- Click{name, entries, textViews, combos, checks, radios, calendars, spins}
 }
 
 func (ui *GTKUI) newWidget(v Widget) gtk.WidgetLike {
@@ -168,13 +210,13 @@ func configureWidget(w *gtk.GtkWidget, b widgetBase) {
 	w.SetSensitive(!b.insensitive)
 
 	if color := b.Foreground(); color != 0 {
-		w.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(color))
+		w.OverrideColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(color))
 	}
 	if color := b.Background(); color != 0 {
-		w.ModifyBG(gtk.GTK_STATE_NORMAL, toColor(color))
+		w.OverrideBackgroundColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(color))
 	}
 	if len(b.font) != 0 {
-		w.ModifyFontEasy(b.font)
+		w.OverrideFont(b.font)
 	}
 	if b.hExpand {
 		w.SetHExpand(true)
@@ -237,6 +279,9 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		return box
 	case Label:
 		label := gtk.Label(v.text)
+		if len(v.markup) > 0 {
+			label.SetMarkup(v.markup)
+		}
 		label.SetAlignment(v.xAlign, v.yAlign)
 		configureWidget(&label.GtkWidget, v.widgetBase)
 		if v.wrap != 0 {
@@ -259,6 +304,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			entry.Connect("activate", func() {
 				ui.clicked(v.name)
 			})
+			if v.updateOnChange {
+				entry.Connect("changed", func() {
+					ui.updatedEntry(v.name)
+				})
+			}
 		}
 		if v.password {
 			entry.SetVisibility(false)
@@ -271,6 +321,11 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 			button = gtk.ButtonWithLabel(v.text)
 		} else {
 			button = gtk.Button()
+			if len(v.markup) > 0 {
+				label := gtk.Label("")
+				label.SetMarkup(v.markup)
+				button.Add(label)
+			}
 		}
 		if v.image != indicatorNone {
 			image := gtk.ImageFromPixbuf(v.image.Image())
@@ -394,7 +449,65 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		if v.colSpacing > 0 {
 			grid.SetColSpacing(v.colSpacing)
 		}
+		if v.rowHomogeneous {
+			grid.SetRowHomogeneous(true)
+		}
+		if v.colHomogeneous {
+			grid.SetColumnHomogeneous(true)
+		}
 		return grid
+	case RadioGroup:
+		hbox := gtk.Box(gtk.GTK_ORIENTATION_HORIZONTAL, 2)
+		var last *gtk.GtkRadioButton
+		for i, labelText := range v.labels {
+			last = gtk.RadioButtonWithLabelFromWidget(last, labelText)
+			i := i
+			last.Connect("toggled", func() {
+				ui.radioGroups[v.name] = i
+				ui.clicked(v.name)
+			})
+			last.Connect("destroy", func() {
+				delete(ui.radioGroups, v.name)
+			})
+			hbox.PackStart(last, false, true, 2)
+		}
+		return hbox
+	case Calendar:
+		cal := gtk.Calendar()
+		configureWidget(&cal.GtkWidget, v.widgetBase)
+		if len(v.name) > 0 {
+			ui.calendars[v.name] = cal
+			cal.Connect("destroy", func() {
+				delete(ui.calendars, v.name)
+			})
+		}
+		return cal
+	case SpinButton:
+		spin := gtk.SpinButtonWithRange(v.min, v.max, v.step)
+		configureWidget(&spin.GtkWidget, v.widgetBase)
+		if len(v.name) > 0 {
+			ui.spinButtons[v.name] = spin
+			spin.Connect("destroy", func() {
+				delete(ui.spinButtons, v.name)
+			})
+		}
+		return spin
+	case CheckButton:
+		check := gtk.CheckButtonWithLabel(v.text)
+		configureWidget(&check.GtkWidget, v.widgetBase)
+		check.SetActive(v.checked)
+		if len(v.name) > 0 {
+			check.Connect("toggled", func() {
+				ui.clicked(v.name)
+			})
+			check.Connect("destroy", func() {
+				delete(ui.checks, v.name)
+			})
+			ui.checks[v.name] = check
+		}
+
+		return check
+
 	default:
 		panic("unknown widget: " + fmt.Sprintf("%#v", v))
 	}
@@ -417,6 +530,12 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.entries = make(map[string]*gtk.GtkEntry)
 		ui.textViews = make(map[string]*gtk.GtkTextView)
 		ui.combos = make(map[string]*gtk.GtkComboBoxText)
+		ui.radioGroups = make(map[string]int)
+		ui.checks = make(map[string]*gtk.GtkCheckButton)
+		ui.radioGroups = make(map[string]int)
+		ui.calendars = make(map[string]*gtk.GtkCalendar)
+		ui.spinButtons = make(map[string]*gtk.GtkSpinButton)
+
 		if ui.topWidget != nil {
 			ui.window.Remove(ui.topWidget)
 			ui.topWidget = nil
@@ -455,7 +574,7 @@ func (ui *GTKUI) handle(action interface{}) {
 		ui.window.ShowAll()
 	case SetBackground:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
-		widget.ModifyBG(gtk.GTK_STATE_NORMAL, toColor(action.color))
+		widget.OverrideBackgroundColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(action.color))
 	case Sensitive:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.SetSensitive(action.sensitive)
@@ -468,6 +587,9 @@ func (ui *GTKUI) handle(action interface{}) {
 	case SetText:
 		widget := gtk.GtkLabel{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetText(action.text)
+	case SetButtonText:
+		widget := gtk.GtkButton{gtk.GtkBin{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}}
+		widget.SetLabel(action.text)
 	case SetEntry:
 		widget := ui.getWidget(action.name).(gtk.TextInputLike)
 		widget.SetText(action.text)
@@ -488,12 +610,19 @@ func (ui *GTKUI) handle(action interface{}) {
 		delete(ui.widgets, action.name)
 	case FileOpen:
 		fileAction := gtk.GTK_FILE_CHOOSER_ACTION_OPEN
-		but := gtk.GTK_STOCK_OPEN
+		button := gtk.GTK_STOCK_OPEN
 		if action.save {
 			fileAction = gtk.GTK_FILE_CHOOSER_ACTION_SAVE
-			but = gtk.GTK_STOCK_SAVE
+			button = gtk.GTK_STOCK_SAVE
 		}
-		dialog := gtk.FileChooserDialog(action.title, ui.window, fileAction, gtk.GTK_STOCK_CANCEL, int(gtk.GTK_RESPONSE_CANCEL), but, int(gtk.GTK_RESPONSE_ACCEPT))
+		dialog := gtk.FileChooserDialog(action.title, ui.window, fileAction, gtk.GTK_STOCK_CANCEL, int(gtk.GTK_RESPONSE_CANCEL), button, int(gtk.GTK_RESPONSE_ACCEPT))
+		if action.save {
+			if len(action.filename) > 0 {
+				dialog.SetCurrentName(action.filename)
+			} else {
+				panic("save dialog without filename")
+			}
+		}
 		switch gtk.GtkResponseType(dialog.Run()) {
 		case gtk.GTK_RESPONSE_ACCEPT:
 			ui.events <- OpenResult{
@@ -507,7 +636,7 @@ func (ui *GTKUI) handle(action interface{}) {
 		dialog.Destroy()
 	case SetForeground:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
-		widget.ModifyFG(gtk.GTK_STATE_NORMAL, toColor(action.foreground))
+		widget.OverrideColor(gtk.GTK_STATE_FLAG_NORMAL, toColor(action.foreground))
 	case SetProgress:
 		widget := gtk.GtkProgressBar{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetFraction(action.fraction)
@@ -524,6 +653,10 @@ func (ui *GTKUI) handle(action interface{}) {
 			x += elem.width
 		}
 		ui.window.ShowAll()
+	case GridSet:
+		grid := gtk.GtkGrid{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
+		grid.Attach(ui.newWidget(action.widget), action.col, action.row, 1, 1)
+		ui.window.ShowAll()
 
 	case UIError:
 	case UIState:
@@ -533,6 +666,10 @@ func (ui *GTKUI) handle(action interface{}) {
 	}
 }
 
-func toColor(color uint32) *gdk.GdkColor {
-	return gdk.Color("#" + strconv.FormatUint(uint64(color), 16))
+func colComponent(component uint32) float64 {
+	return float64(component&0xff) / 255
+}
+
+func toColor(color uint32) *gdk.GdkRGBA {
+	return gdk.RGBA(colComponent(color>>16), colComponent(color>>8), colComponent(color), 1)
 }

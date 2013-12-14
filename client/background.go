@@ -96,7 +96,6 @@ func (c *client) startUpload(id uint64, inPath string) (cancel func()) {
 		} else {
 			c.backgroundChan <- DetachmentError{id, err}
 		}
-		tmp.Close()
 	}()
 	return func() {
 		killChan <- true
@@ -126,7 +125,6 @@ func (c *client) startDownload(id uint64, outPath string, detachment *pond.Messa
 		} else {
 			c.backgroundChan <- DetachmentError{id, err}
 		}
-		tmp.Close()
 	}()
 	return func() {
 		killChan <- true
@@ -211,9 +209,10 @@ func saveEncrypted(rand io.Reader, c chan interface{}, out io.Writer, id uint64,
 			lastUpdate = now
 			select {
 			case c <- DetachmentProgress{
-				id:    id,
-				done:  fileSize,
-				total: uint64(size),
+				id:     id,
+				done:   fileSize,
+				total:  uint64(size),
+				status: "encrypting",
 			}:
 				break
 			default:
@@ -303,9 +302,10 @@ BlockLoop:
 			lastUpdate = now
 			select {
 			case c <- DetachmentProgress{
-				id:    id,
-				done:  bytesIn,
-				total: *detachment.PaddedSize,
+				id:     id,
+				done:   bytesIn,
+				total:  *detachment.PaddedSize,
+				status: "decrypting",
 			}:
 				break
 			default:

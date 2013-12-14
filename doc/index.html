@@ -1,0 +1,114 @@
+---
+layout: default
+title: Pond
+---
+
+<p>(<i>Note: recent events have lead to these topics being in the news quite often in recent weeks. However, Pond is not a reaction to those events - it was started nearly a year ago.</i>)</p>
+
+<p>For secure, synchronous communication we have OTR and, when run over Tor, this is pretty good. But while we have secure asynchronous messaging in the form of PGP email, it's not forward secure and it gratuitously leaks traffic information. While a desire for forward secure PGP <a href="http://tools.ietf.org/html/draft-brown-pgp-pfs-03">is hardly new</a>, it still hasn't materialised in a widely usable manner.</p>
+
+<p>Additionally, email is used predominately for insecure communications (mailing lists, etc) and is useful because it allows previously unconnected people to communicate as long as a (public) email address is known to one party. But the flip side to this is that volume and spam are driving people to use centralised email services. These provide such huge benefits to the majority of email communication, so it's unlikely that this trend is going to reverse. But, even with PGP, these services are trusted with hugely valuable traffic information if any party uses them.</p>
+
+<p>So Pond is not email. Pond is forward secure, asynchronous messaging for the discerning. Pond messages are asynchronous, but are not a record; they expire automatically a week after they are received. Pond seeks to prevent leaking traffic information against everyone except a global passive attacker.</p>
+
+<p><b>Dear God, please don't use Pond for anything real yet. I've hammered out nearly 20K lines of code that have never been reviewed. Unless you're looking to experiment you should go use something that <a href="http://gnupg.org/">actually works</a>.</b></p>
+
+<p>Please email any feedback to <tt>agl at imperialviolet dot org</tt> or else use GitHub's tools.</p>
+
+<p>&nbsp;</p>
+
+<p>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="user.html">User Guide</a>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="threat.html">Threat Model</a>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="tech.html">Technical Details</a>
+  <a style="border: grey 3px solid; border-radius: 5px; padding: 8px;" href="https://github.com/agl/pond">Source Code</a>
+</p>
+
+<p>&nbsp;</p>
+
+<h4>Installation</h4>
+
+<p>One can either build from source or use the prebuilt binaries. For building from source, see the section below.</p>
+
+<p>The following binaries are all 64-bit and are distributed in signed, OpenPGP form. You can obtain my key with <tt>gpg --recv-key C92172384F387DBAED4D420165EB9636F02C5704</tt> or from <a href="https://www.imperialviolet.org/key.asc">https://www.imperialviolet.org/key.asc</a>.</p>
+
+<table>
+  <tr><th>Distribution</th><th>Binary</th><th>Notes<th></tr>
+
+  <tr><td>Ubuntu 13.10</td><td><a href="binary/ubuntu/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
+  <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
+  <tr><td>Fedora 19</td><td><a href="binary/fedora/pond.gpg">pond.gpg</a></td><td><tt>sudo yum install trousers gtkspell3</tt></td></tr>
+  <tr><td>OS X 10.9</td><td><a href="binary/osx/Pond.tar.gpg">Pond.tar.gpg</a></td><td>WARNING: no support for erasure storage yet</td></tr>
+</table>
+
+<h4>Building</h4>
+
+<p>These are very simple build instructions that will get Pond running from source. You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
+
+<h5>Ubuntu 13.10</h5>
+
+<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell3-3-dev libtspi-dev trousers tor mercurial
+cd
+mkdir gopkg
+export GOPATH=$HOME/gopkg
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client
+$GOPATH/bin/client</pre>
+
+<h5>Debian Wheezy</h5>
+
+<p>Same as Ubuntu, above, but 1) on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL and 2) the gtkspell package is called <tt>libgtkspell-3-dev</tt>. On more recent versions of Debian, the instructions should be exactly the same as Ubuntu.</p>
+
+<h5>Fedora 19</h5>
+
+<p>Fedora's <tt>golang</tt> package appears to be completely broken, so this installs Go from source.</p>
+
+<pre>sudo yum install gtk3-devel gtkspell3-devel gcc trousers-devel git mercurial tor
+sudo systemctl start tor
+cd
+hg clone https://code.google.com/p/go
+cd go/src
+./all.bash
+cd
+export PATH=$PATH:$HOME/go/bin
+mkdir gopkg
+export GOPATH=$HOME/gopkg
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client</pre>
+
+<h5>Arch</h5>
+<pre>
+yaourt -S trousers mercurial tor go
+cd
+mkdir gopkg
+export GOPATH=$HOME/gopkg
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client
+systemctl start tor.service
+$GOPATH/bin/client
+</pre>
+
+<p>In order to actually use the TPM, you'll need to <tt>systemctl start tcsd</tt>.</p>
+
+<h5>OS X</h5>
+
+<p>It's possible to get Pond building on OS X after spending <i>lots</i> of time with homebrew. Something that's known to have worked,</p>
+
+<pre>
+// you'll need an X server running in order to launch Pond unless you
+brew edit gtk+3
+// then add --enable-quartz-backend to the configure arguments
+brew install go gtk+3 gtkspell3
+
+export GOPATH=$HOME/gopkg
+export PATH=$PATH:$GOPATH/bin
+export PKG_CONFIG_PATH=/opt/X11/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+
+go get github.com/agl/pond/client
+go install github.com/agl/pond/client
+// now `client` should be in your path
+</pre>
+
+<p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
+
+<p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>

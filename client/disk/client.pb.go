@@ -14,12 +14,116 @@ var _ = proto.Marshal
 var _ = &json.SyntaxError{}
 var _ = math.Inf
 
+type Header struct {
+	NonceSmearCopies *int32         `protobuf:"varint,1,opt,name=nonce_smear_copies,def=1365" json:"nonce_smear_copies,omitempty"`
+	KdfSalt          []byte         `protobuf:"bytes,2,opt,name=kdf_salt" json:"kdf_salt,omitempty"`
+	Scrypt           *Header_SCrypt `protobuf:"bytes,3,opt,name=scrypt" json:"scrypt,omitempty"`
+	TpmNvram         *Header_TPM    `protobuf:"bytes,4,opt,name=tpm_nvram" json:"tpm_nvram,omitempty"`
+	NoErasureStorage *bool          `protobuf:"varint,5,opt,name=no_erasure_storage" json:"no_erasure_storage,omitempty"`
+	XXX_unrecognized []byte         `json:"-"`
+}
+
+func (this *Header) Reset()         { *this = Header{} }
+func (this *Header) String() string { return proto.CompactTextString(this) }
+func (*Header) ProtoMessage()       {}
+
+const Default_Header_NonceSmearCopies int32 = 1365
+
+func (this *Header) GetNonceSmearCopies() int32 {
+	if this != nil && this.NonceSmearCopies != nil {
+		return *this.NonceSmearCopies
+	}
+	return Default_Header_NonceSmearCopies
+}
+
+func (this *Header) GetKdfSalt() []byte {
+	if this != nil {
+		return this.KdfSalt
+	}
+	return nil
+}
+
+func (this *Header) GetScrypt() *Header_SCrypt {
+	if this != nil {
+		return this.Scrypt
+	}
+	return nil
+}
+
+func (this *Header) GetTpmNvram() *Header_TPM {
+	if this != nil {
+		return this.TpmNvram
+	}
+	return nil
+}
+
+func (this *Header) GetNoErasureStorage() bool {
+	if this != nil && this.NoErasureStorage != nil {
+		return *this.NoErasureStorage
+	}
+	return false
+}
+
+type Header_SCrypt struct {
+	N                *int32 `protobuf:"varint,2,opt,def=32768" json:"N,omitempty"`
+	R                *int32 `protobuf:"varint,3,opt,name=r,def=16" json:"r,omitempty"`
+	P                *int32 `protobuf:"varint,4,opt,name=p,def=1" json:"p,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *Header_SCrypt) Reset()         { *this = Header_SCrypt{} }
+func (this *Header_SCrypt) String() string { return proto.CompactTextString(this) }
+func (*Header_SCrypt) ProtoMessage()       {}
+
+const Default_Header_SCrypt_N int32 = 32768
+const Default_Header_SCrypt_R int32 = 16
+const Default_Header_SCrypt_P int32 = 1
+
+func (this *Header_SCrypt) GetN() int32 {
+	if this != nil && this.N != nil {
+		return *this.N
+	}
+	return Default_Header_SCrypt_N
+}
+
+func (this *Header_SCrypt) GetR() int32 {
+	if this != nil && this.R != nil {
+		return *this.R
+	}
+	return Default_Header_SCrypt_R
+}
+
+func (this *Header_SCrypt) GetP() int32 {
+	if this != nil && this.P != nil {
+		return *this.P
+	}
+	return Default_Header_SCrypt_P
+}
+
+type Header_TPM struct {
+	Index            *uint32 `protobuf:"varint,1,req,name=index" json:"index,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Header_TPM) Reset()         { *this = Header_TPM{} }
+func (this *Header_TPM) String() string { return proto.CompactTextString(this) }
+func (*Header_TPM) ProtoMessage()       {}
+
+func (this *Header_TPM) GetIndex() uint32 {
+	if this != nil && this.Index != nil {
+		return *this.Index
+	}
+	return 0
+}
+
 type Contact struct {
 	Id                  *uint64                `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
 	Name                *string                `protobuf:"bytes,2,req,name=name" json:"name,omitempty"`
 	GroupKey            []byte                 `protobuf:"bytes,3,req,name=group_key" json:"group_key,omitempty"`
 	SupportedVersion    *int32                 `protobuf:"varint,16,opt,name=supported_version" json:"supported_version,omitempty"`
 	KeyExchangeBytes    []byte                 `protobuf:"bytes,4,opt,name=key_exchange_bytes" json:"key_exchange_bytes,omitempty"`
+	PandaKeyExchange    []byte                 `protobuf:"bytes,18,opt,name=panda_key_exchange" json:"panda_key_exchange,omitempty"`
+	PandaError          *string                `protobuf:"bytes,19,opt,name=panda_error" json:"panda_error,omitempty"`
 	TheirGroup          []byte                 `protobuf:"bytes,5,opt,name=their_group" json:"their_group,omitempty"`
 	MyGroupKey          []byte                 `protobuf:"bytes,6,opt,name=my_group_key" json:"my_group_key,omitempty"`
 	Generation          *uint32                `protobuf:"varint,7,opt,name=generation" json:"generation,omitempty"`
@@ -30,6 +134,7 @@ type Contact struct {
 	CurrentPrivate      []byte                 `protobuf:"bytes,12,opt,name=current_private" json:"current_private,omitempty"`
 	TheirLastPublic     []byte                 `protobuf:"bytes,13,opt,name=their_last_public" json:"their_last_public,omitempty"`
 	TheirCurrentPublic  []byte                 `protobuf:"bytes,14,opt,name=their_current_public" json:"their_current_public,omitempty"`
+	Ratchet             *RatchetState          `protobuf:"bytes,20,opt,name=ratchet" json:"ratchet,omitempty"`
 	PreviousTags        []*Contact_PreviousTag `protobuf:"bytes,17,rep,name=previous_tags" json:"previous_tags,omitempty"`
 	IsPending           *bool                  `protobuf:"varint,15,opt,name=is_pending,def=0" json:"is_pending,omitempty"`
 	XXX_unrecognized    []byte                 `json:"-"`
@@ -74,6 +179,20 @@ func (this *Contact) GetKeyExchangeBytes() []byte {
 		return this.KeyExchangeBytes
 	}
 	return nil
+}
+
+func (this *Contact) GetPandaKeyExchange() []byte {
+	if this != nil {
+		return this.PandaKeyExchange
+	}
+	return nil
+}
+
+func (this *Contact) GetPandaError() string {
+	if this != nil && this.PandaError != nil {
+		return *this.PandaError
+	}
+	return ""
 }
 
 func (this *Contact) GetTheirGroup() []byte {
@@ -146,6 +265,13 @@ func (this *Contact) GetTheirCurrentPublic() []byte {
 	return nil
 }
 
+func (this *Contact) GetRatchet() *RatchetState {
+	if this != nil {
+		return this.Ratchet
+	}
+	return nil
+}
+
 func (this *Contact) GetPreviousTags() []*Contact_PreviousTag {
 	if this != nil {
 		return this.PreviousTags
@@ -184,6 +310,198 @@ func (this *Contact_PreviousTag) GetExpired() int64 {
 	return 0
 }
 
+type RatchetState struct {
+	RootKey            []byte                    `protobuf:"bytes,1,req,name=root_key" json:"root_key,omitempty"`
+	SendHeaderKey      []byte                    `protobuf:"bytes,2,req,name=send_header_key" json:"send_header_key,omitempty"`
+	RecvHeaderKey      []byte                    `protobuf:"bytes,3,req,name=recv_header_key" json:"recv_header_key,omitempty"`
+	NextSendHeaderKey  []byte                    `protobuf:"bytes,4,req,name=next_send_header_key" json:"next_send_header_key,omitempty"`
+	NextRecvHeaderKey  []byte                    `protobuf:"bytes,5,req,name=next_recv_header_key" json:"next_recv_header_key,omitempty"`
+	SendChainKey       []byte                    `protobuf:"bytes,6,req,name=send_chain_key" json:"send_chain_key,omitempty"`
+	RecvChainKey       []byte                    `protobuf:"bytes,7,req,name=recv_chain_key" json:"recv_chain_key,omitempty"`
+	SendRatchetPrivate []byte                    `protobuf:"bytes,8,req,name=send_ratchet_private" json:"send_ratchet_private,omitempty"`
+	RecvRatchetPublic  []byte                    `protobuf:"bytes,9,req,name=recv_ratchet_public" json:"recv_ratchet_public,omitempty"`
+	SendCount          *uint32                   `protobuf:"varint,10,req,name=send_count" json:"send_count,omitempty"`
+	RecvCount          *uint32                   `protobuf:"varint,11,req,name=recv_count" json:"recv_count,omitempty"`
+	PrevSendCount      *uint32                   `protobuf:"varint,12,req,name=prev_send_count" json:"prev_send_count,omitempty"`
+	Ratchet            *bool                     `protobuf:"varint,13,req,name=ratchet" json:"ratchet,omitempty"`
+	Private0           []byte                    `protobuf:"bytes,14,opt,name=private0" json:"private0,omitempty"`
+	Private1           []byte                    `protobuf:"bytes,15,opt,name=private1" json:"private1,omitempty"`
+	SavedKeys          []*RatchetState_SavedKeys `protobuf:"bytes,16,rep,name=saved_keys" json:"saved_keys,omitempty"`
+	XXX_unrecognized   []byte                    `json:"-"`
+}
+
+func (this *RatchetState) Reset()         { *this = RatchetState{} }
+func (this *RatchetState) String() string { return proto.CompactTextString(this) }
+func (*RatchetState) ProtoMessage()       {}
+
+func (this *RatchetState) GetRootKey() []byte {
+	if this != nil {
+		return this.RootKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetSendHeaderKey() []byte {
+	if this != nil {
+		return this.SendHeaderKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetRecvHeaderKey() []byte {
+	if this != nil {
+		return this.RecvHeaderKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetNextSendHeaderKey() []byte {
+	if this != nil {
+		return this.NextSendHeaderKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetNextRecvHeaderKey() []byte {
+	if this != nil {
+		return this.NextRecvHeaderKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetSendChainKey() []byte {
+	if this != nil {
+		return this.SendChainKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetRecvChainKey() []byte {
+	if this != nil {
+		return this.RecvChainKey
+	}
+	return nil
+}
+
+func (this *RatchetState) GetSendRatchetPrivate() []byte {
+	if this != nil {
+		return this.SendRatchetPrivate
+	}
+	return nil
+}
+
+func (this *RatchetState) GetRecvRatchetPublic() []byte {
+	if this != nil {
+		return this.RecvRatchetPublic
+	}
+	return nil
+}
+
+func (this *RatchetState) GetSendCount() uint32 {
+	if this != nil && this.SendCount != nil {
+		return *this.SendCount
+	}
+	return 0
+}
+
+func (this *RatchetState) GetRecvCount() uint32 {
+	if this != nil && this.RecvCount != nil {
+		return *this.RecvCount
+	}
+	return 0
+}
+
+func (this *RatchetState) GetPrevSendCount() uint32 {
+	if this != nil && this.PrevSendCount != nil {
+		return *this.PrevSendCount
+	}
+	return 0
+}
+
+func (this *RatchetState) GetRatchet() bool {
+	if this != nil && this.Ratchet != nil {
+		return *this.Ratchet
+	}
+	return false
+}
+
+func (this *RatchetState) GetPrivate0() []byte {
+	if this != nil {
+		return this.Private0
+	}
+	return nil
+}
+
+func (this *RatchetState) GetPrivate1() []byte {
+	if this != nil {
+		return this.Private1
+	}
+	return nil
+}
+
+func (this *RatchetState) GetSavedKeys() []*RatchetState_SavedKeys {
+	if this != nil {
+		return this.SavedKeys
+	}
+	return nil
+}
+
+type RatchetState_SavedKeys struct {
+	HeaderKey        []byte                               `protobuf:"bytes,1,req,name=header_key" json:"header_key,omitempty"`
+	MessageKeys      []*RatchetState_SavedKeys_MessageKey `protobuf:"bytes,2,rep,name=message_keys" json:"message_keys,omitempty"`
+	XXX_unrecognized []byte                               `json:"-"`
+}
+
+func (this *RatchetState_SavedKeys) Reset()         { *this = RatchetState_SavedKeys{} }
+func (this *RatchetState_SavedKeys) String() string { return proto.CompactTextString(this) }
+func (*RatchetState_SavedKeys) ProtoMessage()       {}
+
+func (this *RatchetState_SavedKeys) GetHeaderKey() []byte {
+	if this != nil {
+		return this.HeaderKey
+	}
+	return nil
+}
+
+func (this *RatchetState_SavedKeys) GetMessageKeys() []*RatchetState_SavedKeys_MessageKey {
+	if this != nil {
+		return this.MessageKeys
+	}
+	return nil
+}
+
+type RatchetState_SavedKeys_MessageKey struct {
+	Num              *uint32 `protobuf:"varint,1,req,name=num" json:"num,omitempty"`
+	Key              []byte  `protobuf:"bytes,2,req,name=key" json:"key,omitempty"`
+	CreationTime     *int64  `protobuf:"varint,3,req,name=creation_time" json:"creation_time,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *RatchetState_SavedKeys_MessageKey) Reset()         { *this = RatchetState_SavedKeys_MessageKey{} }
+func (this *RatchetState_SavedKeys_MessageKey) String() string { return proto.CompactTextString(this) }
+func (*RatchetState_SavedKeys_MessageKey) ProtoMessage()       {}
+
+func (this *RatchetState_SavedKeys_MessageKey) GetNum() uint32 {
+	if this != nil && this.Num != nil {
+		return *this.Num
+	}
+	return 0
+}
+
+func (this *RatchetState_SavedKeys_MessageKey) GetKey() []byte {
+	if this != nil {
+		return this.Key
+	}
+	return nil
+}
+
+func (this *RatchetState_SavedKeys_MessageKey) GetCreationTime() int64 {
+	if this != nil && this.CreationTime != nil {
+		return *this.CreationTime
+	}
+	return 0
+}
+
 type Inbox struct {
 	Id               *uint64 `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
 	From             *uint64 `protobuf:"fixed64,2,req,name=from" json:"from,omitempty"`
@@ -192,12 +510,15 @@ type Inbox struct {
 	Message          []byte  `protobuf:"bytes,5,opt,name=message" json:"message,omitempty"`
 	Read             *bool   `protobuf:"varint,6,req,name=read" json:"read,omitempty"`
 	Sealed           []byte  `protobuf:"bytes,7,opt,name=sealed" json:"sealed,omitempty"`
+	Retained         *bool   `protobuf:"varint,8,opt,name=retained,def=0" json:"retained,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
 func (this *Inbox) Reset()         { *this = Inbox{} }
 func (this *Inbox) String() string { return proto.CompactTextString(this) }
 func (*Inbox) ProtoMessage()       {}
+
+const Default_Inbox_Retained bool = false
 
 func (this *Inbox) GetId() uint64 {
 	if this != nil && this.Id != nil {
@@ -246,6 +567,13 @@ func (this *Inbox) GetSealed() []byte {
 		return this.Sealed
 	}
 	return nil
+}
+
+func (this *Inbox) GetRetained() bool {
+	if this != nil && this.Retained != nil {
+		return *this.Retained
+	}
+	return Default_Inbox_Retained
 }
 
 type Outbox struct {
@@ -401,6 +729,7 @@ type State struct {
 	GroupPrivate             []byte                 `protobuf:"bytes,6,req,name=group_private" json:"group_private,omitempty"`
 	PreviousGroupPrivateKeys []*State_PreviousGroup `protobuf:"bytes,12,rep,name=previous_group_private_keys" json:"previous_group_private_keys,omitempty"`
 	Generation               *uint32                `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
+	LastErasureStorageTime   *int64                 `protobuf:"varint,13,opt,name=last_erasure_storage_time" json:"last_erasure_storage_time,omitempty"`
 	Contacts                 []*Contact             `protobuf:"bytes,8,rep,name=contacts" json:"contacts,omitempty"`
 	Inbox                    []*Inbox               `protobuf:"bytes,9,rep,name=inbox" json:"inbox,omitempty"`
 	Outbox                   []*Outbox              `protobuf:"bytes,10,rep,name=outbox" json:"outbox,omitempty"`
@@ -464,6 +793,13 @@ func (this *State) GetPreviousGroupPrivateKeys() []*State_PreviousGroup {
 func (this *State) GetGeneration() uint32 {
 	if this != nil && this.Generation != nil {
 		return *this.Generation
+	}
+	return 0
+}
+
+func (this *State) GetLastErasureStorageTime() int64 {
+	if this != nil && this.LastErasureStorageTime != nil {
+		return *this.LastErasureStorageTime
 	}
 	return 0
 }

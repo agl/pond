@@ -4,22 +4,58 @@ import "github.com/agl/pond/protos/pond.proto";
 
 // These protobufs are used for serialising the client's state to disk.
 
+// Header is placed at the beginning of the state file and is *unencrypted and
+// unauthenticated*. Its purpose is only to describe how to decrypt the
+// remainder of the file.
+message Header {
+	// nonce_smear_copies contains the number of copies of the nonce that
+	// follow the header. Each copy of the nonce is different and, XORed
+	// together, they result in the real nonce. The intent is that this may
+	// make recovery of old state files more difficult on HDDs.
+	optional int32 nonce_smear_copies = 1 [ default = 1365 ];
+	// kdf_salt contains the salt for the KDF function.
+	optional bytes kdf_salt = 2;
+
+	message SCrypt {
+		optional int32 N = 2 [ default = 32768 ];
+		optional int32 r = 3 [ default = 16 ];
+		optional int32 p = 4 [ default = 1 ];
+	}
+	optional SCrypt scrypt = 3;
+
+	// TPM contains information about an erasure key stored in TPM NVRAM.
+	message TPM {
+		required uint32 index = 1;
+	}
+	optional TPM tpm_nvram = 4;
+
+	// no_erasure_storage exists to signal that there is no erasure storage
+	// for this state file, as opposed to the state file using a method
+	// that isn't recognised by the client.
+	optional bool no_erasure_storage = 5;
+}
+
 message Contact {
 	required fixed64 id = 1;
 	required string name = 2;
 	required bytes group_key = 3;
 	optional int32 supported_version = 16;
 	optional bytes key_exchange_bytes = 4;
+	optional bytes panda_key_exchange = 18;
+	optional string panda_error = 19;
 	optional bytes their_group = 5;
 	optional bytes my_group_key = 6;
 	optional uint32 generation = 7;
 	optional string their_server = 8;
 	optional bytes their_pub = 9;
 	optional bytes their_identity_public = 10;
+
 	optional bytes last_private = 11;
 	optional bytes current_private = 12;
 	optional bytes their_last_public = 13;
 	optional bytes their_current_public = 14;
+
+	optional RatchetState ratchet = 20;
 
 	message PreviousTag {
 		required bytes tag = 1;
@@ -30,6 +66,36 @@ message Contact {
 	optional bool is_pending = 15 [ default = false ];
 }
 
+message RatchetState {
+	required bytes root_key = 1;
+	required bytes send_header_key = 2;
+	required bytes recv_header_key = 3;
+	required bytes next_send_header_key = 4;
+	required bytes next_recv_header_key = 5;
+	required bytes send_chain_key = 6;
+	required bytes recv_chain_key = 7;
+	required bytes send_ratchet_private = 8;
+	required bytes recv_ratchet_public = 9;
+	required uint32 send_count = 10;
+	required uint32 recv_count = 11;
+	required uint32 prev_send_count = 12;
+	required bool ratchet = 13;
+
+	optional bytes private0 = 14;
+	optional bytes private1 = 15;
+
+	message SavedKeys {
+		required bytes header_key = 1;
+		message MessageKey {
+			required uint32 num = 1;
+			required bytes key = 2;
+			required int64 creation_time = 3;
+		}
+		repeated MessageKey message_keys = 2;
+	}
+	repeated SavedKeys saved_keys = 16;
+}
+
 message Inbox {
 	required fixed64 id = 1;
 	required fixed64 from = 2;
@@ -38,6 +104,7 @@ message Inbox {
 	optional bytes message = 5;
 	required bool read = 6;
 	optional bytes sealed = 7;
+	optional bool retained = 8 [ default = false ];
 }
 
 message Outbox {
@@ -77,6 +144,7 @@ message State {
 	repeated PreviousGroup previous_group_private_keys = 12;
 
 	required uint32 generation = 7;
+	optional int64 last_erasure_storage_time = 13;
 
 	repeated Contact contacts = 8;
 	repeated Inbox inbox = 9;

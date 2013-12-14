@@ -13,12 +13,28 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"code.google.com/p/goprotobuf/proto"
+	panda "github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
+
+// clientLogToStderr controls whether the TestClients will log to stderr during
+// the test. This produces too much noise to be enabled all the time, but it
+// can be helpful when debugging.
+const clientLogToStderr = false
+
+// Since t.Log calls don't result in any output until the test terminates, this
+// constant can be tweaked to enable logging to stderr.
+const debugDeadlock = false
+
+const parallel = true
+
+// logActions causes all GUI events to be written to the test log.
+const logActions = false
 
 type TestServer struct {
 	cmd      *exec.Cmd
@@ -95,48 +111,50 @@ func (server *TestServer) Close() {
 	os.RemoveAll(server.stateDir)
 }
 
-type TestUI struct {
+type TestGUI struct {
 	actions        chan interface{}
 	events         chan interface{}
 	signal         chan chan bool
 	currentStateID int
 	t              *testing.T
 	text           map[string]string
+	combos         map[string][]string
 	fileOpen       FileOpen
 	haveFileOpen   bool
 	panicOnSignal  bool
 }
 
-func NewTestUI(t *testing.T) *TestUI {
-	return &TestUI{
+func NewTestGUI(t *testing.T) *TestGUI {
+	return &TestGUI{
 		actions:        make(chan interface{}, 16),
 		events:         make(chan interface{}, 16),
 		signal:         make(chan chan bool),
 		currentStateID: uiStateInvalid,
 		t:              t,
 		text:           make(map[string]string),
+		combos:         make(map[string][]string),
 	}
 }
 
-func (ui *TestUI) Actions() chan<- interface{} {
+func (ui *TestGUI) Actions() chan<- interface{} {
 	return ui.actions
 }
 
-func (ui *TestUI) Events() <-chan interface{} {
+func (ui *TestGUI) Events() <-chan interface{} {
 	return ui.events
 }
 
-func (ui *TestUI) Signal() {
+func (ui *TestGUI) Signal() {
 	c := make(chan bool)
 	ui.signal <- c
 	<-c
 }
 
-func (ui *TestUI) Run() {
+func (ui *TestGUI) Run() {
 	panic("should never be called")
 }
 
-func (ui *TestUI) processWidget(widget interface{}) {
+func (ui *TestGUI) processWidget(widget interface{}) {
 	switch v := widget.(type) {
 	case VBox:
 		for _, child := range v.children {
@@ -162,10 +180,12 @@ func (ui *TestUI) processWidget(widget interface{}) {
 		ui.text[v.name] = v.text
 	case Label:
 		ui.text[v.name] = v.text
+	case Combo:
+		ui.combos[v.name] = v.labels
 	}
 }
 
-func (ui *TestUI) WaitForSignal() error {
+func (ui *TestGUI) WaitForSignal() error {
 	var uierr error
 	ack, ok := <-ui.signal
 	if !ok {
@@ -176,7 +196,12 @@ ReadActions:
 	for {
 		select {
 		case action := <-ui.actions:
-			//ui.t.Logf("%#v", action)
+			if logActions {
+				ui.t.Logf("%#v", action)
+			}
+			if debugDeadlock {
+				fmt.Printf("%#v\n", action)
+			}
 			switch action := action.(type) {
 			case UIState:
 				ui.currentStateID = action.stateID
@@ -209,7 +234,7 @@ ReadActions:
 	return uierr
 }
 
-func (ui *TestUI) WaitForFileOpen() FileOpen {
+func (ui *TestGUI) WaitForFileOpen() FileOpen {
 	ui.haveFileOpen = false
 	for !ui.haveFileOpen {
 		if err := ui.WaitForSignal(); err != nil {
@@ -220,40 +245,58 @@ func (ui *TestUI) WaitForFileOpen() FileOpen {
 }
 
 type TestClient struct {
-	*client
-	stateDir   string
-	ui         *TestUI
-	mainUIDone bool
-	name       string
+	*guiClient
+	stateDir      string
+	gui           *TestGUI
+	mainUIDone    bool
+	name          string
+	testTimerChan chan time.Time
 }
 
-func NewTestClient(t *testing.T, name string) (*TestClient, error) {
+type TestClientOptions struct {
+	initialStateFile string
+}
+
+func NewTestClient(t *testing.T, name string, options *TestClientOptions) (*TestClient, error) {
 	tc := &TestClient{
-		ui:   NewTestUI(t),
-		name: name,
+		gui:           NewTestGUI(t),
+		name:          name,
+		testTimerChan: make(chan time.Time, 1),
 	}
 	var err error
 	if tc.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
 		return nil, err
 	}
-	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
-	tc.client.log.name = name
-	tc.client.log.toStderr = false
+	stateFilePath := filepath.Join(tc.stateDir, "state")
+	if options != nil && len(options.initialStateFile) != 0 {
+		inBytes, err := ioutil.ReadFile(options.initialStateFile)
+		if err != nil {
+			panic(err)
+		}
+		if err := ioutil.WriteFile(stateFilePath, inBytes, 0600); err != nil {
+			panic(err)
+		}
+	}
+	tc.guiClient = NewGUIClient(stateFilePath, tc.gui, rand.Reader, true, false)
+	tc.guiClient.log.name = name
+	tc.guiClient.log.toStderr = clientLogToStderr
+	tc.guiClient.timerChan = tc.testTimerChan
+	tc.guiClient.Start()
 	return tc, nil
 }
 
 func (tc *TestClient) Shutdown() {
-	tc.ui.t.Log("Shutting down client")
-	close(tc.ui.events)
+	tc.gui.t.Log("Shutting down client")
+	close(tc.gui.events)
 
 WaitForClient:
 	for {
 		select {
-		case _, ok := <-tc.ui.actions:
+		case _, ok := <-tc.gui.actions:
 			if !ok {
 				break WaitForClient
 			}
-		case ack := <-tc.ui.signal:
+		case ack := <-tc.gui.signal:
 			ack <- true
 		}
 	}
@@ -265,26 +308,41 @@ func (tc *TestClient) Close() {
 }
 
 func (tc *TestClient) AdvanceTo(state int) {
-	tc.ui.currentStateID = uiStateInvalid
-	for tc.ui.currentStateID != state {
-		if err := tc.ui.WaitForSignal(); err != nil {
-			tc.ui.t.Fatal(err)
+	tc.gui.currentStateID = uiStateInvalid
+	for tc.gui.currentStateID != state {
+		if err := tc.gui.WaitForSignal(); err != nil {
+			tc.gui.t.Fatal(err)
 		}
 	}
 }
 
 func (tc *TestClient) Reload() {
+	tc.ReloadWithMeetingPlace(nil)
+}
+
+func (tc *TestClient) ReloadWithMeetingPlace(mp panda.MeetingPlace) {
 	tc.Shutdown()
-	tc.ui = NewTestUI(tc.ui.t)
-	tc.client = NewClient(filepath.Join(tc.stateDir, "state"), tc.ui, rand.Reader, true, false)
-	tc.client.log.name = tc.name
-	tc.client.log.toStderr = false
+	oldNowFunc := tc.nowFunc
+	tc.gui = NewTestGUI(tc.gui.t)
+	tc.guiClient = NewGUIClient(filepath.Join(tc.stateDir, "state"), tc.gui, rand.Reader, true /* testing */, false /* autoFetch */)
+	tc.guiClient.log.name = tc.name
+	tc.guiClient.log.toStderr = clientLogToStderr
+	tc.guiClient.timerChan = tc.testTimerChan
+	tc.nowFunc = oldNowFunc
+	if mp != nil {
+		tc.guiClient.newMeetingPlace = func() panda.MeetingPlace {
+			return mp
+		}
+	}
+	tc.guiClient.Start()
 }
 
 func TestOpenClose(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +350,9 @@ func TestOpenClose(t *testing.T) {
 }
 
 func TestAccountCreation(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -300,57 +360,66 @@ func TestAccountCreation(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 
-	client.ui.WaitForSignal()
-	if id := client.ui.currentStateID; id != uiStateLoading {
+	client.gui.WaitForSignal()
+	if id := client.gui.currentStateID; id != uiStateLoading {
 		t.Fatalf("client in UI state %d when it was expected to be loading", id)
 	}
 
-	client.ui.WaitForSignal()
-	if id := client.ui.currentStateID; id != uiStateCreatePassphrase {
+	client.gui.WaitForSignal()
+	if id := client.gui.currentStateID; id != uiStateCreatePassphrase {
 		t.Fatalf("client in UI state %d when it was expected to be creating a passphrase", id)
 	}
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "next",
 		entries: map[string]string{"pw": ""},
 	}
 
-	client.ui.WaitForSignal()
-	if id := client.ui.currentStateID; id != uiStateCreateAccount {
+	client.gui.WaitForSignal()
+	if id := client.gui.currentStateID; id != uiStateErasureStorage {
+		t.Fatalf("client in UI state %d when it was expected to be setting up erasure storage", id)
+	}
+
+	client.gui.events <- Click{
+		name: "continue",
+	}
+
+	client.gui.WaitForSignal()
+	if id := client.gui.currentStateID; id != uiStateCreateAccount {
 		t.Fatalf("client in UI state %d when it was expected to be creating an account", id)
 	}
 
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "create",
 		entries: map[string]string{"server": "asldfjksadfkl"},
 	}
 	t.Log("Waiting for error from garbage URL")
 	for {
-		if err := client.ui.WaitForSignal(); err != nil {
+		if err := client.gui.WaitForSignal(); err != nil {
 			break
 		}
 	}
 
 	url := server.URL()
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "create",
 		entries: map[string]string{"server": url[:len(url)-1]},
 	}
 
 	t.Log("Waiting for error from invalid port")
 	for {
-		if err := client.ui.WaitForSignal(); err != nil {
+		if err := client.gui.WaitForSignal(); err != nil {
 			break
 		}
 	}
 
 	t.Log("Waiting for success")
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "create",
 		entries: map[string]string{"server": url},
 	}
@@ -363,13 +432,17 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 	}
 
 	client.AdvanceTo(uiStateCreatePassphrase)
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "next",
 		entries: map[string]string{"pw": ""},
 	}
+	client.AdvanceTo(uiStateErasureStorage)
+	client.gui.events <- Click{
+		name: "continue",
+	}
 	client.AdvanceTo(uiStateCreateAccount)
 	url := server.URL()
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "create",
 		entries: map[string]string{"server": url},
 	}
@@ -380,14 +453,14 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 func proceedToKeyExchange(t *testing.T, client *TestClient, server *TestServer, otherName string) {
 	proceedToMainUI(t, client, server)
 
-	client.ui.events <- Click{name: "newcontact"}
+	client.gui.events <- Click{name: "newcontact"}
 	client.AdvanceTo(uiStateNewContact)
 
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:    "name",
 		entries: map[string]string{"name": otherName},
 	}
-	client.ui.events <- Click{name:    "manual" }
+	client.gui.events <- Click{name: "manual"}
 	client.AdvanceTo(uiStateNewContact2)
 }
 
@@ -395,15 +468,15 @@ func proceedToPairedWithNames(t *testing.T, client1, client2 *TestClient, name1,
 	proceedToKeyExchange(t, client1, server, name2)
 	proceedToKeyExchange(t, client2, server, name1)
 
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name:      "process",
-		textViews: map[string]string{"kxin": client2.ui.text["kxout"]},
+		textViews: map[string]string{"kxin": client2.gui.text["kxout"]},
 	}
 	client1.AdvanceTo(uiStateShowContact)
 
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name:      "process",
-		textViews: map[string]string{"kxin": client1.ui.text["kxout"]},
+		textViews: map[string]string{"kxin": client1.gui.text["kxout"]},
 	}
 	client2.AdvanceTo(uiStateShowContact)
 }
@@ -413,7 +486,17 @@ func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestSer
 }
 
 func TestKeyExchange(t *testing.T) {
-	t.Parallel()
+	testKeyExchange(t, false)
+}
+
+func TestKeyExchangeCrossVersion(t *testing.T) {
+	testKeyExchange(t, true)
+}
+
+func testKeyExchange(t *testing.T, crossVersion bool) {
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -421,13 +504,15 @@ func TestKeyExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client1.simulateOldClient = crossVersion
+
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,49 +523,49 @@ func TestKeyExchange(t *testing.T) {
 
 	client1.Reload()
 	client1.AdvanceTo(uiStateMain)
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name: client1.contactsUI.entries[0].boxName,
 	}
 	client1.AdvanceTo(uiStateNewContact2)
 	client2.Reload()
 	client2.AdvanceTo(uiStateMain)
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: client2.contactsUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateNewContact2)
 
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name:      "process",
 		textViews: map[string]string{"kxin": "rubbish"},
 	}
 	t.Log("Waiting for error from garbage key exchange")
 	for {
-		if err := client1.ui.WaitForSignal(); err != nil {
+		if err := client1.gui.WaitForSignal(); err != nil {
 			break
 		}
 	}
 
-	kxBytes := []byte(client2.ui.text["kxout"])
+	kxBytes := []byte(client2.gui.text["kxout"])
 	kxBytes[55] ^= 1
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name:      "process",
 		textViews: map[string]string{"kxin": string(kxBytes)},
 	}
 	t.Log("Waiting for error from corrupt key exchange")
 	for {
-		if err := client1.ui.WaitForSignal(); err != nil {
+		if err := client1.gui.WaitForSignal(); err != nil {
 			break
 		}
 	}
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name:      "process",
-		textViews: map[string]string{"kxin": client2.ui.text["kxout"]},
+		textViews: map[string]string{"kxin": client2.gui.text["kxout"]},
 	}
 	client1.AdvanceTo(uiStateShowContact)
 
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name:      "process",
-		textViews: map[string]string{"kxin": client1.ui.text["kxout"]},
+		textViews: map[string]string{"kxin": client1.gui.text["kxout"]},
 	}
 	client2.AdvanceTo(uiStateShowContact)
 }
@@ -489,6 +574,20 @@ func contactByName(client *TestClient, name string) (id uint64, contact *Contact
 	for id, contact = range client.contacts {
 		if contact.name == name {
 			return
+		}
+	}
+	panic("contact not found: " + name)
+}
+
+func clickOnContact(client *TestClient, name string) {
+	for id, contact := range client.contacts {
+		if contact.name == name {
+			for _, entry := range client.contactsUI.entries {
+				if entry.id == id {
+					client.gui.events <- Click{name: entry.boxName}
+					return
+				}
+			}
 		}
 	}
 	panic("contact not found: " + name)
@@ -505,15 +604,15 @@ func selectContact(t *testing.T, client *TestClient, name string) {
 	if len(boxName) == 0 {
 		panic("couldn't find box for given name")
 	}
-	client.ui.events <- Click{name: boxName}
+	client.gui.events <- Click{name: boxName}
 	client.AdvanceTo(uiStateShowContact)
 }
 
 func sendMessage(client *TestClient, to string, message string) {
-	client.ui.events <- Click{name: "compose"}
+	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name:      "send",
 		combos:    map[string]string{"to": to},
 		textViews: map[string]string{"body": message},
@@ -522,18 +621,27 @@ func sendMessage(client *TestClient, to string, message string) {
 	client.AdvanceTo(uiStateOutbox)
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
-	<-ackChan
-}
-
-func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
-	ackChan := make(chan bool)
-	client.fetchNowChan <- ackChan
-	initialInboxLen := len(client.inbox)
 
 WaitForAck:
 	for {
 		select {
-		case ack := <-client.ui.signal:
+		case ack := <-client.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
+}
+
+func fetchMessage(client *TestClient) (from string, msg *InboxMessage) {
+	ackChan := make(chan bool)
+	initialInboxLen := len(client.inbox)
+	client.fetchNowChan <- ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client.gui.signal:
 			ack <- true
 		case <-ackChan:
 			break WaitForAck
@@ -551,7 +659,17 @@ WaitForAck:
 }
 
 func TestMessageExchange(t *testing.T) {
-	t.Parallel()
+	testMessageExchange(t, false)
+}
+
+func TestMessageExchangeCrossVersion(t *testing.T) {
+	testMessageExchange(t, true)
+}
+
+func testMessageExchange(t *testing.T, crossVersion bool) {
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -559,13 +677,14 @@ func TestMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
+	client1.simulateOldClient = crossVersion
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,9 +693,11 @@ func TestMessageExchange(t *testing.T) {
 	proceedToPaired(t, client1, client2, server)
 
 	var initialCurrentDH [32]byte
-	for _, contact := range client1.contacts {
-		if contact.name == "client2" {
-			copy(initialCurrentDH[:], contact.currentDHPrivate[:])
+	if crossVersion {
+		for _, contact := range client1.contacts {
+			if contact.name == "client2" {
+				copy(initialCurrentDH[:], contact.currentDHPrivate[:])
+			}
 		}
 	}
 
@@ -588,7 +709,7 @@ func TestMessageExchange(t *testing.T) {
 			t.Fatalf("message from %s, expected client1", from)
 		}
 		if string(msg.message.Body) != testMsg {
-			t.Fatalf("Incorrect message contents: %s", msg)
+			t.Fatalf("Incorrect message contents: %#v", msg)
 		}
 
 		sendMessage(client2, "client1", testMsg)
@@ -597,22 +718,26 @@ func TestMessageExchange(t *testing.T) {
 			t.Fatalf("message from %s, expected client2", from)
 		}
 		if string(msg.message.Body) != testMsg {
-			t.Fatalf("Incorrect message contents: %s", msg)
+			t.Fatalf("Incorrect message contents: %#v", msg)
 		}
 	}
 
-	// Ensure that the DH secrets are advancing.
-	for _, contact := range client1.contacts {
-		if contact.name == "client2" {
-			if bytes.Equal(initialCurrentDH[:], contact.currentDHPrivate[:]) {
-				t.Fatalf("DH secrets aren't advancing!")
+	if crossVersion {
+		// Ensure that the DH secrets are advancing.
+		for _, contact := range client1.contacts {
+			if contact.name == "client2" {
+				if bytes.Equal(initialCurrentDH[:], contact.currentDHPrivate[:]) {
+					t.Fatalf("DH secrets aren't advancing!")
+				}
 			}
 		}
 	}
 }
 
 func TestACKs(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -620,13 +745,13 @@ func TestACKs(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,23 +766,31 @@ func TestACKs(t *testing.T) {
 		t.Fatalf("message from %s, expected client1", from)
 	}
 	if string(msg.message.Body) != testMsg {
-		t.Fatalf("Incorrect message contents: %s", msg)
+		t.Fatalf("Incorrect message contents: %#v", msg)
 	}
 	if !client1.outbox[0].acked.IsZero() {
 		t.Fatalf("client1 incorrectly believes that its message has been acked")
 	}
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: client2.inboxUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateInbox)
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: "ack",
 	}
 	client2.AdvanceTo(uiStateInbox)
 
 	ackChan := make(chan bool)
 	client2.fetchNowChan <- ackChan
-	<-ackChan
+WaitForAck:
+	for {
+		select {
+		case ack := <-client2.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	from, _ = fetchMessage(client1)
 	if from != "client2" {
@@ -670,7 +803,9 @@ func TestACKs(t *testing.T) {
 }
 
 func TestHalfPairedMessageExchange(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -678,13 +813,13 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,10 +828,10 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	proceedToKeyExchange(t, client1, server, "client2")
 	proceedToKeyExchange(t, client2, server, "client1")
 
-	client1KX := client1.ui.text["kxout"]
-	client1.ui.events <- Click{
+	client1KX := client1.gui.text["kxout"]
+	client1.gui.events <- Click{
 		name:      "process",
-		textViews: map[string]string{"kxin": client2.ui.text["kxout"]},
+		textViews: map[string]string{"kxin": client2.gui.text["kxout"]},
 	}
 	client1.AdvanceTo(uiStateShowContact)
 
@@ -718,7 +853,7 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	}
 
 	// Check that viewing the message in client2 doesn't crash anything.
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: client2.inboxUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateInbox)
@@ -727,27 +862,29 @@ func TestHalfPairedMessageExchange(t *testing.T) {
 	client2.AdvanceTo(uiStateMain)
 
 	// Select the pending contact in client2 to complete the key exchange.
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: client2.contactsUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateNewContact)
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name:      "process",
 		textViews: map[string]string{"kxin": client1KX},
 	}
 	client2.AdvanceTo(uiStateShowContact)
-	client2.ui.events <- Click{
+	client2.gui.events <- Click{
 		name: client2.inboxUI.entries[0].boxName,
 	}
 	client2.AdvanceTo(uiStateInbox)
 
-	if s := client2.ui.text["body"]; s != testMsg {
+	if s := client2.gui.text["body"]; s != testMsg {
 		t.Fatalf("resolved message is incorrect: %s", s)
 	}
 }
 
 func TestDraft(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -755,14 +892,14 @@ func TestDraft(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 
 	proceedToMainUI(t, client, server)
-	client.ui.events <- Click{name: "compose"}
+	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
 	if l := len(client.drafts); l != 1 {
@@ -776,7 +913,7 @@ func TestDraft(t *testing.T) {
 
 	const initialText = "wibble wobble"
 
-	client.ui.events <- Update{
+	client.gui.events <- Update{
 		name: "body",
 		text: initialText,
 	}
@@ -795,9 +932,9 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("Incorrect draft ID after reload: %d vs %d", id, draftID)
 	}
 
-	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.gui.events <- Click{name: client.draftsUI.entries[0].boxName}
 	client.AdvanceTo(uiStateCompose)
-	if text := client.ui.text["body"]; text != initialText {
+	if text := client.gui.text["body"]; text != initialText {
 		t.Fatalf("Wrong message text after reload: '%s' vs '%s'", text, initialText)
 	}
 
@@ -806,17 +943,17 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("Failed to write attachment file: %s", err)
 	}
 
-	client.ui.events <- Click{name: "attach"}
-	client.ui.events <- OpenResult{path: attachmentFile, ok: true}
+	client.gui.events <- Click{name: "attach"}
+	client.gui.events <- OpenResult{path: attachmentFile, ok: true}
 
 	client.Reload()
 	client.AdvanceTo(uiStateMain)
-	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.gui.events <- Click{name: client.draftsUI.entries[0].boxName}
 	client.AdvanceTo(uiStateCompose)
 
 	const labelPrefix = "attachment-label-"
 	var attachmentID uint64
-	for name := range client.ui.text {
+	for name := range client.gui.text {
 		if strings.HasPrefix(name, labelPrefix) {
 			attachmentID, err = strconv.ParseUint(name[len(labelPrefix):], 16, 64)
 			if err != nil {
@@ -830,13 +967,13 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("failed to find attachment after reload")
 	}
 
-	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
+	client.gui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
 	client.Reload()
 	client.AdvanceTo(uiStateMain)
-	client.ui.events <- Click{name: client.draftsUI.entries[0].boxName}
+	client.gui.events <- Click{name: client.draftsUI.entries[0].boxName}
 	client.AdvanceTo(uiStateCompose)
 
-	for name := range client.ui.text {
+	for name := range client.gui.text {
 		if strings.HasPrefix(name, labelPrefix) {
 			t.Fatalf("Found attachment after removing")
 		}
@@ -847,17 +984,17 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("Failed to write error file: %s", err)
 	}
 
-	client.ui.events <- Click{name: "attach"}
-	client.ui.WaitForFileOpen()
-	client.ui.events <- OpenResult{path: attachmentFile, ok: true}
-	client.ui.events <- Click{name: "attach"}
-	client.ui.WaitForFileOpen()
-	client.ui.events <- OpenResult{path: errorFile, ok: true}
-	client.ui.WaitForSignal()
+	client.gui.events <- Click{name: "attach"}
+	client.gui.WaitForFileOpen()
+	client.gui.events <- OpenResult{path: attachmentFile, ok: true}
+	client.gui.events <- Click{name: "attach"}
+	client.gui.WaitForFileOpen()
+	client.gui.events <- OpenResult{path: errorFile, ok: true}
+	client.gui.WaitForSignal()
 
 	attachmentID = 0
 	const errorPrefix = "attachment-error-"
-	for name := range client.ui.text {
+	for name := range client.gui.text {
 		if strings.HasPrefix(name, errorPrefix) {
 			attachmentID, err = strconv.ParseUint(name[len(errorPrefix):], 16, 64)
 			if err != nil {
@@ -871,12 +1008,14 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("failed to find error attachment")
 	}
 
-	client.ui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
-	client.ui.WaitForSignal()
+	client.gui.events <- Click{name: fmt.Sprintf("remove-%x", attachmentID)}
+	client.gui.WaitForSignal()
 }
 
 func TestDraftDiscard(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -884,21 +1023,21 @@ func TestDraftDiscard(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 
 	proceedToMainUI(t, client, server)
-	client.ui.events <- Click{name: "compose"}
+	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
 	if l := len(client.drafts); l != 1 {
 		t.Fatalf("Bad number of drafts: %d", l)
 	}
 
-	client.ui.events <- Click{name: "discard"}
+	client.gui.events <- Click{name: "discard"}
 	client.AdvanceTo(uiStateMain)
 
 	if l := len(client.drafts); l != 0 {
@@ -907,7 +1046,9 @@ func TestDraftDiscard(t *testing.T) {
 }
 
 func testDetached(t *testing.T, upload bool) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -915,20 +1056,20 @@ func testDetached(t *testing.T, upload bool) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client2.Close()
 
 	proceedToPaired(t, client1, client2, server)
-	client1.ui.events <- Click{name: "compose"}
+	client1.gui.events <- Click{name: "compose"}
 	client1.AdvanceTo(uiStateCompose)
 
 	plaintextPath := filepath.Join(client1.stateDir, "file")
@@ -939,11 +1080,11 @@ func testDetached(t *testing.T, upload bool) {
 		t.Fatal(err)
 	}
 
-	client1.ui.events <- Click{name: "attach"}
-	client1.ui.WaitForFileOpen()
-	client1.ui.events <- OpenResult{path: plaintextPath, ok: true}
-	client1.ui.WaitForSignal()
-	for name := range client1.ui.text {
+	client1.gui.events <- Click{name: "attach"}
+	client1.gui.WaitForFileOpen()
+	client1.gui.events <- OpenResult{path: plaintextPath, ok: true}
+	client1.gui.WaitForSignal()
+	for name := range client1.gui.text {
 		const labelPrefix = "attachment-label-"
 		if strings.HasPrefix(name, labelPrefix) {
 			attachmentID, err := strconv.ParseUint(name[len(labelPrefix):], 16, 64)
@@ -951,17 +1092,17 @@ func testDetached(t *testing.T, upload bool) {
 				t.Fatalf("Failed to parse attachment label: %s", name)
 			}
 			if upload {
-				client1.ui.events <- Click{name: fmt.Sprintf("attachment-upload-%x", attachmentID)}
+				client1.gui.events <- Click{name: fmt.Sprintf("attachment-upload-%x", attachmentID)}
 			} else {
-				client1.ui.events <- Click{name: fmt.Sprintf("attachment-convert-%x", attachmentID)}
+				client1.gui.events <- Click{name: fmt.Sprintf("attachment-convert-%x", attachmentID)}
 			}
 			break
 		}
 	}
 	if !upload {
-		fo := client1.ui.WaitForFileOpen()
-		client1.ui.events <- OpenResult{path: ciphertextPath, ok: true, arg: fo.arg}
-		client1.ui.WaitForSignal()
+		fo := client1.gui.WaitForFileOpen()
+		client1.gui.events <- OpenResult{path: ciphertextPath, ok: true, arg: fo.arg}
+		client1.gui.WaitForSignal()
 	}
 
 	var draft *Draft
@@ -971,10 +1112,10 @@ func testDetached(t *testing.T, upload bool) {
 	}
 
 	for len(draft.detachments) == 0 {
-		client1.ui.WaitForSignal()
+		client1.gui.WaitForSignal()
 	}
 
-	client1.ui.events <- Click{
+	client1.gui.events <- Click{
 		name:      "send",
 		combos:    map[string]string{"to": "client2"},
 		textViews: map[string]string{"body": "foo"},
@@ -983,7 +1124,16 @@ func testDetached(t *testing.T, upload bool) {
 	client1.AdvanceTo(uiStateOutbox)
 	ackChan := make(chan bool)
 	client1.fetchNowChan <- ackChan
-	<-ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client1.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	_, msg := fetchMessage(client2)
 	if len(msg.message.DetachedFiles) != 1 {
@@ -992,27 +1142,27 @@ func testDetached(t *testing.T, upload bool) {
 
 	for _, e := range client2.inboxUI.entries {
 		if e.id == msg.id {
-			client2.ui.events <- Click{name: e.boxName}
+			client2.gui.events <- Click{name: e.boxName}
 			break
 		}
 	}
 
 	client2.AdvanceTo(uiStateInbox)
 	if upload {
-		client2.ui.events <- Click{name: "detachment-download-0"}
+		client2.gui.events <- Click{name: "detachment-download-0"}
 	} else {
-		client2.ui.events <- Click{name: "detachment-decrypt-0"}
+		client2.gui.events <- Click{name: "detachment-decrypt-0"}
 	}
-	fo := client2.ui.WaitForFileOpen()
+	fo := client2.gui.WaitForFileOpen()
 	outputPath := filepath.Join(client1.stateDir, "output")
 	if upload {
-		client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+		client2.gui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
 	} else {
-		client2.ui.events <- OpenResult{ok: true, path: ciphertextPath, arg: fo.arg}
-		fo = client2.ui.WaitForFileOpen()
-		client2.ui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
+		client2.gui.events <- OpenResult{ok: true, path: ciphertextPath, arg: fo.arg}
+		fo = client2.gui.WaitForFileOpen()
+		client2.gui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
 	}
-	client2.ui.WaitForSignal()
+	client2.gui.WaitForSignal()
 
 	var id uint64
 	for dID := range msg.decryptions {
@@ -1025,7 +1175,7 @@ func testDetached(t *testing.T, upload bool) {
 	}
 
 	for len(msg.decryptions) > 0 {
-		client2.ui.WaitForSignal()
+		client2.gui.WaitForSignal()
 	}
 
 	result, err := ioutil.ReadFile(outputPath)
@@ -1047,7 +1197,9 @@ func TestUploadDownload(t *testing.T) {
 }
 
 func TestLogOverflow(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1055,14 +1207,14 @@ func TestLogOverflow(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 	proceedToMainUI(t, client1, server)
 
-	client1.ui.events <- Click{name: client1.clientUI.entries[1].boxName}
+	client1.gui.events <- Click{name: client1.clientUI.entries[1].boxName}
 	client1.AdvanceTo(uiStateLog)
 
 	for i := 0; i < 2*(logLimit+logSlack); i++ {
@@ -1077,7 +1229,7 @@ func TestServerAnnounce(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewTestClient(t, "client")
+	client, err := NewTestClient(t, "client", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1106,11 +1258,11 @@ func TestServerAnnounce(t *testing.T) {
 	if len(client.inbox) != 1 {
 		t.Fatalf("Inbox doesn't have a message")
 	}
-	client.ui.events <- Click{
+	client.gui.events <- Click{
 		name: client.inboxUI.entries[0].boxName,
 	}
 	client.AdvanceTo(uiStateInbox)
-	if s := client.ui.text["body"]; s != testMessage {
+	if s := client.gui.text["body"]; s != testMessage {
 		t.Fatalf("resolved message is incorrect: %s", s)
 	}
 
@@ -1119,7 +1271,9 @@ func TestServerAnnounce(t *testing.T) {
 }
 
 func TestRevoke(t *testing.T) {
-	t.Parallel()
+	if parallel {
+		t.Parallel()
+	}
 
 	server, err := NewTestServer(t)
 	if err != nil {
@@ -1127,25 +1281,25 @@ func TestRevoke(t *testing.T) {
 	}
 	defer server.Close()
 
-	client1, err := NewTestClient(t, "client1")
+	client1, err := NewTestClient(t, "client1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client1.Close()
 
-	client2, err := NewTestClient(t, "client2")
+	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client2.Close()
 
-	client3, err := NewTestClient(t, "client3")
+	client3, err := NewTestClient(t, "client3", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client3.Close()
 
-	client4, err := NewTestClient(t, "client4")
+	client4, err := NewTestClient(t, "client4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1180,10 +1334,12 @@ func TestRevoke(t *testing.T) {
 		}
 	}
 
-	client1.ui.events <- Click{name: client1.contactsUI.entries[0].boxName}
+	client1.gui.events <- Click{name: client1.contactsUI.entries[0].boxName}
 	client1.AdvanceTo(uiStateShowContact)
-	client1.ui.events <- Click{name: "revoke"}
-	client1.ui.WaitForSignal()
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.WaitForSignal() // button changes to "Confirm"
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
 
 	if client1.generation != initialGeneration+1 {
 		t.Errorf("Generation did not advance")
@@ -1204,11 +1360,11 @@ func TestRevoke(t *testing.T) {
 NextEvent:
 	for {
 		select {
-		case ack := <-client1.ui.signal:
+		case ack := <-client1.gui.signal:
 		ReadActions:
 			for {
 				select {
-				case <-client1.ui.actions:
+				case <-client1.gui.actions:
 				default:
 					break ReadActions
 				}
@@ -1241,7 +1397,15 @@ NextEvent:
 
 	// Have client3 resend.
 	client3.fetchNowChan <- ackChan
-	<-ackChan
+WaitForAck:
+	for {
+		select {
+		case ack := <-client3.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
 
 	// Have client1 fetch the resigned message from client3, and the
 	// message from client4 using previousTags.
@@ -1254,7 +1418,7 @@ NextEvent:
 				t.Fatalf("client3 message observed twice")
 			}
 			if string(msg.message.Body) != "test2" {
-				t.Fatalf("Incorrect message contents from client3: %s", msg)
+				t.Fatalf("Incorrect message contents from client3: %#v", msg)
 			}
 			seenClient3 = true
 		case "client4":
@@ -1262,9 +1426,656 @@ NextEvent:
 				t.Fatalf("client4 message observed twice")
 			}
 			if string(msg.message.Body) != beforeRevocationMsg {
-				t.Fatalf("Incorrect message contents client4: %s", msg)
+				t.Fatalf("Incorrect message contents client4: %#v", msg)
 			}
 			seenClient4 = true
 		}
+	}
+}
+
+func startPANDAKeyExchange(t *testing.T, client *TestClient, server *TestServer, otherName, sharedSecret string) {
+	proceedToMainUI(t, client, server)
+
+	client.gui.events <- Click{name: "newcontact"}
+	client.AdvanceTo(uiStateNewContact)
+
+	client.gui.events <- Click{
+		name:    "name",
+		entries: map[string]string{"name": otherName},
+	}
+	client.gui.events <- Click{name: "shared"}
+	client.AdvanceTo(uiStateNewContact2)
+
+	client.gui.events <- Click{
+		name:    "begin",
+		entries: map[string]string{"shared": sharedSecret},
+	}
+}
+
+func TestPANDA(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	mp := panda.NewSimpleMeetingPlace()
+	newMeetingPlace := func() panda.MeetingPlace {
+		return mp
+	}
+	client1.newMeetingPlace = newMeetingPlace
+	client2.newMeetingPlace = newMeetingPlace
+
+	startPANDAKeyExchange(t, client1, server, "client2", "shared secret")
+
+	client1.ReloadWithMeetingPlace(mp)
+
+	startPANDAKeyExchange(t, client2, server, "client1", "shared secret")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		client1.AdvanceTo(uiStatePANDAComplete)
+		wg.Done()
+	}()
+	go func() {
+		client2.AdvanceTo(uiStatePANDAComplete)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	var client2FromClient1 *Contact
+	for _, contact := range client1.contacts {
+		client2FromClient1 = contact
+		break
+	}
+
+	var client1FromClient2 *Contact
+	for _, contact := range client2.contacts {
+		client1FromClient2 = contact
+		break
+	}
+
+	if g := client2FromClient1.generation; g != client2.generation {
+		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
+	}
+
+	if g := client1FromClient2.generation; g != client1.generation {
+		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
+	}
+}
+
+func TestReadingOldStateFiles(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", &TestClientOptions{
+		initialStateFile: "testdata/state-old",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client1.AdvanceTo(uiStateMain)
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+}
+
+func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
+	// Test that a message is acked by sending a reply. If reloadDraft is
+	// true then the message is reloaded as draft before sending.
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+	if !client1.outbox[0].acked.IsZero() {
+		t.Fatalf("client1 incorrectly believes that its message has been acked")
+	}
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name: "reply",
+	}
+	client2.AdvanceTo(uiStateCompose)
+
+	if reloadDraft {
+		client2.gui.events <- Click{
+			name: client2.draftsUI.entries[0].boxName,
+		}
+		client2.AdvanceTo(uiStateCompose)
+	}
+
+	client2.gui.events <- Click{
+		name:      "send",
+		combos:    map[string]string{"to": "client1"},
+		textViews: map[string]string{"body": "reply message"},
+	}
+	client2.AdvanceTo(uiStateOutbox)
+
+	if abortSend {
+		client2.gui.events <- Click{name: "abort"}
+		client2.AdvanceTo(uiStateCompose)
+
+		client2.gui.events <- Click{
+			name:      "send",
+			combos:    map[string]string{"to": "client1"},
+			textViews: map[string]string{"body": "reply message"},
+		}
+		client2.AdvanceTo(uiStateOutbox)
+	}
+
+	ackChan := make(chan bool)
+	client2.fetchNowChan <- ackChan
+
+WaitForAck:
+	for {
+		select {
+		case ack := <-client2.gui.signal:
+			ack <- true
+		case <-ackChan:
+			break WaitForAck
+		}
+	}
+
+	from, _ = fetchMessage(client1)
+	if from != "client2" {
+		t.Fatalf("ack received from wrong contact: %s", from)
+	}
+
+	if client1.outbox[0].acked.IsZero() {
+		t.Fatalf("client1 doesn't believe that its message has been acked")
+	}
+	if !client2.inbox[0].acked {
+		t.Fatalf("client2 doesn't believe that it has acked the message")
+	}
+}
+
+func TestReplyACKs(t *testing.T) {
+	testReplyACKs(t, false, false)
+}
+
+func TestReplyACKsWithDraft(t *testing.T) {
+	testReplyACKs(t, true, false)
+}
+
+func TestReplyACKsWithDraftAndAbort(t *testing.T) {
+	testReplyACKs(t, true, true)
+}
+
+func TestCliId(t *testing.T) {
+	id := cliId(0x7ab8)
+	s := id.String()
+	t.Log(s)
+	if result, ok := cliIdFromString(s); !ok || result != id {
+		t.Fatalf("CliId parse failed: got %d, want %d", result, id)
+	}
+}
+
+func TestSendToPendingContact(t *testing.T) {
+	// Test that it's not possible to send a message to a pending contact.
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := NewTestClient(t, "client", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	proceedToMainUI(t, client, server)
+
+	client.gui.events <- Click{name: "newcontact"}
+	client.AdvanceTo(uiStateNewContact)
+
+	client.gui.events <- Click{
+		name:    "name",
+		entries: map[string]string{"name": "pendingContact"},
+	}
+	client.gui.events <- Click{name: "manual"}
+	client.AdvanceTo(uiStateNewContact2)
+
+	client.gui.events <- Click{name: "compose"}
+	client.AdvanceTo(uiStateCompose)
+
+	if contacts, ok := client.gui.combos["to"]; !ok || len(contacts) > 0 {
+		t.Error("can send message to pending contact")
+	}
+}
+
+func TestDelete(t *testing.T) {
+	// Test that deleting contacts works.
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	// Start an incomplete, manual exchange.
+	proceedToKeyExchange(t, client1, server, "client3")
+
+	// Start a PANDA exchange.
+	mp := panda.NewSimpleMeetingPlace()
+	newMeetingPlace := func() panda.MeetingPlace {
+		return mp
+	}
+	client1.newMeetingPlace = newMeetingPlace
+	startPANDAKeyExchange(t, client1, server, "client4", "secret")
+	client1.AdvanceTo(uiStateShowContact)
+
+	clickOnContact(client1, "client2")
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	if len(client1.inbox) > 0 {
+		t.Errorf("still entries in inbox")
+	}
+
+	for _, msg := range client1.outbox {
+		if !msg.revocation {
+			t.Errorf("still entries in outbox")
+			break
+		}
+	}
+
+	clickOnContact(client1, "client3")
+	client1.gui.events <- Click{name: "abort"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	clickOnContact(client1, "client4")
+	client1.gui.events <- Click{name: "delete"}
+	client1.gui.events <- Click{name: "delete"}
+	client1.AdvanceTo(uiStateRevocationComplete)
+
+	if len(client1.contacts) > 0 {
+		t.Errorf("still contacts")
+	}
+
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+}
+
+func TestExpireMessage(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad initial number of inbox messages: %d", n)
+	}
+
+	baseTime := time.Now()
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad number of messages after first timer: %d", n)
+	}
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after first timer: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorGray {
+		t.Fatalf("Bad message background after first timer")
+	}
+
+	// Advance the clock so that the message should be indicated as near
+	// deletion.
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messagePreIndicationLifetime + 10*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorDeleteSoon {
+		t.Fatalf("Bad message background after second timer")
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after reload: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorDeleteSoon {
+		t.Fatalf("Bad message background after second reload")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after second reload: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorImminently {
+		t.Fatalf("Bad message background after second reload")
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after grace period timer: %d", n)
+	}
+
+	if client2.inboxUI.entries[0].background != colorImminently {
+		t.Fatalf("Bad message background after grace period timer")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second + messageGraceTime)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad number of messages in listUI after expiry: %d", n)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad number of messages in inbox after expiry: %d", n)
+	}
+}
+
+func TestRetainMessage(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Bad initial number of inbox messages: %d", n)
+	}
+
+	if n := len(client2.inboxUI.entries); n != 1 {
+		t.Fatalf("Bad initial number of messages in listUI: %d", n)
+	}
+
+	msg := client2.inbox[0]
+	if msg.retained {
+		t.Fatalf("Retained flag is initially set")
+	}
+
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name:   "retain",
+		checks: map[string]bool{"retain": true},
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	if !msg.retained {
+		t.Fatalf("Retained flag not set")
+	}
+
+	client2.Reload()
+	client2.AdvanceTo(uiStateMain)
+
+	msg = client2.inbox[0]
+	if !msg.retained {
+		t.Fatalf("Retained flag lost")
+	}
+
+	baseTime := time.Now()
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message was deleted while retain flag set")
+	}
+
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name:   "retain",
+		checks: map[string]bool{"retain": false},
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	if msg.retained {
+		t.Fatalf("Retain flag not cleared")
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message was deleted while in grace period")
+	}
+
+	client2.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + messageGraceTime + 20*time.Second)
+	}
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 1 {
+		t.Fatalf("Message deleted while selected")
+	}
+
+	client2.gui.events <- Click{
+		name: "compose",
+	}
+	client2.AdvanceTo(uiStateCompose)
+
+	client2.testTimerChan <- baseTime
+	client2.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client2.inbox); n != 0 {
+		t.Fatalf("Message not deleted")
+	}
+}
+
+func TestOutboxDeletion(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+
+	client1.gui.events <- Click{
+		name: "compose",
+	}
+	client1.AdvanceTo(uiStateCompose)
+
+	if n := len(client1.outbox); n != 1 {
+		t.Fatalf("Bad initial number of outbox messages: %d", n)
+	}
+
+	baseTime := time.Now()
+	client1.nowFunc = func() time.Time {
+		return baseTime.Add(messageLifetime + 10*time.Second)
+	}
+
+	client1.testTimerChan <- baseTime
+	client1.AdvanceTo(uiStateTimerComplete)
+
+	if n := len(client1.outbox); n != 0 {
+		t.Fatalf("Outbox message not deleted")
 	}
 }

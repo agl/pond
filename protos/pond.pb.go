@@ -564,6 +564,7 @@ type KeyExchange struct {
 	IdentityPublic   []byte  `protobuf:"bytes,2,req,name=identity_public" json:"identity_public,omitempty"`
 	Server           *string `protobuf:"bytes,3,req,name=server" json:"server,omitempty"`
 	Dh               []byte  `protobuf:"bytes,4,req,name=dh" json:"dh,omitempty"`
+	Dh1              []byte  `protobuf:"bytes,8,opt,name=dh1" json:"dh1,omitempty"`
 	Group            []byte  `protobuf:"bytes,5,req,name=group" json:"group,omitempty"`
 	GroupKey         []byte  `protobuf:"bytes,6,req,name=group_key" json:"group_key,omitempty"`
 	Generation       *uint32 `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
@@ -598,6 +599,13 @@ func (this *KeyExchange) GetServer() string {
 func (this *KeyExchange) GetDh() []byte {
 	if this != nil {
 		return this.Dh
+	}
+	return nil
+}
+
+func (this *KeyExchange) GetDh1() []byte {
+	if this != nil {
+		return this.Dh1
 	}
 	return nil
 }
@@ -652,7 +660,7 @@ type Message struct {
 	Time             *int64                `protobuf:"varint,2,req,name=time" json:"time,omitempty"`
 	Body             []byte                `protobuf:"bytes,3,req,name=body" json:"body,omitempty"`
 	BodyEncoding     *Message_Encoding     `protobuf:"varint,4,opt,name=body_encoding,enum=protos.Message_Encoding" json:"body_encoding,omitempty"`
-	MyNextDh         []byte                `protobuf:"bytes,5,req,name=my_next_dh" json:"my_next_dh,omitempty"`
+	MyNextDh         []byte                `protobuf:"bytes,5,opt,name=my_next_dh" json:"my_next_dh,omitempty"`
 	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
 	DetachedFiles    []*Message_Detachment `protobuf:"bytes,8,rep,name=detached_files" json:"detached_files,omitempty"`

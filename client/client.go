@@ -1,24 +1,82 @@
 package main
 
+// The Pond client consists of a number of goroutines:
+//
+// The initial goroutine handles GTK and sits in the GTK event loop most of the
+// time. It reads requests to change the UI from UI.Actions() and writes UI
+// events to UI.Events(). Since its sitting in a GTK mainloop, after writing to
+// UI.Actions(), UI.Signal() must be called which wakes up the UI goroutine and
+// triggers the processing of any pending requests.
+//
+// The "main" goroutine is started immediately and exclusively drives the UI.
+// The reason that the "main" goroutine isn't the initial goroutine is that, on
+// OS X, the system really likes the native UI calls to be made from the
+// initial thread.
+//
+// The main goroutine drives the startup process, loads state from disk etc.
+// During startup it interacts with the UI channels directly but once startup
+// has completed it sits in nextEvent(). The UI goroutine is callback based
+// because GTK is callback based, but the main goroutine has a synchronous
+// model. The nextEvent() call reads from a number of differnet channels,
+// including UI.Events() and either processes the event directly, returns the
+// event to the calling function, or returns and indicates that it's a global
+// event. Global events are basically clicks on the left-hand-side of the UI
+// which stop the current UI flow and start a different one.
+//
+// There are two utility goroutines with which the main goroutine communicates:
+//
+// The state writing goroutine is passed the serialised state for writing to
+// the disk every time c.save() is called. It avoids having disk or TPM latency
+// hang the main goroutine.
+//
+// The network goroutine handles sending and receiving messages. It shares a
+// locked queue with the main goroutine in the form of client.queue. Once
+// something has been added to the queue, the network goroutine owns it. This
+// is complex when it comes to handling revocations because that involves
+// resigning messages that have already been queued and thus part of the
+// handling has to happen on the network goroutine.
+//
+// Lastly there are two types of O(n) goroutines: detachment and PANDA
+// goroutines.
+//
+// Detachment goroutines handle the encryption/decryption and upload/download
+// of detactments. They feed their results back into nextEvent().
+//
+// PANDA goroutines handle shared-secret key exchanges. They spend most of
+// their time sleeping, waiting to poll the MeetingPlace. In tests, the mock
+// MeetingPlace can be gracefully shutdown but, in normal operation, these
+// goroutines are just killed. Their state is preserved because it's serialised
+// whenever they write a log message.
+//
+//
+// There are two flags that affect operation: dev and testing. Development mode
+// is triggered by an environment variable: POND=dev. It causes a number of
+// changes, including: servers are not contacted over Tor, fetches happen once
+// every 5 seconds and the default server is on localhost.
+//
+// In addition to dev mode, there's testing mode. (Testing mode implies dev.)
+// Testing mode is used by the unittests and generally changes things so that
+// the tests can fully synchonise and avoid non-determinism.
+
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/ratchet"
+	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 )
 
@@ -26,81 +84,49 @@ const (
 	// messageLifetime is the default amount of time for which we'll keep a
 	// message. (Counting from the time that it was received.)
 	messageLifetime = 7 * 24 * time.Hour
+	// messagePreIndicationLifetime is the amount of time that a message
+	// remains before the background color changes to indicate that it will
+	// be deleted soon.
+	messagePreIndicationLifetime = 6 * 24 * time.Hour
+	// messageGraceTime is the amount of time that we'll leave a message
+	// before deletion after it has been marked as not-retained, or after
+	// startup.
+	messageGraceTime = 5 * time.Minute
 	// The current protocol version implemented by this code.
 	protoVersion = 1
 )
 
 const (
-	colorDefault               = 0
-	colorWhite                 = 0xffffff
-	colorGray                  = 0xfafafa
-	colorHighlight             = 0xffebcd
-	colorSubline               = 0x999999
-	colorHeaderBackground      = 0xececed
-	colorHeaderForeground      = 0x777777
-	colorHeaderForegroundSmall = 0x7b7f83
-	colorSep                   = 0xc9c9c9
-	colorTitleForeground       = 0xdddddd
-	colorBlack                 = 1
-	colorRed                   = 0xff0000
-	colorError                 = 0xff0000
+	shortTimeFormat = "Jan _2 15:04"
+	logTimeFormat   = "Jan _2 15:04:05"
+	keyExchangePEM  = "POND KEY EXCHANGE"
 )
-
-const (
-	fontLoadTitle   = "DejaVu Serif 30"
-	fontLoadLarge   = "Arial Bold 30"
-	fontListHeading = "Ariel Bold 11"
-	fontListEntry   = "Liberation Sans 12"
-	fontListSubline = "Liberation Sans 10"
-	fontMainTitle   = "Arial 16"
-	fontMainLabel   = "Arial Bold 9"
-	fontMainBody    = "Arial 12"
-	fontMainMono    = "Liberation Mono 10"
-)
-
-const (
-	uiStateInvalid = iota
-	uiStateLoading
-	uiStateError
-	uiStateMain
-	uiStateCreateAccount
-	uiStateCreatePassphrase
-	uiStateNewContact
-	uiStateNewContact2
-	uiStateShowContact
-	uiStateCompose
-	uiStateOutbox
-	uiStateShowIdentity
-	uiStatePassphrase
-	uiStateInbox
-	uiStateLog
-	uiStateRevocationProcessed
-)
-
-const shortTimeFormat = "Jan _2 15:04"
-const logTimeFormat = "Jan _2 15:04:05"
-const keyExchangePEM = "POND KEY EXCHANGE"
 
 // client is the main structure containing most of the client's state.
 type client struct {
 	// testing is true in unittests and disables some assertions that are
 	// needed in the real world, but which make testing difficult.
 	testing bool
+	// dev is true if POND=dev is in the environment. Unittests also set this.
+	dev bool
 	// autoFetch controls whether the network goroutine performs periodic
 	// transactions or waits for outside prompting.
 	autoFetch bool
+	// newMeetingPlace is a function that returns a PANDA MeetingPlace. In
+	// tests this can be overridden to return a testing meeting place.
+	newMeetingPlace func() panda.MeetingPlace
 
+	ui UI
 	// stateFilename is the filename of the file on disk in which we
 	// load/save our state.
 	stateFilename string
-	stateLock     *disk.Lock
-	// diskSalt contains the scrypt salt used to derive the state
-	// encryption key.
-	diskSalt [disk.SCryptSaltLen]byte
-	// diskKey is the XSalsa20 key used to encrypt the disk state.
-	diskKey [32]byte
+	// stateLock protects the state against concurrent access by another
+	// program.
+	stateLock *disk.Lock
+	// torAddress contains a string like "127.0.0.1:9050", which specifies
+	// the address of the local Tor SOCKS proxy.
+	torAddress string
 
-	ui UI
 	// server is the URL of the user's home server.
 	server string
 	// identity is a curve25519 private value that's used to authenticate
@@ -120,12 +146,15 @@ type client struct {
 	// pub is the public key corresponding to |priv|.
 	pub  [32]byte
 	rand io.Reader
+	// lastErasureStorageTime is the time at which we last rotated the
+	// erasure storage value.
+	lastErasureStorageTime time.Time
 	// writerChan is a channel that the disk goroutine reads from to
 	// receive updated, serialised states.
-	writerChan chan []byte
+	writerChan chan disk.NewState
 	// writerDone is a channel that is closed by the disk goroutine when it
 	// has finished all pending updates.
-	writerDone chan bool
+	writerDone chan struct{}
 	// fetchNowChan is the channel that the network goroutine reads from
 	// that triggers an immediate network transaction. Mostly intended for
 	// testing.
@@ -139,8 +168,7 @@ type client struct {
 
 	log *Log
 
-	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
-
+	// outbox contains all outgoing messages.
 	outbox   []*queuedMessage
 	drafts   map[uint64]*Draft
 	contacts map[uint64]*Contact
@@ -156,10 +184,77 @@ type client struct {
 	// messageSentChan receives the ids of messages that have been sent by
 	// the network goroutine.
 	messageSentChan chan messageSendResult
-	backgroundChan  chan interface{}
+	// backgroundChan is used for signals from background processes - e.g.
+	// detachment uploads.
+	backgroundChan chan interface{}
+	// pandaChan receives messages from goroutines in runPANDA about
+	// changes to PANDA key exchange state.
+	pandaChan chan pandaUpdate
+	// pandaWaitGroup is incremented for each running PANDA goroutine.
+	pandaWaitGroup sync.WaitGroup
+
+	// usedIds records ID numbers that have been assigned in the current
+	// state file.
+	usedIds map[uint64]bool
+
+	// timerChan fires every two minutes so that messages can be erased.
+	timerChan <-chan time.Time
+	// nowFunc is a function that, if not nil, will be used by the GUI to
+	// get the current time. This is used in testing.
+	nowFunc func() time.Time
+
+	// simulateOldClient causes the client to act like a pre-ratchet client
+	// for testing purposes.
+	simulateOldClient bool
+}
+
+// UI abstracts behaviour that is specific to a given interface (GUI or CLI).
+// Generic code can call these functions to perform interface-specific
+// behaviour.
+type UI interface {
+	initUI()
+	// loadingUI shows a basic "loading" prompt while the state file is read.
+	loadingUI()
+	// torPromptUI prompts the user to start Tor.
+	torPromptUI() error
+	// sleepUI waits the given amount of time or never returns if the user
+	// closes the UI.
+	sleepUI(d time.Duration) error
+	// errorUI shows an error and returns.
+	errorUI(msg string, fatal bool)
+	// ShutdownAndSuspend quits the program - possibly waiting for the user
+	// to close the window in the case of a GUI so any error message can be
+	// read first.
+	ShutdownAndSuspend() error
+	createPassphraseUI() (string, error)
+	createErasureStorage(pw string, stateFile *disk.StateFile) error
+	createAccountUI() error
+	keyPromptUI(stateFile *disk.StateFile) error
+	processFetch(msg *InboxMessage)
+	processServerAnnounce(announce *InboxMessage)
+	processAcknowledgement(ackedMsg *queuedMessage)
+	// processRevocationOfUs is called when a revocation is received that
+	// revokes our group key for a contact.
+	processRevocationOfUs(by *Contact)
+	// processRevocation is called when we have finished processing a
+	// revocation. This includes revocations of others and of this
+	// ourselves. In the latter case, this is called after
+	// processRevocationOfUs.
+	processRevocation(by *Contact)
+	// processMessageSent is called when an outbox message has been
+	// delivered to the destination server.
+	processMessageDelivered(msg *queuedMessage)
+	// processPANDAUpdateUI is called on each PANDA update to update the
+	// UI and unseal pending messages.
+	processPANDAUpdateUI(update pandaUpdate)
+	// mainUI starts the main interface.
+	mainUI()
 }
 
 type messageSendResult struct {
+	// If the id is zero then a message wasn't actually sent - this is just
+	// the transact goroutine poking the UI because the queue has been
+	// updated.
 	id uint64
 	// revocation optionally contains a revocation update that resulted
 	// from attempting to send a message.
@@ -178,12 +273,62 @@ type revocationUpdate struct {
 // pendingDecryption represents a detachment decryption/download operation
 // that's in progress. These are not saved to disk.
 type pendingDecryption struct {
-	index  int
+	// index is used by the UI code and indexes the list of detachments in
+	// a message.
+	index int
+	// cancel is a thunk that causes the task to be canceled at some point
+	// in the future.
 	cancel func()
 }
 
-// InboxMessage represents a message in the client's inbox. (Although acks also
-// appear as InboxMessages, but their message.Body is empty.)
+// cliId represents a short, unique ID that is assigned by the command-line
+// interface so that users can select an object by typing a short sequence of
+// letters and digits. The value is 15 bits long and represented as a string in
+// z-base-32.
+type cliId uint
+
+const invalidCliId cliId = 0
+
+// See http://philzimmermann.com/docs/human-oriented-base-32-encoding.txt
+const zBase32Chars = "ybndrfg8ejkmcpqxot1uwisza345h769"
+
+func (id cliId) String() string {
+	var chars [3]byte
+
+	for i := range chars {
+		chars[i] = zBase32Chars[id&31]
+		id >>= 5
+	}
+
+	return string(chars[:])
+}
+
+func cliIdFromString(s string) (id cliId, ok bool) {
+	if len(s) != 3 {
+		return
+	}
+
+	var shift uint
+
+NextChar:
+	for _, r := range s {
+		for i, r2 := range zBase32Chars {
+			if r == r2 {
+				id |= cliId(i) << shift
+				shift += 5
+				continue NextChar
+			}
+		}
+
+		return
+	}
+
+	ok = true
+	return
+}
+
+// InboxMessage represents a message in the client's inbox. (Acks also appear
+// as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
 	id           uint64
 	read         bool
@@ -196,8 +341,47 @@ type InboxMessage struct {
 	// message may be nil if the contact who sent this is pending. In this
 	// case, sealed with contain the encrypted message.
 	message *pond.Message
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
+	// retained is true if the user has chosen to retain this message -
+	// i.e. to opt it out of the usual, time-based, auto-deletion.
+	retained bool
+	// exposureTime contains the time when the message was last "exposed".
+	// This is used to allow a small period of time for the user to mark a
+	// message as retained (messageGraceTime). For example, if a message is
+	// loaded at startup and has expired then it's a candidate for
+	// deletion, but the exposureTime will be the startup time, which
+	// ensures that we leave it a few minutes before deletion. Setting
+	// retained to false also resets the exposureTime.
+	exposureTime time.Time
 
 	decryptions map[uint64]*pendingDecryption
+}
+
+func (msg *InboxMessage) Strings() (from, sentTime, eraseTime, body string) {
+	isServerAnnounce := msg.from == 0
+
+	if isServerAnnounce {
+		from = "<Home Server>"
+	}
+	isPending := msg.message == nil
+	if isPending {
+		body = "(cannot display message as key exchange is still pending)"
+		sentTime = "(unknown)"
+	} else {
+		sentTime = time.Unix(*msg.message.Time, 0).Format(time.RFC1123)
+		body = "(cannot display message as encoding is not supported)"
+		if msg.message.BodyEncoding != nil {
+			switch *msg.message.BodyEncoding {
+			case pond.Message_RAW:
+				body = string(msg.message.Body)
+			}
+		}
+	}
+	eraseTime = msg.receivedTime.Add(messageLifetime).Format(time.RFC1123)
+	return
 }
 
 // NewMessage is sent from the network goroutine to the client goroutine and
@@ -212,7 +396,8 @@ type NewMessage struct {
 type Contact struct {
 	// id is only locally valid.
 	id uint64
-	// name is the friendly name that the user chose for this contact.
+	// name is the friendly name that the user chose for this contact. It
+	// is unique for all contacts.
 	name string
 	// isPending is true if we haven't received a key exchange message from
 	// this contact.
@@ -225,7 +410,7 @@ type Contact struct {
 	groupKey, myGroupKey *bbssig.MemberKey
 	// previousTags contains bbssig tags that were previously used by this
 	// contact. The tag of a contact changes when a recovation is
-	// processed, but old messages may still be pending.
+	// processed, but old messages may still be queued.
 	previousTags []previousTag
 	// generation is the current group generation number that we know for
 	// this contact.
@@ -244,12 +429,26 @@ type Contact struct {
 	revoked bool
 	// revokedUs is true if this contact has recoved us.
 	revokedUs bool
+	// pandaKeyExchange contains the serialised PANDA state if a key
+	// exchange is ongoing.
+	pandaKeyExchange []byte
+	// pandaShutdownChan is a channel that can be closed to trigger the
+	// shutdown of an individual PANDA exchange.
+	pandaShutdownChan chan struct{}
+	// pandaResult contains an error message in the event that a PANDA key
+	// exchange failed.
+	pandaResult string
 
-	lastDHPrivate    [32]byte
-	currentDHPrivate [32]byte
-
+	// Members for the old ratchet.
+	lastDHPrivate        [32]byte
+	currentDHPrivate     [32]byte
 	theirLastDHPublic    [32]byte
 	theirCurrentDHPublic [32]byte
+
+	// New ratchet support.
+	ratchet *ratchet.Ratchet
+
+	cliId cliId
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -292,743 +491,17 @@ type Draft struct {
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
 	detachments []*pond.Message_Detachment
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
 
 	pendingDetachments map[uint64]*pendingDetachment
 }
 
-type queuedMessage struct {
-	request    *pond.Request
-	id         uint64
-	to         uint64
-	server     string
-	created    time.Time
-	sent       time.Time
-	acked      time.Time
-	revocation bool
-	message    *pond.Message
-}
-
-func (c *client) errorUI(errorText string, bgColor uint32) {
-	ui := EventBox{
-		widgetBase: widgetBase{background: bgColor, expand: true, fill: true},
-		child: Label{
-			widgetBase: widgetBase{
-				foreground: colorBlack,
-				font:       "Ariel Bold 12",
-			},
-			text:   errorText,
-			xAlign: 0.5,
-			yAlign: 0.5,
-		},
-	}
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- UIState{uiStateError}
-	c.ui.Signal()
-	if !c.testing {
-		select {
-		case _, ok := <-c.ui.Events():
-			if !ok {
-				// User asked to close the window.
-				close(c.ui.Actions())
-				select {}
-			}
-		}
-	}
-}
-
-func (c *client) loadUI() {
-	ui := VBox{
-		widgetBase: widgetBase{
-			background: colorWhite,
-		},
-		children: []Widget{
-			EventBox{
-				widgetBase: widgetBase{background: 0x333355},
-				child: HBox{
-					children: []Widget{
-						Label{
-							widgetBase: widgetBase{
-								foreground: colorWhite,
-								padding:    10,
-								font:       fontLoadTitle,
-							},
-							text: "Pond",
-						},
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{
-					name:    "body",
-					padding: 30,
-					expand:  true,
-					fill:    true,
-				},
-			},
-		},
-	}
-	c.ui.Actions() <- Reset{ui}
-
-	loading := EventBox{
-		widgetBase: widgetBase{expand: true, fill: true},
-		child: Label{
-			widgetBase: widgetBase{
-				foreground: colorTitleForeground,
-				font:       fontLoadLarge,
-			},
-			text:   "Loading...",
-			xAlign: 0.5,
-			yAlign: 0.5,
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: loading}
-	c.ui.Actions() <- UIState{uiStateLoading}
-	c.ui.Signal()
-
-	stateFile, err := os.Open(c.stateFilename)
-
-	ok := true
-	var state []byte
-	if err == nil {
-		if c.stateLock, ok = disk.LockStateFile(stateFile); !ok {
-			c.errorUI("State file locked by another process. Waiting for lock.", colorDefault)
-			c.log.Errorf("Waiting for locked state file")
-		}
-		for {
-			if c.stateLock, ok = disk.LockStateFile(stateFile); ok {
-				break
-			}
-			select {
-			case _, ok := <-c.ui.Events():
-				if !ok {
-					// User asked to close the window.
-					close(c.ui.Actions())
-					select {}
-				}
-			case <-time.After(1 * time.Second):
-				break
-			}
-		}
-
-		state, err = ioutil.ReadAll(stateFile)
-		stateFile.Close()
-		c.diskSalt, ok = disk.GetSCryptSaltFromState(state)
-	}
-
-	newAccount := false
-	if err != nil || !ok {
-		// New account flow.
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			panic(err)
-		}
-		copy(c.priv[:], priv[:])
-		copy(c.pub[:], pub[:])
-
-		c.groupPriv, err = bbssig.GenerateGroup(rand.Reader)
-		if err != nil {
-			panic(err)
-		}
-		c.createPassphraseUI()
-		c.createAccountUI()
-		newAccount = true
-	} else {
-		// First try with zero key.
-		err = c.loadState(state)
-		for err == disk.BadPasswordError {
-			// That didn't work, try prompting for a key.
-			err = c.keyPromptUI(state)
-		}
-		if err != nil {
-			// Fatal error loading state. Abort.
-			c.errorUI(err.Error(), colorError)
-			select {}
-			c.ShutdownAndSuspend()
-		}
-	}
-
-	if newAccount {
-		file, err := os.Create(c.stateFilename)
-		if err == nil {
-			c.stateLock, ok = disk.LockStateFile(file)
-			if !ok {
-				err = errors.New("Failed to obtain lock on newly created state file")
-			}
-			file.Close()
-		}
-		if err != nil {
-			c.errorUI(err.Error(), colorError)
-			c.ShutdownAndSuspend()
-		}
-	}
-
-	c.writerChan = make(chan []byte)
-	c.writerDone = make(chan bool)
-	c.fetchNowChan = make(chan chan bool, 1)
-	c.revocationUpdateChan = make(chan revocationUpdate, 8)
-
-	// Start disk and network workers.
-	go disk.StateWriter(c.stateFilename, &c.diskKey, &c.diskSalt, c.writerChan, c.writerDone)
-	go c.transact()
-	if newAccount {
-		c.save()
-	}
-
-	c.mainUI()
-}
-
-func (c *client) DeselectAll() {
-	c.inboxUI.Deselect()
-	c.outboxUI.Deselect()
-	c.contactsUI.Deselect()
-	c.clientUI.Deselect()
-	c.draftsUI.Deselect()
-}
-
-var rightPlaceholderUI = EventBox{
-	widgetBase: widgetBase{background: colorGray, name: "right"},
-	child: Label{
-		widgetBase: widgetBase{
-			foreground: colorTitleForeground,
-			font:       fontLoadLarge,
-		},
-		text:   "Pond",
-		xAlign: 0.5,
-		yAlign: 0.5,
-	},
-}
-
-func (c *client) updateWindowTitle() {
-	unreadCount := 0
-
-	for _, msg := range c.inbox {
-		if msg.message != nil && !msg.read && len(msg.message.Body) > 0 {
-			unreadCount++
-		}
-	}
-
-	if unreadCount == 0 {
-		c.ui.Actions() <- SetTitle{"Pond"}
-	} else {
-		c.ui.Actions() <- SetTitle{fmt.Sprintf("Pond (%d)", unreadCount)}
-	}
-	c.ui.Signal()
-}
-
-func (c *client) mainUI() {
-	ui := Paned{
-		left: Scrolled{
-			viewport: true,
-			child: EventBox{
-				widgetBase: widgetBase{background: colorGray},
-				child: VBox{
-					children: []Widget{
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Inbox",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{widgetBase: widgetBase{name: "inboxVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Outbox",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						HBox{
-							widgetBase: widgetBase{padding: 6},
-							children: []Widget{
-								HBox{widgetBase: widgetBase{expand: true}},
-								HBox{
-									widgetBase: widgetBase{padding: 8},
-									children: []Widget{
-										VBox{
-											widgetBase: widgetBase{padding: 8},
-											children: []Widget{
-												Button{
-													widgetBase: widgetBase{width: 100, name: "compose"},
-													text:       "Compose",
-												},
-											},
-										},
-									},
-								},
-								HBox{widgetBase: widgetBase{expand: true}},
-							},
-						},
-						VBox{widgetBase: widgetBase{name: "outboxVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Drafts",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{widgetBase: widgetBase{name: "draftsVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Contacts",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						HBox{
-							widgetBase: widgetBase{padding: 6},
-							children: []Widget{
-								HBox{widgetBase: widgetBase{expand: true}},
-								HBox{
-									widgetBase: widgetBase{padding: 8},
-									children: []Widget{
-										VBox{
-											widgetBase: widgetBase{padding: 8},
-											children: []Widget{
-												Button{
-													widgetBase: widgetBase{width: 100, name: "newcontact"},
-													text:       "Add",
-												},
-											},
-										},
-									},
-								},
-								HBox{widgetBase: widgetBase{expand: true}},
-							},
-						},
-						VBox{widgetBase: widgetBase{name: "contactsVbox"}},
-
-						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
-							child: Label{
-								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
-									padding:    10,
-									font:       fontListHeading,
-								},
-								xAlign: 0.5,
-								text:   "Client",
-							},
-						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-						VBox{
-							widgetBase: widgetBase{name: "clientVbox"},
-						},
-					},
-				},
-			},
-		},
-		right: Scrolled{
-			horizontal: true,
-			viewport:   true,
-			child:      rightPlaceholderUI,
-		},
-	}
-
-	c.ui.Actions() <- Reset{ui}
-	c.ui.Signal()
-
-	c.contactsUI = &listUI{
-		ui:       c.ui,
-		vboxName: "contactsVbox",
-	}
-
-	for id, contact := range c.contacts {
-		subline := ""
-		if contact.isPending {
-			subline = "pending"
-		}
-		c.contactsUI.Add(id, contact.name, subline, indicatorNone)
-	}
-
-	c.inboxUI = &listUI{
-		ui:       c.ui,
-		vboxName: "inboxVbox",
-	}
-
-	for _, msg := range c.inbox {
-		var subline string
-		i := indicatorNone
-
-		if msg.message == nil {
-			subline = "pending"
-		} else {
-			if len(msg.message.Body) == 0 {
-				continue
-			}
-			if !msg.read {
-				i = indicatorBlue
-			}
-			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-		}
-		fromString := "Home Server"
-		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
-		}
-		c.inboxUI.Add(msg.id, fromString, subline, i)
-	}
-	c.updateWindowTitle()
-
-	c.outboxUI = &listUI{
-		ui:       c.ui,
-		vboxName: "outboxVbox",
-	}
-
-	for _, msg := range c.outbox {
-		if msg.revocation {
-			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
-			c.outboxUI.SetInsensitive(msg.id)
-			continue
-		}
-		if len(msg.message.Body) > 0 {
-			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
-		}
-	}
-
-	c.draftsUI = &listUI{
-		ui:       c.ui,
-		vboxName: "draftsVbox",
-	}
-
-	for _, draft := range c.drafts {
-		to := "Unknown"
-		if draft.to != 0 {
-			to = c.contacts[draft.to].name
-		}
-		subline := draft.created.Format(shortTimeFormat)
-		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
-	}
-
-	c.clientUI = &listUI{
-		ui:       c.ui,
-		vboxName: "clientVbox",
-	}
-	const (
-		clientUIIdentity = iota + 1
-		clientUIActivity
-	)
-	c.clientUI.Add(clientUIIdentity, "Identity", "", indicatorNone)
-	c.clientUI.Add(clientUIActivity, "Activity Log", "", indicatorNone)
-
-	c.ui.Actions() <- UIState{uiStateMain}
-	c.ui.Signal()
-
-	var nextEvent interface{}
-	for {
-		event := nextEvent
-		nextEvent = nil
-		if event == nil {
-			event, _ = c.nextEvent()
-		}
-		if event == nil {
-			continue
-		}
-
-		c.DeselectAll()
-		if id, ok := c.inboxUI.Event(event); ok {
-			c.inboxUI.Select(id)
-			nextEvent = c.showInbox(id)
-			continue
-		}
-		if id, ok := c.outboxUI.Event(event); ok {
-			c.outboxUI.Select(id)
-			nextEvent = c.showOutbox(id)
-			continue
-		}
-		if id, ok := c.contactsUI.Event(event); ok {
-			c.contactsUI.Select(id)
-			nextEvent = c.showContact(id)
-			continue
-		}
-		if id, ok := c.clientUI.Event(event); ok {
-			c.clientUI.Select(id)
-			switch id {
-			case clientUIIdentity:
-				nextEvent = c.identityUI()
-			case clientUIActivity:
-				nextEvent = c.logUI()
-			default:
-				panic("bad clientUI event")
-			}
-			continue
-		}
-		if id, ok := c.draftsUI.Event(event); ok {
-			c.draftsUI.Select(id)
-			nextEvent = c.composeUI(c.drafts[id], nil)
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		switch click.name {
-		case "newcontact":
-			nextEvent = c.newContactUI(nil)
-		case "compose":
-			nextEvent = c.composeUI(nil, nil)
-		}
-	}
-}
-
-// listUI manages the sections in the left-hand side list. It contains a number
-// of items, which may have subheadlines and indicators (coloured dots).
-type listUI struct {
-	ui       UI
-	vboxName string
-	entries  []listItem
-	selected uint64
-	nextId   int
-}
-
-type listItem struct {
-	id                                                           uint64
-	name, sepName, boxName, imageName, lineName, sublineTextName string
-	insensitive                                                  bool
-}
-
-func (cs *listUI) Event(event interface{}) (uint64, bool) {
-	if click, ok := event.(Click); ok {
-		for _, entry := range cs.entries {
-			if click.name == entry.boxName {
-				if entry.insensitive {
-					return 0, false
-				}
-				return entry.id, true
-			}
-		}
-	}
-
-	return 0, false
-}
-
-func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
-	c := listItem{
-		id:              id,
-		name:            name,
-		sepName:         cs.newIdent(),
-		boxName:         cs.newIdent(),
-		imageName:       cs.newIdent(),
-		lineName:        cs.newIdent(),
-		sublineTextName: cs.newIdent(),
-	}
-	cs.entries = append(cs.entries, c)
-	index := len(cs.entries) - 1
-
-	if index > 0 {
-		// Add the separator bar.
-		cs.ui.Actions() <- AddToBox{
-			box:   cs.vboxName,
-			pos:   index*2 - 1,
-			child: EventBox{widgetBase: widgetBase{height: 1, background: 0xe5e6e6, name: c.sepName}},
-		}
-	}
-
-	children := []Widget{
-		HBox{
-			widgetBase: widgetBase{padding: 1},
-			children: []Widget{
-				Label{
-					widgetBase: widgetBase{
-						name:    c.lineName,
-						padding: 5,
-						font:    fontListEntry,
-					},
-					text: name,
-				},
-			},
-		},
-	}
-
-	var sublineChildren []Widget
-
-	if len(subline) > 0 {
-		sublineChildren = append(sublineChildren, Label{
-			widgetBase: widgetBase{
-				padding:    5,
-				foreground: colorSubline,
-				font:       fontListSubline,
-				name:       c.sublineTextName,
-			},
-			text: subline,
-		})
-	}
-
-	sublineChildren = append(sublineChildren, Image{
-		widgetBase: widgetBase{
-			padding: 4,
-			expand:  true,
-			fill:    true,
-			name:    c.imageName,
-		},
-		image:  indicator,
-		xAlign: 1,
-		yAlign: 0.5,
-	})
-
-	children = append(children, HBox{
-		widgetBase: widgetBase{padding: 1},
-		children:   sublineChildren,
-	})
-
-	cs.ui.Actions() <- AddToBox{
-		box: cs.vboxName,
-		pos: index * 2,
-		child: EventBox{
-			widgetBase: widgetBase{name: c.boxName, background: colorGray},
-			child:      VBox{children: children},
-		},
-	}
-	cs.ui.Signal()
-}
-
-func (cs *listUI) SetInsensitive(id uint64) {
-	for i, entry := range cs.entries {
-		if entry.id == id {
-			cs.entries[i].insensitive = true
-		}
-	}
-}
-
-func (cs *listUI) Remove(id uint64) {
-	for i, entry := range cs.entries {
-		if entry.id == id {
-			if i > 0 {
-				cs.ui.Actions() <- Destroy{name: entry.sepName}
-			}
-			cs.ui.Actions() <- Destroy{name: entry.boxName}
-			cs.ui.Signal()
-			if cs.selected == id {
-				cs.selected = 0
-			}
-			return
-		}
-	}
-
-	panic("unknown id passed to Remove")
-}
-
-func (cs *listUI) Deselect() {
-	if cs.selected == 0 {
-		return
-	}
-
-	var currentlySelected string
-
-	for _, entry := range cs.entries {
-		if entry.id == cs.selected {
-			currentlySelected = entry.boxName
-			break
-		}
-	}
-
-	cs.ui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
-	cs.selected = 0
-	cs.ui.Signal()
-}
-
-func (cs *listUI) Select(id uint64) {
-	if id == cs.selected {
-		return
-	}
-
-	var currentlySelected, newSelected string
-
-	for _, entry := range cs.entries {
-		if entry.id == cs.selected {
-			currentlySelected = entry.boxName
-		} else if entry.id == id {
-			newSelected = entry.boxName
-		}
-
-		if len(currentlySelected) > 0 && len(newSelected) > 0 {
-			break
-		}
-	}
-
-	if len(newSelected) == 0 {
-		panic("internal error")
-	}
-
-	if len(currentlySelected) > 0 {
-		cs.ui.Actions() <- SetBackground{name: currentlySelected, color: colorGray}
-	}
-	cs.ui.Actions() <- SetBackground{name: newSelected, color: colorHighlight}
-	cs.selected = id
-	cs.ui.Signal()
-}
-
-func (cs *listUI) SetIndicator(id uint64, indicator Indicator) {
-	for _, entry := range cs.entries {
-		if entry.id == id {
-			cs.ui.Actions() <- SetImage{name: entry.imageName, image: indicator}
-			cs.ui.Signal()
-			break
-		}
-	}
-}
-
-func (cs *listUI) SetLine(id uint64, line string) {
-	for _, entry := range cs.entries {
-		if entry.id == id {
-			cs.ui.Actions() <- SetText{name: entry.lineName, text: line}
-			cs.ui.Signal()
-			break
-		}
-	}
-}
-
-func (cs *listUI) SetSubline(id uint64, subline string) {
-	for _, entry := range cs.entries {
-		if entry.id == id {
-			if len(subline) > 0 {
-				cs.ui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
-			} else {
-				cs.ui.Actions() <- Destroy{name: entry.sublineTextName}
-			}
-			cs.ui.Signal()
-			break
-		}
-	}
-}
-
-func (cs *listUI) newIdent() string {
-	id := cs.vboxName + "-" + strconv.Itoa(cs.nextId)
-	cs.nextId++
-	return id
-}
-
 // usageString returns a description of the amount of space taken up by a body
 // with the given contents and a bool indicating overflow.
-func usageString(draft *Draft) (string, bool) {
+func (draft *Draft) usageString() (string, bool) {
 	var replyToId *uint64
 	if draft.inReplyTo != 0 {
 		replyToId = proto.Uint64(1)
@@ -1056,658 +529,25 @@ func usageString(draft *Draft) (string, bool) {
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
-func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
-	var labelName string
-	var labelColor uint32
-	if isError {
-		labelName = fmt.Sprintf("attachment-error-%x", id)
-		labelColor = colorRed
-	} else {
-		labelName = fmt.Sprintf("attachment-label-%x", id)
-	}
-	return Frame{
-		widgetBase: widgetBase{
-			name:    fmt.Sprintf("attachment-frame-%x", id),
-			padding: 1,
-		},
-		child: VBox{
-			widgetBase: widgetBase{
-				name: fmt.Sprintf("attachment-vbox-%x", id),
-			},
-			children: append([]Widget{
-				HBox{
-					children: []Widget{
-						Label{
-							widgetBase: widgetBase{
-								padding:    2,
-								foreground: labelColor,
-								name:       labelName,
-							},
-							yAlign: 0.5,
-							text:   label,
-						},
-						VBox{
-							widgetBase: widgetBase{expand: true, fill: true},
-						},
-						Button{
-							widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
-							image:      indicatorRemove,
-						},
-					},
-				},
-			}, extraWidgets...),
-		},
-	}
-}
+type queuedMessage struct {
+	request    *pond.Request
+	id         uint64
+	to         uint64
+	server     string
+	created    time.Time
+	sent       time.Time
+	acked      time.Time
+	revocation bool
+	message    *pond.Message
 
-type DetachmentUI interface {
-	IsValid(id uint64) bool
-	ProgressName(id uint64) string
-	VBoxName(id uint64) string
-	OnFinal(id uint64)
-	OnSuccess(id uint64, detachment *pond.Message_Detachment)
-}
+	// sending is true if the transact goroutine is currently sending this
+	// message. This is protected by the queueMutex.
+	sending bool
 
-type ComposeDetachmentUI struct {
-	draft       *Draft
-	detachments map[uint64]int
-	ui          UI
-	final       func()
-}
-
-func (i ComposeDetachmentUI) IsValid(id uint64) bool {
-	_, ok := i.draft.pendingDetachments[id]
-	return ok
-}
-
-func (i ComposeDetachmentUI) ProgressName(id uint64) string {
-	return fmt.Sprintf("attachment-progress-%x", id)
-}
-
-func (i ComposeDetachmentUI) VBoxName(id uint64) string {
-	return fmt.Sprintf("attachment-vbox-%x", id)
-}
-
-func (i ComposeDetachmentUI) OnFinal(id uint64) {
-	delete(i.draft.pendingDetachments, id)
-	i.final()
-}
-
-func (i ComposeDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
-	i.detachments[id] = len(i.draft.detachments)
-	i.draft.detachments = append(i.draft.detachments, detachment)
-}
-
-func (c *client) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI) bool {
-	if derr, ok := event.(DetachmentError); ok {
-		id := derr.id
-		if !ui.IsValid(id) {
-			return true
-		}
-		c.ui.Actions() <- Destroy{name: ui.ProgressName(id)}
-		c.ui.Actions() <- Append{
-			name: ui.VBoxName(id),
-			children: []Widget{
-				Label{
-					widgetBase: widgetBase{
-						foreground: colorRed,
-					},
-					text: derr.err.Error(),
-				},
-			},
-		}
-		ui.OnFinal(id)
-		c.ui.Signal()
-		return true
-	}
-	if prog, ok := event.(DetachmentProgress); ok {
-		id := prog.id
-		if !ui.IsValid(id) {
-			return true
-		}
-		if prog.total == 0 {
-			return true
-		}
-		f := float64(prog.done) / float64(prog.total)
-		if f > 1 {
-			f = 1
-		}
-		c.ui.Actions() <- SetProgress{
-			name:     ui.ProgressName(id),
-			s:        prog.status,
-			fraction: f,
-		}
-		c.ui.Signal()
-		return true
-	}
-	if complete, ok := event.(DetachmentComplete); ok {
-		id := complete.id
-		if !ui.IsValid(id) {
-			return true
-		}
-		c.ui.Actions() <- Destroy{
-			name: ui.ProgressName(id),
-		}
-		ui.OnFinal(id)
-		ui.OnSuccess(id, complete.detachment)
-		c.ui.Signal()
-		return true
-	}
-
-	return false
-}
-
-func (c *client) updateUsage(validContactSelected bool, draft *Draft) bool {
-	usageMessage, over := usageString(draft)
-	c.ui.Actions() <- SetText{name: "usage", text: usageMessage}
-	color := uint32(colorBlack)
-	if over {
-		color = colorRed
-		c.ui.Actions() <- Sensitive{name: "send", sensitive: false}
-	} else if validContactSelected {
-		c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
-	}
-	c.ui.Actions() <- SetForeground{name: "usage", foreground: color}
-	return over
-}
-
-func (c *client) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
-	if draft != nil && inReplyTo != nil {
-		panic("draft and inReplyTo both set")
-	}
-
-	var contactNames []string
-	for _, contact := range c.contacts {
-		if !contact.revokedUs {
-			contactNames = append(contactNames, contact.name)
-		}
-	}
-
-	var preSelected string
-	if inReplyTo != nil {
-		if from, ok := c.contacts[inReplyTo.from]; ok {
-			preSelected = from.name
-		}
-	}
-
-	attachments := make(map[uint64]int)
-	detachments := make(map[uint64]int)
-
-	if draft != nil {
-		if to, ok := c.contacts[draft.to]; ok {
-			preSelected = to.name
-		}
-		for i := range draft.attachments {
-			attachments[c.randId()] = i
-		}
-		for i := range draft.detachments {
-			detachments[c.randId()] = i
-		}
-	}
-
-	if draft == nil {
-		var replyToId, contactId uint64
-		from := preSelected
-
-		if inReplyTo != nil {
-			replyToId = inReplyTo.id
-			contactId = inReplyTo.from
-		}
-		if len(preSelected) == 0 {
-			from = "Unknown"
-		}
-
-		draft = &Draft{
-			id:        c.randId(),
-			inReplyTo: replyToId,
-			to:        contactId,
-			created:   time.Now(),
-		}
-
-		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
-		c.draftsUI.Select(draft.id)
-		c.drafts[draft.id] = draft
-	}
-
-	initialUsageMessage, overSize := usageString(draft)
-	validContactSelected := len(preSelected) > 0
-
-	lhs := VBox{
-		children: []Widget{
-			HBox{
-				widgetBase: widgetBase{padding: 2},
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
-						text:       "TO",
-						yAlign:     0.5,
-					},
-					Combo{
-						widgetBase: widgetBase{
-							name:        "to",
-							insensitive: len(preSelected) > 0 && inReplyTo != nil,
-						},
-						labels:      contactNames,
-						preSelected: preSelected,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 2},
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
-						text:       "SIZE",
-						yAlign:     0.5,
-					},
-					Label{
-						widgetBase: widgetBase{name: "usage"},
-						text:       initialUsageMessage,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 0},
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
-						text:       "ATTACHMENTS",
-						yAlign:     0.5,
-					},
-					Button{
-						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
-						image:      indicatorAdd,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 0},
-				children: []Widget{
-					VBox{
-						widgetBase: widgetBase{name: "filesvbox", padding: 25},
-					},
-				},
-			},
-		},
-	}
-	rhs := VBox{
-		widgetBase: widgetBase{padding: 5},
-		children: []Widget{
-			Button{
-				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2},
-				text:       "Send",
-			},
-			Button{
-				widgetBase: widgetBase{name: "discard", padding: 2},
-				text:       "Discard",
-			},
-		},
-	}
-	ui := VBox{
-		children: []Widget{
-			EventBox{
-				widgetBase: widgetBase{background: colorHeaderBackground},
-				child: VBox{
-					children: []Widget{
-						HBox{
-							widgetBase: widgetBase{padding: 10},
-							children: []Widget{
-								Label{
-									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
-									text:       "COMPOSE",
-								},
-							},
-						},
-					},
-				},
-			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
-			HBox{
-				children: []Widget{
-					lhs,
-					Label{
-						widgetBase: widgetBase{expand: true, fill: true},
-					},
-					rhs,
-				},
-			},
-			Scrolled{
-				widgetBase: widgetBase{expand: true, fill: true},
-				horizontal: true,
-				child: TextView{
-					widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
-					editable:       true,
-					wrap:           true,
-					updateOnChange: true,
-					spellCheck:     true,
-					text:           draft.body,
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetChild{name: "right", child: ui}
-
-	if draft.pendingDetachments == nil {
-		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
-	}
-
-	var initialAttachmentChildren []Widget
-	for id, index := range attachments {
-		attachment := draft.attachments[index]
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)), false, nil))
-	}
-	for id, index := range detachments {
-		detachment := draft.detachments[index]
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
-	}
-	for id, pending := range draft.pendingDetachments {
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", filepath.Base(pending.path), pending.size), false, []Widget{
-			Progress{
-				widgetBase: widgetBase{
-					name: fmt.Sprintf("attachment-progress-%x", id),
-				},
-			},
-		}))
-	}
-
-	if len(initialAttachmentChildren) > 0 {
-		c.ui.Actions() <- Append{
-			name:     "filesvbox",
-			children: initialAttachmentChildren,
-		}
-	}
-
-	detachmentUI := ComposeDetachmentUI{draft, detachments, c.ui, func() {
-		overSize = c.updateUsage(validContactSelected, draft)
-	}}
-
-	c.ui.Actions() <- UIState{uiStateCompose}
-	c.ui.Signal()
-
-	for {
-		event, wanted := c.nextEvent()
-		if wanted {
-			return event
-		}
-
-		if update, ok := event.(Update); ok {
-			overSize = c.updateUsage(validContactSelected, draft)
-			draft.body = update.text
-			c.ui.Signal()
-			continue
-		}
-
-		if open, ok := event.(OpenResult); ok && open.ok && open.arg == nil {
-			// Opening a file for an attachment.
-			contents, size, err := func(path string) (contents []byte, size int64, err error) {
-				file, err := os.Open(path)
-				if err != nil {
-					return
-				}
-				defer file.Close()
-
-				fi, err := file.Stat()
-				if err != nil {
-					return
-				}
-				if fi.Size() < pond.MaxSerializedMessage-500 {
-					contents, err = ioutil.ReadAll(file)
-					size = -1
-				} else {
-					size = fi.Size()
-				}
-				return
-			}(open.path)
-
-			base := filepath.Base(open.path)
-			id := c.randId()
-
-			var label string
-			var extraWidgets []Widget
-			if err != nil {
-				label = base + ": " + err.Error()
-			} else if size > 0 {
-				// Oversize attachment.
-				label = fmt.Sprintf("%s (%d bytes, external)", base, size)
-				extraWidgets = []Widget{VBox{
-					widgetBase: widgetBase{
-						name: fmt.Sprintf("attachment-addi-%x", id),
-					},
-					children: []Widget{
-						Label{
-							widgetBase: widgetBase{
-								padding: 4,
-							},
-							text: "This file is too large to send via Pond directly. Instead, this Pond message can contain the encryption key for the file and the encrypted file can be transported via a non-Pond mechanism.",
-							wrap: 300,
-						},
-						HBox{
-							children: []Widget{
-								Button{
-									widgetBase: widgetBase{
-										name: fmt.Sprintf("attachment-convert-%x", id),
-									},
-									text: "Save Encrypted",
-								},
-								Button{
-									widgetBase: widgetBase{
-										name: fmt.Sprintf("attachment-upload-%x", id),
-									},
-									text: "Upload",
-								},
-							},
-						},
-					},
-				}}
-
-				draft.pendingDetachments[id] = &pendingDetachment{
-					path: open.path,
-					size: size,
-				}
-			} else {
-				label = fmt.Sprintf("%s (%d bytes)", base, len(contents))
-				a := &pond.Message_Attachment{
-					Filename: proto.String(filepath.Base(open.path)),
-					Contents: contents,
-				}
-				attachments[id] = len(draft.attachments)
-				draft.attachments = append(draft.attachments, a)
-			}
-
-			c.ui.Actions() <- Append{
-				name: "filesvbox",
-				children: []Widget{
-					widgetForAttachment(id, label, err != nil, extraWidgets),
-				},
-			}
-			overSize = c.updateUsage(validContactSelected, draft)
-			c.ui.Signal()
-		}
-		if open, ok := event.(OpenResult); ok && open.ok && open.arg != nil {
-			// Saving a detachment.
-			id := open.arg.(uint64)
-			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
-			c.ui.Actions() <- Append{
-				name: fmt.Sprintf("attachment-vbox-%x", id),
-				children: []Widget{
-					Progress{
-						widgetBase: widgetBase{
-							name: fmt.Sprintf("attachment-progress-%x", id),
-						},
-					},
-				},
-			}
-			draft.pendingDetachments[id].cancel = c.startEncryption(id, open.path, draft.pendingDetachments[id].path)
-			c.ui.Signal()
-		}
-
-		if c.maybeProcessDetachmentMsg(event, detachmentUI) {
-			continue
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		if click.name == "attach" {
-			c.ui.Actions() <- FileOpen{
-				title: "Attach File",
-			}
-			c.ui.Signal()
-			continue
-		}
-		if click.name == "to" {
-			selected := click.combos["to"]
-			if len(selected) > 0 {
-				validContactSelected = true
-			}
-			for _, contact := range c.contacts {
-				if contact.name == selected {
-					draft.to = contact.id
-				}
-			}
-			c.draftsUI.SetLine(draft.id, selected)
-			if validContactSelected && !overSize {
-				c.ui.Actions() <- Sensitive{name: "send", sensitive: true}
-				c.ui.Signal()
-			}
-			continue
-		}
-		if click.name == "discard" {
-			c.draftsUI.Remove(draft.id)
-			delete(c.drafts, draft.id)
-			c.save()
-			c.ui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
-			c.ui.Actions() <- UIState{uiStateMain}
-			c.ui.Signal()
-			return nil
-		}
-		if strings.HasPrefix(click.name, "remove-") {
-			// One of the attachment remove buttons.
-			id, err := strconv.ParseUint(click.name[7:], 16, 64)
-			if err != nil {
-				panic(click.name)
-			}
-			c.ui.Actions() <- Destroy{name: "attachment-frame-" + click.name[7:]}
-			if index, ok := attachments[id]; ok {
-				draft.attachments = append(draft.attachments[:index], draft.attachments[index+1:]...)
-				delete(attachments, id)
-			}
-			if detachment, ok := draft.pendingDetachments[id]; ok {
-				if detachment.cancel != nil {
-					detachment.cancel()
-				}
-				delete(draft.pendingDetachments, id)
-			}
-			if index, ok := detachments[id]; ok {
-				draft.detachments = append(draft.detachments[:index], draft.detachments[index+1:]...)
-				delete(detachments, id)
-			}
-			overSize = c.updateUsage(validContactSelected, draft)
-			c.ui.Signal()
-			continue
-		}
-		const convertPrefix = "attachment-convert-"
-		if strings.HasPrefix(click.name, convertPrefix) {
-			// One of the attachment "Save Encrypted" buttons.
-			idStr := click.name[len(convertPrefix):]
-			id, err := strconv.ParseUint(idStr, 16, 64)
-			if err != nil {
-				panic(click.name)
-			}
-			c.ui.Actions() <- FileOpen{
-				save:  true,
-				title: "Save encrypted file",
-				arg:   id,
-			}
-			c.ui.Signal()
-		}
-		const uploadPrefix = "attachment-upload-"
-		if strings.HasPrefix(click.name, uploadPrefix) {
-			idStr := click.name[len(uploadPrefix):]
-			id, err := strconv.ParseUint(idStr, 16, 64)
-			if err != nil {
-				panic(click.name)
-			}
-			c.ui.Actions() <- Destroy{name: fmt.Sprintf("attachment-addi-%x", id)}
-			c.ui.Actions() <- Append{
-				name: fmt.Sprintf("attachment-vbox-%x", id),
-				children: []Widget{
-					Progress{
-						widgetBase: widgetBase{
-							name: fmt.Sprintf("attachment-progress-%x", id),
-						},
-					},
-				},
-			}
-			draft.pendingDetachments[id].cancel = c.startUpload(id, draft.pendingDetachments[id].path)
-			c.ui.Signal()
-		}
-
-		if click.name != "send" {
-			continue
-		}
-
-		toName := click.combos["to"]
-		if len(toName) == 0 {
-			continue
-		}
-
-		var to *Contact
-		for _, contact := range c.contacts {
-			if contact.name == toName {
-				to = contact
-				break
-			}
-		}
-
-		var nextDHPub [32]byte
-		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
-
-		var replyToId *uint64
-		if inReplyTo != nil {
-			replyToId = inReplyTo.message.Id
-		}
-
-		body := click.textViews["body"]
-		// Zero length bodies are ACKs.
-		if len(body) == 0 {
-			body = " "
-		}
-
-		id := c.randId()
-		err := c.send(to, &pond.Message{
-			Id:               proto.Uint64(id),
-			Time:             proto.Int64(time.Now().Unix()),
-			Body:             []byte(body),
-			BodyEncoding:     pond.Message_RAW.Enum(),
-			InReplyTo:        replyToId,
-			MyNextDh:         nextDHPub[:],
-			Files:            draft.attachments,
-			DetachedFiles:    draft.detachments,
-			SupportedVersion: proto.Int32(protoVersion),
-		})
-		if err != nil {
-			// TODO: handle this case better.
-			println(err.Error())
-			c.log.Errorf("Error sending message: %s", err)
-			continue
-		}
-		if inReplyTo != nil {
-			inReplyTo.acked = true
-		}
-
-		c.draftsUI.Remove(draft.id)
-		delete(c.drafts, draft.id)
-
-		c.save()
-
-		c.outboxUI.Select(id)
-		return c.showOutbox(id)
-	}
-
-	return nil
+	// cliId is a number, assigned by the command-line interface, to
+	// identity this message for the duration of the session. It's not
+	// saved to disk.
+	cliId cliId
 }
 
 func (qm *queuedMessage) indicator() Indicator {
@@ -1725,32 +565,58 @@ func (qm *queuedMessage) indicator() Indicator {
 	return indicatorRed
 }
 
+// outboxToDraft converts an outbox message back to a Draft. This is used when
+// the user aborts the sending of a message.
+func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
+	draft := &Draft{
+		id:          msg.id,
+		created:     msg.created,
+		to:          msg.to,
+		body:        string(msg.message.Body),
+		attachments: msg.message.Files,
+		detachments: msg.message.DetachedFiles,
+	}
+
+	if irt := msg.message.GetInReplyTo(); irt != 0 {
+		// The inReplyTo value of a draft references *our* id for the
+		// inbox message. But the InReplyTo field of a pond.Message
+		// references's the contact's id for the message. So we need to
+		// enumerate the messages in the inbox from that contact and
+		// find the one with the matching id.
+		for _, inboxMsg := range c.inbox {
+			if inboxMsg.from == msg.to && inboxMsg.message != nil && inboxMsg.message.GetId() == irt {
+				draft.inReplyTo = inboxMsg.id
+				break
+			}
+		}
+	}
+
+	return draft
+}
+
+// detectTor attempts to connect to port 9050 and 9150 on the local host and
+// assumes that Tor is running on the first port that it finds to be open.
+func (c *client) detectTor() bool {
+	ports := []int{9050, 9150}
+	for _, port := range ports {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			continue
+		}
+		c.torAddress = addr
+		conn.Close()
+		return true
+	}
+
+	return false
+}
+
 func (c *client) enqueue(m *queuedMessage) {
 	c.queueMutex.Lock()
 	defer c.queueMutex.Unlock()
 
 	c.queue = append(c.queue, m)
-}
-
-func (c *client) sendAck(msg *InboxMessage) {
-	to := c.contacts[msg.from]
-
-	var nextDHPub [32]byte
-	curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
-
-	id := c.randId()
-	err := c.send(to, &pond.Message{
-		Id:               proto.Uint64(id),
-		Time:             proto.Int64(time.Now().Unix()),
-		Body:             make([]byte, 0),
-		BodyEncoding:     pond.Message_RAW.Enum(),
-		MyNextDh:         nextDHPub[:],
-		InReplyTo:        msg.message.Id,
-		SupportedVersion: proto.Int32(protoVersion),
-	})
-	if err != nil {
-		c.log.Errorf("Error sending message: %s", err)
-	}
 }
 
 func maybeTruncate(s string) string {
@@ -1762,39 +628,6 @@ func maybeTruncate(s string) string {
 	return s
 }
 
-type InboxDetachmentUI struct {
-	msg *InboxMessage
-	ui  UI
-}
-
-func (i InboxDetachmentUI) IsValid(id uint64) bool {
-	_, ok := i.msg.decryptions[id]
-	return ok
-}
-
-func (i InboxDetachmentUI) ProgressName(id uint64) string {
-	return fmt.Sprintf("detachment-progress-%d", i.msg.decryptions[id].index)
-}
-
-func (i InboxDetachmentUI) VBoxName(id uint64) string {
-	return fmt.Sprintf("detachment-vbox-%d", i.msg.decryptions[id].index)
-}
-
-func (i InboxDetachmentUI) OnFinal(id uint64) {
-	i.ui.Actions() <- Sensitive{
-		name:      fmt.Sprintf("detachment-decrypt-%d", i.msg.decryptions[id].index),
-		sensitive: true,
-	}
-	i.ui.Actions() <- Sensitive{
-		name:      fmt.Sprintf("detachment-download-%d", i.msg.decryptions[id].index),
-		sensitive: true,
-	}
-	delete(i.msg.decryptions, id)
-}
-
-func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
-}
-
 func formatTime(t time.Time) string {
 	if t.IsZero() {
 		return "(not yet)"
@@ -1802,7 +635,145 @@ func formatTime(t time.Time) string {
 	return t.Format(time.RFC1123)
 }
 
-func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error {
+var errInterrupted = errors.New("cli: interrupt signal")
+
+func (c *client) loadUI() error {
+	c.ui.initUI()
+
+	c.torAddress = "127.0.0.1:9050" // default for dev mode.
+	if !c.dev && !c.detectTor() {
+		if err := c.ui.torPromptUI(); err != nil {
+			return err
+		}
+	}
+
+	c.ui.loadingUI()
+
+	stateFile := &disk.StateFile{
+		Path: c.stateFilename,
+		Rand: c.rand,
+		Log: func(format string, args ...interface{}) {
+			c.log.Printf(format, args...)
+		},
+	}
+
+	var newAccount bool
+	var err error
+	if c.stateLock, err = stateFile.Lock(false /* don't create */); err == nil && c.stateLock == nil {
+		c.ui.errorUI("State file locked by another process. Waiting for lock.", false)
+		c.log.Errorf("Waiting for locked state file")
+
+		for {
+			if c.stateLock, err = stateFile.Lock(false /* don't create */); c.stateLock != nil {
+				break
+			}
+			if err := c.ui.sleepUI(1 * time.Second); err != nil {
+				return err
+			}
+		}
+	} else if err == nil {
+	} else if os.IsNotExist(err) {
+		newAccount = true
+	} else {
+		c.ui.errorUI(err.Error(), true)
+		if err := c.ui.ShutdownAndSuspend(); err != nil {
+			return err
+		}
+	}
+
+	if newAccount {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			panic(err)
+		}
+		copy(c.priv[:], priv[:])
+		copy(c.pub[:], pub[:])
+
+		c.groupPriv, err = bbssig.GenerateGroup(rand.Reader)
+		if err != nil {
+			panic(err)
+		}
+		pw, err := c.ui.createPassphraseUI()
+		if err != nil {
+			return err
+		}
+		c.ui.createErasureStorage(pw, stateFile)
+		if err := c.ui.createAccountUI(); err != nil {
+			return err
+		}
+		newAccount = true
+	} else {
+		// First try with zero key.
+		err := c.loadState(stateFile, "")
+		for err == disk.BadPasswordError {
+			// That didn't work, try prompting for a key.
+			err = c.ui.keyPromptUI(stateFile)
+		}
+		if err == errInterrupted {
+			return err
+		}
+		if err != nil {
+			// Fatal error loading state. Abort.
+			c.ui.errorUI(err.Error(), true)
+			if err := c.ui.ShutdownAndSuspend(); err != nil {
+				return err
+			}
+		}
+	}
+
+	if newAccount {
+		c.stateLock, err = stateFile.Lock(true /* create */)
+		if err != nil {
+			err = errors.New("Failed to create state file: " + err.Error())
+		} else if c.stateLock == nil {
+			err = errors.New("Failed to obtain lock on created state file")
+		}
+		if err != nil {
+			c.ui.errorUI(err.Error(), true)
+			if err := c.ui.ShutdownAndSuspend(); err != nil {
+				return err
+			}
+		}
+		c.lastErasureStorageTime = time.Now()
+	}
+
+	c.writerChan = make(chan disk.NewState)
+	c.writerDone = make(chan struct{})
+	c.fetchNowChan = make(chan chan bool, 1)
+	c.revocationUpdateChan = make(chan revocationUpdate, 8)
+
+	// Start disk and network workers.
+	go stateFile.StartWriter(c.writerChan, c.writerDone)
+	go c.transact()
+	if newAccount {
+		c.save()
+	}
+
+	// Start any pending key exchanges.
+	for _, contact := range c.contacts {
+		if len(contact.pandaKeyExchange) == 0 {
+			continue
+		}
+		c.pandaWaitGroup.Add(1)
+		contact.pandaShutdownChan = make(chan struct{})
+		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+	}
+
+	c.ui.mainUI()
+
+	return nil
+}
+
+func (contact *Contact) subline() string {
+	if contact.isPending {
+		return "pending"
+	} else if len(contact.pandaResult) > 0 {
+		return "failed"
+	}
+	return ""
+}
+
+func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient bool) error {
 	var kxs pond.SignedKeyExchange
 	if err := proto.Unmarshal(kxsBytes, &kxs); err != nil {
 		return err
@@ -1846,54 +817,29 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing bool) error 
 	}
 	copy(contact.theirIdentityPublic[:], kx.IdentityPublic)
 
-	if len(kx.Dh) != len(contact.theirCurrentDHPublic) {
-		return errors.New("invalid public DH value")
+	if simulateOldClient {
+		kx.Dh1 = nil
 	}
-	copy(contact.theirCurrentDHPublic[:], kx.Dh)
+
+	if len(kx.Dh1) == 0 {
+		// They are using an old-style ratchet. We have to extract the
+		// private value from the Ratchet in order to use it with the
+		// old code.
+		contact.lastDHPrivate = contact.ratchet.GetKXPrivateForTransition()
+		if len(kx.Dh) != len(contact.theirCurrentDHPublic) {
+			return errors.New("invalid public DH value")
+		}
+		copy(contact.theirCurrentDHPublic[:], kx.Dh)
+		contact.ratchet = nil
+	} else {
+		if err := contact.ratchet.CompleteKeyExchange(&kx); err != nil {
+			return err
+		}
+	}
 
 	contact.generation = *kx.Generation
 
 	return nil
-}
-
-func (c *client) nextEvent() (event interface{}, wanted bool) {
-	var ok bool
-	select {
-	case event, ok = <-c.ui.Events():
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-	case newMessage := <-c.newMessageChan:
-		c.processNewMessage(newMessage)
-		return
-	case msr := <-c.messageSentChan:
-		c.processMessageSent(msr)
-		return
-	case event = <-c.backgroundChan:
-		break
-	case <-c.log.updateChan:
-		return
-	}
-
-	if _, ok := c.contactsUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.outboxUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.inboxUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.clientUI.Event(event); ok {
-		wanted = true
-	}
-	if _, ok := c.draftsUI.Event(event); ok {
-		wanted = true
-	}
-	if click, ok := event.(Click); ok {
-		wanted = wanted || click.name == "newcontact" || click.name == "compose"
-	}
-	return
 }
 
 func (c *client) randBytes(buf []byte) {
@@ -1907,32 +853,63 @@ func (c *client) randId() uint64 {
 	for {
 		c.randBytes(idBytes[:])
 		n := binary.LittleEndian.Uint64(idBytes[:])
-		if n != 0 {
-			return n
+		if n == 0 {
+			continue
 		}
+		if c.usedIds[n] {
+			continue
+		}
+		c.usedIds[n] = true
+		return n
 	}
 	panic("unreachable")
 }
 
+// Now is a wrapper around time.Now() that allows unittests to override the
+// current time.
+func (c *client) Now() time.Time {
+	if c.nowFunc == nil {
+		return time.Now()
+	}
+	return c.nowFunc()
+}
+
+// registerId records that an ID number has been used, typically because we are
+// loading a state file.
+func (c *client) registerId(id uint64) {
+	if c.usedIds[id] {
+		panic("duplicate ID registered")
+	}
+	c.usedIds[id] = true
+}
+
+func (c *client) newRatchet(contact *Contact) *ratchet.Ratchet {
+	r := ratchet.New(c.rand)
+	r.MyIdentityPrivate = &c.identity
+	r.MySigningPublic = &c.pub
+	r.TheirIdentityPublic = &contact.theirIdentityPublic
+	r.TheirSigningPublic = &contact.theirPub
+	return r
+}
+
 func (c *client) newKeyExchange(contact *Contact) {
 	var err error
-	c.randBytes(contact.lastDHPrivate[:])
-	c.randBytes(contact.currentDHPrivate[:])
-
-	var pub [32]byte
-	curve25519.ScalarBaseMult(&pub, &contact.lastDHPrivate)
 	if contact.groupKey, err = c.groupPriv.NewMember(c.rand); err != nil {
 		panic(err)
 	}
+	contact.ratchet = c.newRatchet(contact)
 
 	kx := &pond.KeyExchange{
 		PublicKey:      c.pub[:],
 		IdentityPublic: c.identityPublic[:],
 		Server:         proto.String(c.server),
-		Dh:             pub[:],
 		Group:          contact.groupKey.Group.Marshal(),
 		GroupKey:       contact.groupKey.Marshal(),
 		Generation:     proto.Uint32(c.generation),
+	}
+	contact.ratchet.FillKeyExchange(kx)
+	if c.simulateOldClient {
+		kx.Dh1 = nil
 	}
 
 	kxBytes, err := proto.Marshal(kx)
@@ -1952,335 +929,146 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
-func (c *client) keyPromptUI(state []byte) error {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Passphrase",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "Please enter the passphrase used to encrypt Pond's state file. If you set a passphrase and forgot it, it cannot be recovered. You will have to start afresh.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Passphrase:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "pw"},
-						width:      60,
-						password:   true,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "next"},
-						text:       "Next",
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 5},
-				children: []Widget{
-					Label{
-						widgetBase: widgetBase{name: "status"},
-					},
-				},
-			},
-		},
+func (c *client) deleteInboxMsg(id uint64) {
+	newInbox := make([]*InboxMessage, 0, len(c.inbox))
+	for _, inboxMsg := range c.inbox {
+		if inboxMsg.id == id {
+			continue
+		}
+		newInbox = append(newInbox, inboxMsg)
+	}
+	c.inbox = newInbox
+}
+
+func (c *client) deleteOutboxMsg(id uint64) {
+	newOutbox := make([]*queuedMessage, 0, len(c.outbox))
+	for _, outboxMsg := range c.outbox {
+		if outboxMsg.id == id {
+			continue
+		}
+		newOutbox = append(newOutbox, outboxMsg)
+	}
+	c.outbox = newOutbox
+}
+
+func (c *client) indexOfQueuedMessage(msg *queuedMessage) (index int) {
+	// c.queueMutex must be held before calling this function.
+
+	for i, queuedMsg := range c.queue {
+		if queuedMsg == msg {
+			return i
+		}
 	}
 
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "pw"}
-	c.ui.Actions() <- UIState{uiStatePassphrase}
-	c.ui.Signal()
+	return -1
+}
 
-	for {
-		event, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
+func (c *client) removeQueuedMessage(index int) {
+	// c.queueMutex must be held before calling this function.
 
-		click, ok := event.(Click)
-		if !ok {
-			continue
+	var newQueue []*queuedMessage
+	for i, queuedMsg := range c.queue {
+		if i != index {
+			newQueue = append(newQueue, queuedMsg)
 		}
-		if click.name != "next" && click.name != "pw" {
-			continue
-		}
+	}
+	c.queue = newQueue
+}
 
-		pw, ok := click.entries["pw"]
-		if !ok {
-			panic("missing pw")
-		}
-		if len(pw) == 0 {
-			break
-		}
+// RunPANDA runs in its own goroutine and runs a PANDA key exchange.
+func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, shutdown chan struct{}) {
+	var result []byte
+	defer c.pandaWaitGroup.Done()
 
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
-		c.ui.Signal()
+	c.log.Printf("Starting PANDA key exchange with %s", name)
 
-		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
-			panic(err)
+	kx, err := panda.UnmarshalKeyExchange(c.rand, c.newMeetingPlace(), serialisedKeyExchange)
+	kx.Testing = c.testing
+	kx.Log = func(format string, args ...interface{}) {
+		serialised := kx.Marshal()
+		c.pandaChan <- pandaUpdate{
+			id:         id,
+			serialised: serialised,
+		}
+		c.log.Printf("Key exchange with %s: %s", name, fmt.Sprintf(format, args...))
+	}
+	kx.ShutdownChan = shutdown
+
+	if err == nil {
+		result, err = kx.Run()
+	}
+
+	if err == panda.ShutdownErr {
+		return
+	}
+
+	c.pandaChan <- pandaUpdate{
+		id:     id,
+		err:    err,
+		result: result,
+	}
+}
+
+// processPANDAUpdate runs on the main client goroutine and handles messages
+// from a runPANDA goroutine.
+func (c *client) processPANDAUpdate(update pandaUpdate) {
+	contact, ok := c.contacts[update.id]
+	if !ok {
+		return
+	}
+
+	switch {
+	case update.err != nil:
+		contact.pandaResult = update.err.Error()
+		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
+		c.log.Printf("Key exchange with %s failed: %s", contact.name, update.err)
+	case update.serialised != nil:
+		if bytes.Equal(contact.pandaKeyExchange, update.serialised) {
+			return
+		}
+		contact.pandaKeyExchange = update.serialised
+	case update.result != nil:
+		contact.pandaKeyExchange = nil
+		contact.pandaShutdownChan = nil
+		contact.isPending = false
+
+		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient); err != nil {
+			contact.pandaResult = err.Error()
+			update.err = err
+			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
 		} else {
-			copy(c.diskKey[:], diskKey)
+			c.log.Printf("Key exchange with %s complete", contact.name)
 		}
-
-		err := c.loadState(state)
-		if err != disk.BadPasswordError {
-			return err
-		}
-
-		c.ui.Actions() <- SetText{name: "status", text: "Incorrect passphrase or corrupt state file"}
-		c.ui.Actions() <- SetEntry{name: "pw", text: ""}
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: true}
-		c.ui.Signal()
 	}
 
-	return nil
+	c.ui.processPANDAUpdateUI(update)
+	c.save()
 }
 
-func (c *client) createPassphraseUI() {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Set Passphrase",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "Pond keeps private keys, messages etc on disk for a limited amount of time and that information can be encrypted with a passphrase. If you are comfortable with the security of your home directory, this passphrase can be empty and you won't be prompted for it again. If you set a passphrase and forget it, it cannot be recovered. You will have to start afresh.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Passphrase:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "pw"},
-						width:      60,
-						password:   true,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "next"},
-						text:       "Next",
-					},
-				},
-			},
-		},
-	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "pw"}
-	c.ui.Actions() <- UIState{uiStateCreatePassphrase}
-	c.ui.Signal()
-
-	for {
-		event, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-
-		click, ok := event.(Click)
-		if !ok {
-			continue
-		}
-		if click.name != "next" && click.name != "pw" {
-			continue
-		}
-
-		pw, ok := click.entries["pw"]
-		if !ok {
-			panic("missing pw")
-		}
-		if len(pw) == 0 {
-			break
-		}
-
-		c.ui.Actions() <- Sensitive{name: "next", sensitive: false}
-		c.ui.Signal()
-
-		c.randBytes(c.diskSalt[:])
-		if diskKey, err := disk.DeriveKey(pw, &c.diskSalt); err != nil {
-			panic(err)
-		} else {
-			copy(c.diskKey[:], diskKey)
-		}
-
-		break
-	}
+type pandaUpdate struct {
+	id         uint64
+	err        error
+	result     []byte
+	serialised []byte
 }
 
-func (c *client) createAccountUI() {
-	defaultServer := "pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion"
-	if c.testing {
-		defaultServer = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
+func openAttachment(path string) (contents []byte, size int64, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
 	}
+	defer file.Close()
 
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Create Account",
-			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: "In order to use Pond you have to have an account on a server. Servers may set their own account policies, but the default server allows anyone to create an account. If you want to use the default server, just click 'Create'.",
-				wrap: 600,
-			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Server:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "server"},
-						width:      60,
-						text:       defaultServer,
-					},
-				},
-			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "create"},
-						text:       "Create",
-					},
-				},
-			},
-		},
+	fi, err := file.Stat()
+	if err != nil {
+		return
 	}
-
-	c.ui.Actions() <- SetBoxContents{name: "body", child: ui}
-	c.ui.Actions() <- SetFocus{name: "create"}
-	c.ui.Actions() <- UIState{uiStateCreateAccount}
-	c.ui.Signal()
-
-	var spinnerCreated bool
-	for {
-		click, ok := <-c.ui.Events()
-		if !ok {
-			c.ShutdownAndSuspend()
-		}
-		c.server = click.(Click).entries["server"]
-
-		c.ui.Actions() <- Sensitive{name: "server", sensitive: false}
-		c.ui.Actions() <- Sensitive{name: "create", sensitive: false}
-
-		const initialMessage = "Checking..."
-
-		if !spinnerCreated {
-			c.ui.Actions() <- Append{
-				name: "vbox",
-				children: []Widget{
-					HBox{
-						widgetBase: widgetBase{name: "statusbox"},
-						spacing:    10,
-						children: []Widget{
-							Spinner{
-								widgetBase: widgetBase{name: "spinner"},
-							},
-							Label{
-								widgetBase: widgetBase{name: "status"},
-								text:       initialMessage,
-							},
-						},
-					},
-				},
-			}
-			spinnerCreated = true
-		} else {
-			c.ui.Actions() <- StartSpinner{name: "spinner"}
-			c.ui.Actions() <- SetText{name: "status", text: initialMessage}
-		}
-		c.ui.Signal()
-
-		if err := c.doCreateAccount(); err != nil {
-			c.ui.Actions() <- StopSpinner{name: "spinner"}
-			c.ui.Actions() <- UIError{err}
-			c.ui.Actions() <- SetText{name: "status", text: err.Error()}
-			c.ui.Actions() <- Sensitive{name: "server", sensitive: true}
-			c.ui.Actions() <- Sensitive{name: "create", sensitive: true}
-			c.ui.Signal()
-			continue
-		}
-
-		break
+	if fi.Size() < pond.MaxSerializedMessage-500 {
+		contents, err = ioutil.ReadAll(file)
+		size = -1
+	} else {
+		size = fi.Size()
 	}
-}
-
-func (c *client) ShutdownAndSuspend() {
-	if c.writerChan != nil {
-		c.save()
-	}
-	c.Shutdown()
-	close(c.ui.Actions())
-	select {}
-}
-
-func (c *client) Shutdown() {
-	if c.writerChan != nil {
-		close(c.writerChan)
-		<-c.writerDone
-	}
-	if c.fetchNowChan != nil {
-		close(c.fetchNowChan)
-	}
-	if c.revocationUpdateChan != nil {
-		close(c.revocationUpdateChan)
-	}
-	if c.stateLock != nil {
-		c.stateLock.Close()
-	}
-}
-
-func NewClient(stateFilename string, ui UI, rand io.Reader, testing, autoFetch bool) *client {
-	c := &client{
-		testing:         testing,
-		autoFetch:       autoFetch,
-		stateFilename:   stateFilename,
-		log:             NewLog(),
-		ui:              ui,
-		rand:            rand,
-		contacts:        make(map[uint64]*Contact),
-		drafts:          make(map[uint64]*Draft),
-		newMessageChan:  make(chan NewMessage),
-		messageSentChan: make(chan messageSendResult, 1),
-		backgroundChan:  make(chan interface{}, 8),
-	}
-	c.log.toStderr = true
-
-	go c.loadUI()
-	return c
+	return
 }

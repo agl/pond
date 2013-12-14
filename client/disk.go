@@ -11,8 +11,12 @@ import (
 	pond "github.com/agl/pond/protos"
 )
 
-func (c *client) loadState(state []byte) error {
-	parsedState, err := disk.LoadState(state, &c.diskKey)
+// erasureRotationTime is the amount of time that we'll use a single erasure
+// storage value before rotating.
+const erasureRotationTime = 24 * time.Hour
+
+func (c *client) loadState(stateFile *disk.StateFile, pw string) error {
+	parsedState, err := stateFile.Read(pw)
 	if err != nil {
 		return err
 	}
@@ -21,8 +25,14 @@ func (c *client) loadState(state []byte) error {
 
 func (c *client) save() {
 	c.log.Printf("Saving state")
+	now := c.Now()
+	rotateErasureStorage := now.Before(c.lastErasureStorageTime) || now.Sub(c.lastErasureStorageTime) > erasureRotationTime
+	if rotateErasureStorage {
+		c.log.Printf("Rotating erasure storage key")
+		c.lastErasureStorageTime = now
+	}
 	serialized := c.marshal()
-	c.writerChan <- serialized
+	c.writerChan <- disk.NewState{serialized, rotateErasureStorage}
 }
 
 func (c *client) unmarshal(state *disk.State) error {
@@ -53,6 +63,10 @@ func (c *client) unmarshal(state *disk.State) error {
 	copy(c.pub[:], state.Public)
 	c.generation = *state.Generation
 
+	if state.LastErasureStorageTime != nil {
+		c.lastErasureStorageTime = time.Unix(*state.LastErasureStorageTime, 0)
+	}
+
 	for _, prevGroupPriv := range state.PreviousGroupPrivateKeys {
 		group, ok := new(bbssig.Group).Unmarshal(prevGroupPriv.Group)
 		if !ok {
@@ -70,16 +84,27 @@ func (c *client) unmarshal(state *disk.State) error {
 
 	for _, cont := range state.Contacts {
 		contact := &Contact{
-			id:       *cont.Id,
-			name:     *cont.Name,
-			kxsBytes: cont.KeyExchangeBytes,
+			id:               *cont.Id,
+			name:             *cont.Name,
+			kxsBytes:         cont.KeyExchangeBytes,
+			pandaKeyExchange: cont.PandaKeyExchange,
+			pandaResult:      cont.GetPandaError(),
 		}
+		c.registerId(contact.id)
 		c.contacts[contact.id] = contact
 		if contact.groupKey, ok = new(bbssig.MemberKey).Unmarshal(c.groupPriv.Group, cont.GroupKey); !ok {
 			return errors.New("client: failed to unmarshal group member key")
 		}
 		copy(contact.lastDHPrivate[:], cont.LastPrivate)
 		copy(contact.currentDHPrivate[:], cont.CurrentPrivate)
+
+		if cont.Ratchet != nil {
+			contact.ratchet = c.newRatchet(contact)
+			if err := contact.ratchet.Unmarshal(cont.Ratchet); err != nil {
+				return err
+			}
+		}
+
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
 			continue
@@ -128,6 +153,7 @@ func (c *client) unmarshal(state *disk.State) error {
 		}
 	}
 
+	now := c.Now()
 	for _, m := range state.Inbox {
 		msg := &InboxMessage{
 			id:           *m.Id,
@@ -136,7 +162,10 @@ func (c *client) unmarshal(state *disk.State) error {
 			acked:        *m.Acked,
 			read:         *m.Read,
 			sealed:       m.Sealed,
+			retained:     m.GetRetained(),
+			exposureTime: now,
 		}
+		c.registerId(msg.id)
 		if len(m.Message) > 0 {
 			msg.message = new(pond.Message)
 			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
@@ -154,6 +183,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			server:  *m.Server,
 			created: time.Unix(*m.Created, 0),
 		}
+		c.registerId(msg.id)
 		if len(m.Message) > 0 {
 			msg.message = new(pond.Message)
 			if err := proto.Unmarshal(m.Message, msg.message); err != nil {
@@ -173,6 +203,12 @@ func (c *client) unmarshal(state *disk.State) error {
 			}
 		}
 		msg.revocation = m.GetRevocation()
+		if msg.revocation && len(msg.server) == 0 {
+			// There was a bug in some versions where revoking a
+			// pending contact would result in a revocation message
+			// with an empty server.
+			msg.server = c.server
+		}
 
 		c.outbox = append(c.outbox, msg)
 
@@ -190,6 +226,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			detachments: m.Detachments,
 			created:     time.Unix(*m.Created, 0),
 		}
+		c.registerId(draft.id)
 		if m.To != nil {
 			draft.to = *m.To
 		}
@@ -217,16 +254,22 @@ func (c *client) marshal() []byte {
 			LastPrivate:      contact.lastDHPrivate[:],
 			CurrentPrivate:   contact.currentDHPrivate[:],
 			SupportedVersion: proto.Int32(contact.supportedVersion),
+			PandaKeyExchange: contact.pandaKeyExchange,
+			PandaError:       proto.String(contact.pandaResult),
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
 			cont.TheirGroup = contact.myGroupKey.Group.Marshal()
 			cont.TheirServer = proto.String(contact.theirServer)
 			cont.TheirPub = contact.theirPub[:]
+			cont.Generation = proto.Uint32(contact.generation)
+
 			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
-			cont.Generation = proto.Uint32(contact.generation)
+		}
+		if contact.ratchet != nil {
+			cont.Ratchet = contact.ratchet.Marshal(time.Now(), messageLifetime)
 		}
 		for _, prevTag := range contact.previousTags {
 			if time.Since(prevTag.expired) > previousTagLifetime {
@@ -242,7 +285,7 @@ func (c *client) marshal() []byte {
 
 	var inbox []*disk.Inbox
 	for _, msg := range c.inbox {
-		if time.Since(msg.receivedTime) > messageLifetime {
+		if time.Since(msg.receivedTime) > messageLifetime && !msg.retained {
 			continue
 		}
 		m := &disk.Inbox{
@@ -252,6 +295,7 @@ func (c *client) marshal() []byte {
 			Acked:        proto.Bool(msg.acked),
 			Read:         proto.Bool(msg.read),
 			Sealed:       msg.sealed,
+			Retained:     proto.Bool(msg.retained),
 		}
 		if msg.message != nil {
 			if m.Message, err = proto.Marshal(msg.message); err != nil {
@@ -313,17 +357,18 @@ func (c *client) marshal() []byte {
 	}
 
 	state := &disk.State{
-		Private:      c.priv[:],
-		Public:       c.pub[:],
-		Identity:     c.identity[:],
-		Server:       proto.String(c.server),
-		Group:        c.groupPriv.Group.Marshal(),
-		GroupPrivate: c.groupPriv.Marshal(),
-		Generation:   proto.Uint32(c.generation),
-		Contacts:     contacts,
-		Inbox:        inbox,
-		Outbox:       outbox,
-		Drafts:       drafts,
+		Private:                c.priv[:],
+		Public:                 c.pub[:],
+		Identity:               c.identity[:],
+		Server:                 proto.String(c.server),
+		Group:                  c.groupPriv.Group.Marshal(),
+		GroupPrivate:           c.groupPriv.Marshal(),
+		Generation:             proto.Uint32(c.generation),
+		Contacts:               contacts,
+		Inbox:                  inbox,
+		Outbox:                 outbox,
+		Drafts:                 drafts,
+		LastErasureStorageTime: proto.Int64(c.lastErasureStorageTime.Unix()),
 	}
 	for _, prevGroupPriv := range c.prevGroupPrivs {
 		if time.Since(prevGroupPriv.expired) > previousTagLifetime {

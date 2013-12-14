@@ -33,6 +33,10 @@ const (
 	// maxRevocations is the maximum number of revocations that we'll store
 	// on disk for any one account.
 	maxRevocations = 100
+	// maxFilesCount is the maximum number of uploads for a single account.
+	maxFilesCount = 100
+	// maxFilesSize is the maximum number of bytes for all uploads for a single account.
+	maxFilesSize = 100 * 1024 * 1024
 )
 
 type Account struct {
@@ -591,9 +595,6 @@ func (s *Server) confirmedDelivery(from *[32]byte, messageName string) {
 		log.Printf("Failed to delete message file in %s: %s", msgPath, err)
 	}
 }
-
-const maxFilesCount = 100
-const maxFilesSize = 100 * 1024 * 1024
 
 func (s *Server) upload(from *[32]byte, conn *transport.Conn, upload *pond.Upload) *pond.Reply {
 	account, ok := s.getAccount(from)

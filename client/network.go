@@ -29,10 +29,39 @@ import (
 )
 
 const (
-	nonceLen          = 24
+	// nonceLen is the length of a NaCl nonce.
+	nonceLen = 24
+	// ephemeralBlockLen is the length of the signcrypted, ephemeral key
+	// used when Contact.supportedVersion >= 1.
 	ephemeralBlockLen = nonceLen + 32 + box.Overhead
 )
 
+func (c *client) sendAck(msg *InboxMessage) {
+	to := c.contacts[msg.from]
+
+	var myNextDH []byte
+	if to.ratchet == nil {
+		var nextDHPub [32]byte
+		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+		myNextDH = nextDHPub[:]
+	}
+
+	id := c.randId()
+	err := c.send(to, &pond.Message{
+		Id:               proto.Uint64(id),
+		Time:             proto.Int64(time.Now().Unix()),
+		Body:             make([]byte, 0),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		MyNextDh:         myNextDH,
+		InReplyTo:        msg.message.Id,
+		SupportedVersion: proto.Int32(protoVersion),
+	})
+	if err != nil {
+		c.log.Errorf("Error sending message: %s", err)
+	}
+}
+
+// send encrypts |message| and enqueues it for transmission.
 func (c *client) send(to *Contact, message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
@@ -43,38 +72,45 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		return errors.New("message too large")
 	}
 
+	// All messages are padded to the maximum length.
 	plaintext := make([]byte, pond.MaxSerializedMessage+4)
 	binary.LittleEndian.PutUint32(plaintext, uint32(len(messageBytes)))
 	copy(plaintext[4:], messageBytes)
 	c.randBytes(plaintext[4+len(messageBytes):])
 
-	var innerNonce [24]byte
-	c.randBytes(innerNonce[:])
-	var sealed, innerSealed []byte
-	sealedLen := nonceLen + len(plaintext) + box.Overhead
-	dhPrivate := &to.lastDHPrivate
+	var sealed []byte
+	if to.ratchet != nil {
+		sealed = to.ratchet.Encrypt(sealed, plaintext)
+	} else {
+		// The message is encrypted to an ephemeral key so that the sending
+		// client can choose not to store it and then cannot decrypt it once
+		// sent.
 
-	if to.supportedVersion >= 1 {
+		//            +---------------------+            +---...
+		// outerNonce | ephemeral DH public | innerNonce | message
+		// (24 bytes) |                     | (24 bytes) |
+		//            +---------------------+            +---....
+
+		sealedLen := ephemeralBlockLen + nonceLen + len(plaintext) + box.Overhead
+		sealed = make([]byte, sealedLen)
+		var outerNonce [24]byte
+		c.randBytes(outerNonce[:])
+		copy(sealed, outerNonce[:])
+		x := sealed[nonceLen:]
+
 		public, private, err := box.GenerateKey(c.rand)
 		if err != nil {
 			return err
 		}
-		dhPrivate = private
+		box.Seal(x[:0], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
+		x = x[len(public)+box.Overhead:]
 
-		var outerNonce [24]byte
-		c.randBytes(outerNonce[:])
-		sealedLen += ephemeralBlockLen
-		sealed = make([]byte, sealedLen)
-		copy(sealed, outerNonce[:])
-		box.Seal(sealed[nonceLen:nonceLen], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
-		innerSealed = sealed[ephemeralBlockLen:]
-	} else {
-		sealed = make([]byte, sealedLen)
-		innerSealed = sealed
+		var innerNonce [24]byte
+		c.randBytes(innerNonce[:])
+		copy(x, innerNonce[:])
+		x = x[nonceLen:]
+		box.Seal(x[:0], plaintext, &innerNonce, &to.theirCurrentDHPublic, private)
 	}
-
-	copy(innerSealed, innerNonce[:])
-	box.Seal(innerSealed[nonceLen:nonceLen], plaintext, &innerNonce, &to.theirCurrentDHPublic, dhPrivate)
 
 	sha := sha256.New()
 	sha.Write(sealed)
@@ -102,9 +138,6 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		created: time.Unix(*message.Time, 0),
 	}
 	c.enqueue(out)
-	if len(message.Body) > 0 {
-		c.outboxUI.Add(*message.Id, to.name, out.created.Format(shortTimeFormat), indicatorRed)
-	}
 	c.outbox = append(c.outbox, out)
 
 	return nil
@@ -114,7 +147,7 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 // message before signing in order to give context to the signature.
 var revocationSignaturePrefix = []byte("revocation\x00")
 
-func (c *client) revoke(to *Contact) {
+func (c *client) revoke(to *Contact) *queuedMessage {
 	to.revoked = true
 	revocation := c.groupPriv.GenerateRevocation(to.groupKey)
 	now := time.Now()
@@ -169,54 +202,61 @@ func (c *client) revoke(to *Contact) {
 		revocation: true,
 		request:    request,
 		id:         c.randId(),
-		to:         to.id,
-		server:     to.theirServer,
+		server:     c.server, // revocations always go to the home server.
 		created:    time.Now(),
 	}
 	c.enqueue(out)
-	c.outboxUI.Add(out.id, "Revocation", out.created.Format(shortTimeFormat), indicatorRed)
-	c.outboxUI.SetInsensitive(out.id)
 	c.outbox = append(c.outbox, out)
+	return out
 }
 
-func decryptMessage(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
-	plaintext, ok := decryptMessageInner(sealed, nonce, from)
-	if ok {
+func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
+	if from.ratchet != nil {
+		plaintext, err := from.ratchet.Decrypt(sealed)
+		if err != nil {
+			return nil, false
+		}
 		return plaintext, true
 	}
 
-	// The message might have an ephemeral block, the nonce of which has already been split off.
+	var nonce [24]byte
+	if len(sealed) < len(nonce) {
+		return nil, false
+	}
+	copy(nonce[:], sealed)
+	sealed = sealed[24:]
 	headerLen := ephemeralBlockLen - len(nonce)
-	if len(sealed) > headerLen {
-		publicBytes, ok := decryptMessageInner(sealed[:headerLen], nonce, from)
-		if !ok || len(publicBytes) != 32 {
-			return nil, false
-		}
-		var innerNonce [nonceLen]byte
-		sealed = sealed[headerLen:]
-		copy(innerNonce[:], sealed)
-		sealed = sealed[nonceLen:]
-		var ephemeralPublicKey [32]byte
-		copy(ephemeralPublicKey[:], publicBytes)
-
-		if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
-			return plaintext, ok
-		}
-
-		plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
-		if !ok {
-			return nil, false
-		}
-		// They have clearly received our current DH value. Time to
-		// rotate.
-		copy(from.lastDHPrivate[:], from.currentDHPrivate[:])
-		if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
-			panic(err)
-		}
-		return plaintext, true
+	if len(sealed) < headerLen {
+		return nil, false
 	}
 
-	return nil, false
+	publicBytes, ok := decryptMessageInner(sealed[:headerLen], &nonce, from)
+	if !ok || len(publicBytes) != 32 {
+		return nil, false
+	}
+	var innerNonce [nonceLen]byte
+	sealed = sealed[headerLen:]
+	copy(innerNonce[:], sealed)
+	sealed = sealed[nonceLen:]
+	var ephemeralPublicKey [32]byte
+	copy(ephemeralPublicKey[:], publicBytes)
+
+	if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
+		return plaintext, ok
+	}
+
+	plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
+	if !ok {
+		return nil, false
+	}
+
+	// They have clearly received our current DH value. Time to
+	// rotate.
+	copy(from.lastDHPrivate[:], from.currentDHPrivate[:])
+	if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
+		panic(err)
+	}
+	return plaintext, true
 }
 
 func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
@@ -324,20 +364,12 @@ NextCandidate:
 		sealed:       f.Message,
 	}
 
-	if !from.isPending {
-		if !c.unsealMessage(inboxMsg, from) {
-			return
-		}
-		if len(inboxMsg.message.Body) > 0 {
-			subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-			c.inboxUI.Add(inboxMsg.id, from.name, subline, indicatorBlue)
-		}
-	} else {
-		c.inboxUI.Add(inboxMsg.id, from.name, "pending", indicatorRed)
+	if !from.isPending && !c.unsealMessage(inboxMsg, from) {
+		return
 	}
 
 	c.inbox = append(c.inbox, inboxMsg)
-	c.updateWindowTitle()
+	c.ui.processFetch(inboxMsg)
 	c.save()
 }
 
@@ -349,11 +381,9 @@ func (c *client) processServerAnnounce(m NewMessage) {
 		message:      m.announce.Message,
 	}
 
-	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
-
 	c.inbox = append(c.inbox, inboxMsg)
-	c.updateWindowTitle()
+	c.ui.processServerAnnounce(inboxMsg)
+
 	c.save()
 }
 
@@ -363,10 +393,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	}
 
 	sealed := inboxMsg.sealed
-	var nonce [24]byte
-	copy(nonce[:], sealed)
-	sealed = sealed[24:]
-	plaintext, ok := decryptMessage(sealed, &nonce, from)
+	plaintext, ok := decryptMessage(sealed, from)
 
 	if !ok {
 		c.log.Errorf("Failed to decrypt message from %s", from.name)
@@ -388,12 +415,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 
 	msg := new(pond.Message)
 	if err := proto.Unmarshal(plaintext, msg); err != nil {
-		c.log.Errorf("Failed to parse mesage from %s: %s", from, err)
-		return false
-	}
-
-	if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
-		c.log.Errorf("Message from %s with bad DH length %d", from, l)
+		c.log.Errorf("Failed to parse mesage from %s: %s", from.name, err)
 		return false
 	}
 
@@ -408,10 +430,17 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		}
 	}
 
-	if !bytes.Equal(from.theirCurrentDHPublic[:], msg.MyNextDh) {
-		// We have a new DH value from them.
-		copy(from.theirLastDHPublic[:], from.theirCurrentDHPublic[:])
-		copy(from.theirCurrentDHPublic[:], msg.MyNextDh)
+	if from.ratchet == nil {
+		if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
+			c.log.Errorf("Message from %s with bad DH length %d", from.name, l)
+			return false
+		}
+
+		if !bytes.Equal(from.theirCurrentDHPublic[:], msg.MyNextDh) {
+			// We have a new DH value from them.
+			copy(from.theirLastDHPublic[:], from.theirCurrentDHPublic[:])
+			copy(from.theirCurrentDHPublic[:], msg.MyNextDh)
+		}
 	}
 
 	if msg.InReplyTo != nil {
@@ -420,7 +449,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		for _, candidate := range c.outbox {
 			if candidate.id == id {
 				candidate.acked = time.Now()
-				c.outboxUI.SetIndicator(id, indicatorGreen)
+				c.ui.processAcknowledgement(candidate)
 			}
 		}
 	}
@@ -486,17 +515,14 @@ func (c *client) processMessageSent(msr messageSendResult) {
 			// We were revoked.
 			to.revokedUs = true
 			c.log.Printf("Revoked by %s", to.name)
-			c.contactsUI.SetIndicator(to.id, indicatorBlack)
-			c.contactsUI.SetSubline(to.id, "has revoked")
+			c.ui.processRevocationOfUs(to)
 
 			// Mark all pending messages to this contact as
 			// undeliverable.
 			newQueue := make([]*queuedMessage, 0, len(c.queue))
 			c.queueMutex.Lock()
 			for _, m := range c.queue {
-				if m.to == msg.to {
-					c.outboxUI.SetIndicator(m.id, indicatorBlack)
-				} else {
+				if m.to != msg.to {
 					newQueue = append(newQueue, m)
 				}
 			}
@@ -511,17 +537,13 @@ func (c *client) processMessageSent(msr messageSendResult) {
 			dupKey, _ := new(bbssig.MemberKey).Unmarshal(to.myGroupKey.Group, to.myGroupKey.Marshal())
 			c.revocationUpdateChan <- revocationUpdate{msg.to, dupKey, to.generation}
 		}
-		c.ui.Actions() <- UIState{uiStateRevocationProcessed}
-		c.ui.Signal()
+
+		c.ui.processRevocation(to)
 		return
 	}
 
 	msg.sent = time.Now()
-	if msg.revocation {
-		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
-	} else {
-		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
-	}
+	c.ui.processMessageDelivered(msg)
 	c.save()
 }
 
@@ -582,9 +604,6 @@ func parseServer(server string, testing bool) (serverIdentity *[32]byte, host st
 	return
 }
 
-// torAddr is the address at which we expect to find the local Tor SOCKS proxy.
-const torAddr = "127.0.0.1:9050"
-
 func (c *client) torDialer() proxy.Dialer {
 	// We generate a random username so that Tor will decouple all of our
 	// connections.
@@ -594,7 +613,7 @@ func (c *client) torDialer() proxy.Dialer {
 		User:     base32.StdEncoding.EncodeToString(userBytes[:]),
 		Password: "password",
 	}
-	dialer, err := proxy.SOCKS5("tcp", torAddr, &auth, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", c.torAddress, &auth, proxy.Direct)
 	if err != nil {
 		panic(err)
 	}
@@ -615,12 +634,12 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 		identityPublic = &randomIdentityPublic
 	}
 
-	serverIdentity, host, err := parseServer(server, c.testing)
+	serverIdentity, host, err := parseServer(server, c.dev)
 	if err != nil {
 		return nil, err
 	}
 	var tor proxy.Dialer
-	if c.testing {
+	if c.dev {
 		tor = proxy.Direct
 	} else {
 		tor = c.torDialer()
@@ -639,29 +658,27 @@ func (c *client) dialServer(server string, useRandomIdentity bool) (*transport.C
 	return conn, nil
 }
 
-func (c *client) doCreateAccount() error {
-	_, _, err := parseServer(c.server, c.testing)
+func (c *client) doCreateAccount(displayMsg func(string)) error {
+	_, _, err := parseServer(c.server, c.dev)
 	if err != nil {
 		return err
 	}
 
-	if !c.testing {
+	if !c.dev {
 		// Check that Tor is running.
-		testConn, err := net.Dial("tcp", torAddr)
+		testConn, err := net.Dial("tcp", c.torAddress)
 		if err != nil {
 			return errors.New("Failed to connect to local Tor: " + err.Error())
 		}
 		testConn.Close()
 	}
 
-	c.ui.Actions() <- SetText{name: "status", text: "Generating keys..."}
-	c.ui.Signal()
+	displayMsg("Generating keys...")
 
 	c.randBytes(c.identity[:])
 	curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
 
-	c.ui.Actions() <- SetText{name: "status", text: "Connecting..."}
-	c.ui.Signal()
+	displayMsg("Connecting...")
 
 	conn, err := c.dialServer(c.server, false)
 	if err != nil {
@@ -669,8 +686,7 @@ func (c *client) doCreateAccount() error {
 	}
 	defer conn.Close()
 
-	c.ui.Actions() <- SetText{name: "status", text: "Requesting new account..."}
-	c.ui.Signal()
+	displayMsg("Requesting new account...")
 
 	c.generation = uint32(c.randId())
 
@@ -691,8 +707,7 @@ func (c *client) doCreateAccount() error {
 		return err
 	}
 
-	c.ui.Actions() <- SetText{name: "status", text: "Done"}
-	c.ui.Signal()
+	displayMsg("Done")
 
 	return nil
 }
@@ -731,7 +746,18 @@ func (c *client) transact() {
 	startup := true
 
 	var ackChan chan bool
+	var head *queuedMessage
+	lastWasSend := false
+
 	for {
+		if head != nil {
+			// We failed to send a message.
+			c.queueMutex.Lock()
+			head.sending = false
+			c.queueMutex.Unlock()
+			head = nil
+		}
+
 		if !startup || !c.autoFetch {
 			if ackChan != nil {
 				ackChan <- true
@@ -744,12 +770,13 @@ func (c *client) transact() {
 				c.randBytes(seedBytes[:])
 				seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
 				r := mrand.New(mrand.NewSource(seed))
-				delay := r.ExpFloat64() * transactionRateSeconds
-				if c.testing {
-					delay = 5
+				delaySeconds := r.ExpFloat64() * transactionRateSeconds
+				if c.dev {
+					delaySeconds = 5
 				}
-				c.log.Printf("Next network transaction in %d seconds", int(delay))
-				timerChan = time.After(time.Duration(delay*1000) * time.Millisecond)
+				delay := time.Duration(delaySeconds*1000) * time.Millisecond
+				c.log.Printf("Next network transaction in %s seconds", delay)
+				timerChan = time.After(delay)
 			}
 
 			// Revocation updates are always processed first.
@@ -796,24 +823,25 @@ func (c *client) transact() {
 		}
 		startup = false
 
-		var head *queuedMessage
 		var req *pond.Request
 		var server string
 
 		useAnonymousIdentity := true
 		isFetch := false
 		c.queueMutex.Lock()
-		if len(c.queue) == 0 {
+		if (!c.testing && lastWasSend) || len(c.queue) == 0 {
 			useAnonymousIdentity = false
 			isFetch = true
 			req = &pond.Request{Fetch: &pond.Fetch{}}
 			server = c.server
 			c.log.Printf("Starting fetch from home server")
+			lastWasSend = false
 		} else {
-			// We move the head to the back of the queue so that we
-			// don't get stuck trying to send the same message over
-			// and over.
 			head = c.queue[0]
+			head.sending = true
+			// Move the head of the queue to the end so that we
+			// don't get stuck trying send the same message over
+			// and over.
 			c.queue = append(c.queue[1:], head)
 			req = head.request
 			server = head.server
@@ -822,8 +850,13 @@ func (c *client) transact() {
 			if head.revocation {
 				useAnonymousIdentity = false
 			}
+			lastWasSend = true
 		}
 		c.queueMutex.Unlock()
+
+		// Poke the UI thread so that it knows that a message has
+		// started sending.
+		c.messageSentChan <- messageSendResult{}
 
 		conn, err := c.dialServer(server, useAnonymousIdentity)
 		if err != nil {
@@ -841,39 +874,59 @@ func (c *client) transact() {
 			continue
 		}
 
-		if reply.Status == nil {
-			if isFetch && (reply.Fetched != nil || reply.Announce != nil) {
-				ackChan := make(chan bool)
-				c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}
-				<-ackChan
-			} else if !isFetch {
-				c.queueMutex.Lock()
-				c.queue = c.queue[:len(c.queue)-1]
-				if len(c.queue) == 0 {
-					c.queue = nil
-				}
+		conn.Close()
+
+		if !isFetch {
+			c.queueMutex.Lock()
+			// Find the index of the message that we just sent (if any) in
+			// the queue. It should be at the end, but another message may
+			// have been enqueued while we were sending it.
+			indexOfSentMessage := c.indexOfQueuedMessage(head)
+
+			// If we sent a message that was removed from the queue while
+			// we were processing it then ignore any result.
+			if indexOfSentMessage == -1 {
+				continue
+			}
+
+			head.sending = false
+
+			if reply.Status == nil {
+				c.removeQueuedMessage(indexOfSentMessage)
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
+			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
+				reply.Revocation != nil {
+				c.queueMutex.Unlock()
+				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
+			} else {
+				c.queueMutex.Unlock()
 			}
-		} else if !isFetch &&
-			*reply.Status == pond.Reply_GENERATION_REVOKED &&
-			reply.Revocation != nil {
-			c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
-		}
 
-		conn.Close()
+			head = nil
+		} else if reply.Fetched != nil || reply.Announce != nil {
+			ackChan := make(chan bool)
+			c.newMessageChan <- NewMessage{reply.Fetched, reply.Announce, ackChan}
+			<-ackChan
+		}
 
 		if err := replyToError(reply); err != nil {
 			c.log.Errorf("Error from server %s: %s", server, err)
 			continue
 		}
-
 	}
 }
 
+// detachmentTransfer is the interface to either an upload or download so that
+// the code for moving the bytes can be shared between them.
 type detachmentTransfer interface {
+	// Request returns the request that should be sent to the server.
 	Request() *pond.Request
-	ProcessReply(*pond.Reply) (*os.File, bool, int64, bool, error)
+	// ProcessReply returns a file to read/write from, the starting offset
+	// for the transfer and the total size of the file. The file will
+	// already have been positioned correctly.
+	ProcessReply(*pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error)
+	// Complete is called once the bytes have been transfered. It trues true on success.
 	Complete(conn *transport.Conn) bool
 }
 
@@ -892,14 +945,17 @@ func (ut uploadTransfer) Request() *pond.Request {
 	}
 }
 
-func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
-	var offset int64
+func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error) {
 	if reply.Upload != nil && reply.Upload.Resume != nil {
 		offset = *reply.Upload.Resume
 	}
 
 	if offset == ut.total {
 		isComplete = true
+		return
+	}
+	if offset > ut.total {
+		err = fmt.Errorf("offset from server is greater than the length of the file: %d vs %d", offset, ut.total)
 		return
 	}
 	pos, err := ut.file.Seek(offset, 0 /* from start */)
@@ -910,7 +966,7 @@ func (ut uploadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUploa
 
 	file = ut.file
 	isUpload = true
-	total = ut.total - offset
+	total = ut.total
 	return
 }
 
@@ -940,7 +996,14 @@ type downloadTransfer struct {
 	from   *[32]byte
 }
 
-func (dt downloadTransfer) Request() *pond.Request {
+func (dt *downloadTransfer) Request() *pond.Request {
+	pos, err := dt.file.Seek(0, 2 /* from end */)
+	if err == nil {
+		dt.resume = pos
+	} else {
+		dt.resume = 0
+	}
+
 	var resume *int64
 	if dt.resume > 0 {
 		resume = proto.Int64(dt.resume)
@@ -955,24 +1018,24 @@ func (dt downloadTransfer) Request() *pond.Request {
 	}
 }
 
-func (dt downloadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, total int64, isComplete bool, err error) {
+func (dt *downloadTransfer) ProcessReply(reply *pond.Reply) (file *os.File, isUpload bool, offset, total int64, isComplete bool, err error) {
 	if reply.Download == nil {
 		err = errors.New("Reply from server didn't include a download section")
 		return
 	}
 
-	size := *reply.Download.Size
-	if size < dt.resume {
+	total = *reply.Download.Size
+	if total < dt.resume {
 		err = errors.New("Reply from server suggested that the file was truncated")
 		return
 	}
 
+	offset = dt.resume
 	file = dt.file
-	total = size - dt.resume
 	return
 }
 
-func (dt downloadTransfer) Complete(conn *transport.Conn) bool {
+func (dt *downloadTransfer) Complete(conn *transport.Conn) bool {
 	return true
 }
 
@@ -1012,25 +1075,124 @@ func (c *client) downloadDetachment(out chan interface{}, file *os.File, id uint
 	u.Path = ""
 	server := u.String()
 
-	transfer := downloadTransfer{file: file, fileID: fileID, from: &from}
-
-	pos, err := file.Seek(0, 2 /* from end */)
-	if err != nil {
-		return err
-	}
-	transfer.resume = pos
+	transfer := &downloadTransfer{file: file, fileID: fileID, from: &from}
 
 	return c.transferDetachment(out, server, transfer, id, killChan)
 }
 
-func (c *client) transferDetachment(out chan interface{}, server string, transfer detachmentTransfer, id uint64, killChan chan bool) error {
-	var transferred, total int64
+// transferDetachmentConn transfers as much of a detachment as possible on a
+// single connection. It calls sendStatus repeatedly with the current state of
+// the transfer and watches killChan for an abort signal. It returns an error
+// and an indication of whether the error is fatal. If not fatatl then another
+// connection can be attempted in order to resume the transfer.
+func (c *client) transferDetachmentConn(sendStatus func(s string, done, total int64), conn *transport.Conn, transfer detachmentTransfer, killChan chan bool) (err error, fatal bool) {
+	defer conn.Close()
 
-	sendStatus := func(s string) {
+	// transferred is the number of bytes that *this connection* has transferred.
+	// total is the full length of the file.
+	var startingOffset, transferred, total int64
+
+	sendStatus("Requesting transfer", 0, 0)
+	if err := conn.WriteProto(transfer.Request()); err != nil {
+		return fmt.Errorf("failed to write request: %s", err), false
+	}
+
+	reply := new(pond.Reply)
+	if err := conn.ReadProto(reply); err != nil {
+		return fmt.Errorf("failed to read reply: %s", err), false
+	}
+
+	if reply.Status != nil && *reply.Status == pond.Reply_RESUME_PAST_END_OF_FILE {
+		return nil, false
+	}
+
+	if err := replyToError(reply); err != nil {
+		if reply.GetStatus() == pond.Reply_OVER_QUOTA {
+			return fmt.Errorf("server reports that the upload would exceed allowed quota"), true
+		}
+		return fmt.Errorf("request failed: %s", err), false
+	}
+
+	var file *os.File
+	var isUpload, isComplete bool
+	if file, isUpload, startingOffset, total, isComplete, err = transfer.ProcessReply(reply); err != nil {
+		return fmt.Errorf("request failed: %s", err), false
+	}
+	if isComplete {
+		return nil, false
+	}
+	todo := total - startingOffset
+
+	var in io.Reader
+	var out io.Writer
+	if isUpload {
+		out = conn
+		in = file
+	} else {
+		out = file
+		in = conn
+	}
+
+	buf := make([]byte, 16*1024)
+	var lastUpdate time.Time
+
+	for transferred < todo {
+		select {
+		case <-killChan:
+			return backgroundCanceledError, true
+		default:
+			break
+		}
+
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+		n, err := in.Read(buf)
+		if err != nil {
+			if isUpload {
+				return fmt.Errorf("failed to read from disk: %s", err), true
+			}
+
+			return err, false
+		}
+
+		n, err = out.Write(buf[:n])
+		if err != nil {
+			if !isUpload {
+				return fmt.Errorf("failed to write to disk: %s", err), true
+			}
+
+			return err, false
+		}
+
+		transferred += int64(n)
+
+		if transferred > todo {
+			return errors.New("transferred more than the expected amount"), true
+		}
+		now := time.Now()
+		if lastUpdate.IsZero() || now.Sub(lastUpdate) > 10*time.Millisecond {
+			lastUpdate = now
+			sendStatus("", startingOffset+transferred, total)
+		}
+	}
+	sendStatus("", startingOffset+transferred, total)
+
+	if transferred < todo {
+		return errors.New("incomplete transfer"), false
+	}
+
+	if !transfer.Complete(conn) {
+		return errors.New("didn't receive confirmation from server"), false
+	}
+	return nil, false
+}
+
+func (c *client) transferDetachment(out chan interface{}, server string, transfer detachmentTransfer, id uint64, killChan chan bool) error {
+	sendStatus := func(s string, done, total int64) {
 		select {
 		case out <- DetachmentProgress{
 			id:     id,
-			done:   uint64(transferred),
+			done:   uint64(done),
 			total:  uint64(total),
 			status: s,
 		}:
@@ -1043,13 +1205,16 @@ func (c *client) transferDetachment(out chan interface{}, server string, transfe
 	const maxBackoff = 5 * time.Minute
 	backoff := initialBackoff
 
-	for {
-		sendStatus("Connecting")
+	const maxTransientErrors = 15
+	transientErrors := 0
+
+	for transientErrors < maxTransientErrors {
+		sendStatus("Connecting", 0, 0)
 
 		conn, err := c.dialServer(server, false)
 		if err != nil {
-			c.log.Printf("Failed to connect to %s: %s", c.server, err)
-			sendStatus("Waiting to reconnect")
+			c.log.Printf("Failed to connect to %s: %s", server, err)
+			sendStatus("Waiting to reconnect", 0, 0)
 
 			select {
 			case <-time.After(backoff):
@@ -1065,122 +1230,29 @@ func (c *client) transferDetachment(out chan interface{}, server string, transfe
 		}
 
 		backoff = initialBackoff
-
-		sendStatus("Requesting transfer")
-		if err := conn.WriteProto(transfer.Request()); err != nil {
-			c.log.Printf("Failed to write request to %s: %s", c.server, err)
-			conn.Close()
-			continue
-		}
-
-		reply := new(pond.Reply)
-		if err := conn.ReadProto(reply); err != nil {
-			c.log.Printf("Failed to read reply from %s: %s", c.server, err)
-			conn.Close()
-			continue
-		}
-
-		if reply.Status != nil && *reply.Status == pond.Reply_RESUME_PAST_END_OF_FILE {
-			conn.Close()
+		err, isFatal := c.transferDetachmentConn(sendStatus, conn, transfer, killChan)
+		if err == nil {
+			c.log.Printf("Completed transfer to/from %s", server)
 			return nil
 		}
 
-		if err := replyToError(reply); err != nil {
-			c.log.Printf("Request failed: %s", err)
-			conn.Close()
+		if err == backgroundCanceledError {
 			return err
 		}
 
-		var file *os.File
-		var isUpload, isComplete bool
-		if file, isUpload, total, isComplete, err = transfer.ProcessReply(reply); err != nil {
-			c.log.Printf("Request failed: %s", err)
-			conn.Close()
-			return err
-		}
-		if isComplete {
-			conn.Close()
-			return nil
-		}
-
-		var in io.Reader
-		var out io.Writer
-		if isUpload {
-			out = conn
-			in = file
+		if isFatal {
+			err = fmt.Errorf("fatal error: %s", err)
 		} else {
-			out = file
-			in = conn
+			transientErrors++
+			err = fmt.Errorf("transient error: %s", err)
 		}
-
-		buf := make([]byte, 16*1024)
-		var lastUpdate time.Time
-
-		for {
-			select {
-			case <-killChan:
-				conn.Close()
-				return backgroundCanceledError
-			default:
-				break
-			}
-
-			conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-			n, err := in.Read(buf)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				conn.Close()
-				if isUpload {
-					err = fmt.Errorf("failed to read during transfer: %s", err)
-					c.log.Printf("%s", err)
-					return err
-				}
-				// Read errors from the network are transient.
-				continue
-			}
-
-			n, err = out.Write(buf[:n])
-			if err != nil {
-				conn.Close()
-				if !isUpload {
-					err = fmt.Errorf("failed to write during download: %s", err)
-					c.log.Printf("%s", err)
-					return err
-				}
-				// Write errors to the network are transient.
-				continue
-			}
-
-			transferred += int64(n)
-			if transferred > total {
-				err = errors.New("transferred more than the expected amount")
-				conn.Close()
-				c.log.Printf("%s", err)
-				return err
-			}
-			now := time.Now()
-			if lastUpdate.IsZero() || now.Sub(lastUpdate) > 500*time.Millisecond {
-				lastUpdate = now
-				sendStatus("")
-			}
-
-			time.Sleep(5 * time.Millisecond)
-		}
-
-		if transferred < total {
-			conn.Close()
-			continue
-		}
-
-		ok := transfer.Complete(conn)
-		conn.Close()
-		if ok {
-			return nil
+		c.log.Printf("While transferring to/from %s: %s", server, err)
+		if isFatal {
+			return err
 		}
 	}
 
-	return nil
+	err := errors.New("too many transient errors")
+	c.log.Printf("While tranferring to/from %s: %s", server, err)
+	return err
 }

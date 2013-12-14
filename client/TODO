@@ -1,17 +1,17 @@
 Short-term TODOs:
 
-Allow for immediate deletion.
-Delete messages while UI is open.
  ? Add delay to server responses.
 Compress messages
 
-
-Medium:
-
-Attachments
-PANDA support
+Update ratchet
+Use single point for both signing and ECDH.
 
 
 Minor, non-urgent:
 
 Expose server queue length in fetches
+
+
+BUGS:
+
+A key exchange should send the group that's currently on the server, not the current group.

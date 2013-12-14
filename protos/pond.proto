@@ -168,6 +168,9 @@ message KeyExchange {
 	required string server = 3;
 	// A Curve25519, initial Diffie-Hellman value.
 	required bytes dh = 4;
+	// dh1 contains the second, curve25519, public key if the new-form
+	// ratchet is being used.
+	optional bytes dh1 = 8;
 	// A serialised bbssig.Group.
 	required bytes group = 5;
 	// A bbssig.PrivateKey to authorise message delivery.
@@ -202,7 +205,7 @@ message Message {
 	}
 	optional Encoding body_encoding = 4;
 	// my_next_dh contains a Curve25519 public value for future messages.
-	required bytes my_next_dh = 5;
+	optional bytes my_next_dh = 5;
 	// in_reply_to, if set, contains the |id| value of a previous message
 	// sent by the recipient.
 	optional uint64 in_reply_to = 6;
