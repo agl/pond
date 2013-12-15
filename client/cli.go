@@ -793,6 +793,11 @@ Handle:
 			c.Printf("%s (%s) %s\n", termHeaderPrefix, entry.Format(logTimeFormat), terminalEscape(entry.s, false))
 		}
 
+	case quitCommand:
+		c.ShutdownAndSuspend()
+		c.Printf("Goodbye!\n")
+		os.Exit(0)
+
 	case deleteCommand:
 		if c.currentObj == nil {
 			c.Printf("%s Select object first\n", termWarnPrefix)
@@ -899,6 +904,9 @@ Handle:
 		default:
 			c.Printf("%s Cannot show the current object\n", termWarnPrefix)
 		}
+
+	case statusCommand:
+		c.showState()
 
 	case attachCommand:
 		draft, ok := c.currentObj.(*Draft)

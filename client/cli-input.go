@@ -31,11 +31,13 @@ var cliCommands = []cliCommand{
 	{"help", helpCommand{}, "List known commands"},
 	{"log", logCommand{}, "Show recent log entries"},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact"},
+	{"quit", quitCommand{}, "Exit Pond"},
 	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message"},
 	{"reply", replyCommand{}, "Reply to the current message"},
 	{"save", saveCommand{}, "Save a numbered attachment to disk"},
 	{"send", sendCommand{}, "Send the current draft"},
 	{"show", showCommand{}, "Show the current object"},
+	{"status", statusCommand{}, "Show overall Pond status"},
 	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft"},
 }
 
@@ -45,9 +47,11 @@ type deleteCommand struct{}
 type editCommand struct{}
 type helpCommand struct{}
 type logCommand struct{}
+type quit struct{}
 type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
+type statusCommand struct{}
 
 type newContactCommand struct {
 	Name string
