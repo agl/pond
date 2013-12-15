@@ -304,7 +304,7 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 		ciphertext := secretbox.Seal(nil, plaintext, &nonce, &effectiveKey)
 
 		// Open a new, temporary, statefile
-		out, err := os.OpenFile(sf.Path + ".tmp", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
+		out, err := os.OpenFile(sf.Path+".tmp", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			panic(err)
 		}
@@ -327,19 +327,20 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 		if _, err := out.Write(ciphertext); err != nil {
 			panic(err)
 		}
+		out.Sync()
 		out.Close()
 
 		// Remove any previous temporary statefile
 		// (But this shouldn't ever happen?)
-		if err := os.Remove(sf.Path + "~"); ! os.IsNotExist(err) {
+		if err := os.Remove(sf.Path + "~"); !os.IsNotExist(err) {
 			panic(err)
 		}
 		// Relink the old statefile to a temporary location
-		if err := os.Rename(sf.Path, sf.Path + "~"); ! os.IsNotExist(err) {
+		if err := os.Rename(sf.Path, sf.Path+"~"); !os.IsNotExist(err) {
 			panic(err)
 		}
 		// Link the new statefile in place
-		if err := os.Link(sf.Path + ".tmp", sf.Path); err != nil {
+		if err := os.Link(sf.Path+".tmp", sf.Path); err != nil {
 			panic(err)
 		}
 		// Remove the old statefile
