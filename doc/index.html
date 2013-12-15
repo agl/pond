@@ -59,6 +59,26 @@ $GOPATH/bin/client</pre>
 
 <p>Same as Ubuntu, above, but 1) on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL and 2) the gtkspell package is called <tt>libgtkspell-3-dev</tt>. On more recent versions of Debian, the instructions should be exactly the same as Ubuntu.</p>
 
+<h5>TAILS</h5>
+<p>TAILS only supports the cli mode of operation for Pond as it is based on an Debian old stable.
+Build, install and usage instructions for TAILS users:
+<pre>
+sudo apt-get update --fix-missing
+sudo apt-get install -t unstable golang
+sudo apt-get install mercurial trousers gcc
+sudo apt-get install -t backports libtspi-dev
+mkdir ~/amnesia/Persistent/go/
+export GOPATH=$HOME/Persistent/go/
+export PATH=$PATH:$GOPATH/bin
+go get -d github.com/agl/pond/client
+go build -tags nogui github.com/agl/pond/client
+go install -tags nogui github.com/agl/pond/client
+export POND=experimental
+export PONDCLI=1
+alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"
+</pre>
+</p>
+
 <h5>Fedora 19</h5>
 
 <p>Fedora's <tt>golang</tt> package appears to be completely broken, so this installs Go from source.</p>
