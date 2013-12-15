@@ -533,8 +533,11 @@ func (c *cliClient) mainUI() {
 				}
 			}
 
-			c.processCommand(line.command)
+			shouldQuit := c.processCommand(line.command)
 			close(line.ackChan)
+			if shouldQuit {
+				return
+			}
 		case newMessage := <-c.newMessageChan:
 			c.processNewMessage(newMessage)
 		case msr := <-c.messageSentChan:
@@ -711,7 +714,7 @@ func (c *cliClient) runBackgroundProcess(id uint64, cancelThunk func()) (*pond.M
 	}
 }
 
-func (c *cliClient) processCommand(cmd interface{}) {
+func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 	// First commands that might start a subprocess that needs terminal
 	// control.
 	switch cmd.(type) {
@@ -796,7 +799,8 @@ Handle:
 	case quitCommand:
 		c.ShutdownAndSuspend()
 		c.Printf("Goodbye!\n")
-		os.Exit(0)
+		shouldQuit = true
+		return
 
 	case deleteCommand:
 		if c.currentObj == nil {
@@ -1056,6 +1060,8 @@ Handle:
 	default:
 		panic(fmt.Sprintf("Unhandled command: %#v", cmd))
 	}
+
+	return
 }
 
 // indentForReply returns a copy of in where the beginning of each line is

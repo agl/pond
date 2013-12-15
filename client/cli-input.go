@@ -47,7 +47,7 @@ type deleteCommand struct{}
 type editCommand struct{}
 type helpCommand struct{}
 type logCommand struct{}
-type quit struct{}
+type quitCommand struct{}
 type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
