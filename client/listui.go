@@ -128,6 +128,7 @@ func (cs *listUI) SetInsensitive(id uint64) {
 }
 
 func (cs *listUI) Remove(id uint64) {
+	newEntries := make([]listItem, 0, len(cs.entries))
 	for i, entry := range cs.entries {
 		if entry.id == id {
 			if i > 0 {
@@ -138,11 +139,15 @@ func (cs *listUI) Remove(id uint64) {
 			if cs.selected == id {
 				cs.selected = 0
 			}
-			return
+			continue
 		}
+		newEntries = append(newEntries, entry)
 	}
 
-	panic("unknown id passed to Remove")
+	if len(newEntries) == len(cs.entries) {
+		panic("unknown id passed to Remove")
+	}
+	cs.entries = newEntries
 }
 
 func (cs *listUI) Deselect() {

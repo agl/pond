@@ -1602,6 +1602,15 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 					text: "Abort Send",
 				}},
 			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        "delete",
+						insensitive: canAbort,
+					},
+					text: "Delete",
+				}},
+			},
 		},
 	}
 
@@ -1627,15 +1636,14 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 
 		if click, ok := event.(Click); ok && click.name == "abort" {
 			c.queueMutex.Lock()
-
 			indexOfMessage := c.indexOfQueuedMessage(msg)
-
 			if indexOfMessage == -1 || msg.sending {
 				// Sorry - too late. Can't abort now.
 				c.queueMutex.Unlock()
 
 				canAbort = false
 				c.gui.Actions() <- Sensitive{name: "abort", sensitive: canAbort}
+				c.gui.Actions() <- Sensitive{name: "delete", sensitive: !canAbort}
 				c.gui.Signal()
 				continue
 			}
@@ -1661,6 +1669,25 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			return c.composeUI(draft, nil)
 		}
 
+		if click, ok := event.(Click); ok && click.name == "delete" {
+			c.deleteOutboxMsg(msg.id)
+			// Also find and delete any empty acks for this message.
+			for _, inboxMsg := range c.inbox {
+				if inboxMsg.message != nil && len(inboxMsg.message.Body) == 0 && inboxMsg.message.InReplyTo != nil && *inboxMsg.message.InReplyTo == msg.id {
+					c.deleteInboxMsg(inboxMsg.id)
+					break
+				}
+			}
+			c.save()
+			if msg.revocation || len(msg.message.Body) > 0 {
+				c.outboxUI.Remove(msg.id)
+			}
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
+			return nil
+		}
+
 		if !haveSentTime && !msg.sent.IsZero() {
 			c.gui.Actions() <- SetText{name: "sent", text: formatTime(msg.sent)}
 			c.gui.Signal()
@@ -1680,6 +1707,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 
 		if canAbortChanged {
 			c.gui.Actions() <- Sensitive{name: "abort", sensitive: canAbort}
+			c.gui.Actions() <- Sensitive{name: "delete", sensitive: !canAbort}
 			c.gui.Signal()
 		}
 	}

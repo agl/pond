@@ -475,6 +475,11 @@ func (c *client) processMessageSent(msr messageSendResult) {
 		}
 	}
 
+	if msg == nil {
+		// Message might have been deleted while sending.
+		return
+	}
+
 	if msr.revocation != nil {
 		// We tried to deliver a message to a user but the server told
 		// us that there's a pending revocation.

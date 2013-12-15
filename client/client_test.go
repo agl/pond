@@ -800,6 +800,23 @@ WaitForAck:
 	if client1.outbox[0].acked.IsZero() {
 		t.Fatalf("client1 doesn't believe that its message has been acked")
 	}
+
+	client1.gui.events <- Click{
+		name: client1.outboxUI.entries[0].boxName,
+	}
+	client1.AdvanceTo(uiStateOutbox)
+	client1.gui.events <- Click{
+		name: "delete",
+	}
+	client1.AdvanceTo(uiStateMain)
+
+	if l := len(client1.outboxUI.entries); l > 0 {
+		t.Fatalf("client1 still has %d outbox UI entries after delete", l)
+	}
+
+	if l := len(client1.outbox); l > 0 {
+		t.Fatalf("client1 still has %d outbox entries after delete", l)
+	}
 }
 
 func TestHalfPairedMessageExchange(t *testing.T) {
