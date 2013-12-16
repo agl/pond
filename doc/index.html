@@ -36,7 +36,7 @@ title: Pond
   <tr><th>Distribution</th><th>Binary</th><th>Notes<th></tr>
 
   <tr><td>Ubuntu 13.10</td><td><a href="binary/ubuntu/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
-  <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
+  <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell-3-0</tt></td></tr>
   <tr><td>Fedora 19</td><td><a href="binary/fedora/pond.gpg">pond.gpg</a></td><td><tt>sudo yum install trousers gtkspell3</tt></td></tr>
   <tr><td>OS X 10.9</td><td><a href="binary/osx/Pond.tar.gpg">Pond.tar.gpg</a></td><td>WARNING: no support for erasure storage yet</td></tr>
 </table>
@@ -52,16 +52,15 @@ cd
 mkdir gopkg
 export GOPATH=$HOME/gopkg
 go get github.com/agl/pond/client
-go install github.com/agl/pond/client
 $GOPATH/bin/client</pre>
 
-<h5>Debian Wheezy</h5>
+<h5>Debian Wheezy and Ubuntu 12.04</h5>
 
 <p>Same as Ubuntu, above, but 1) on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL and 2) the gtkspell package is called <tt>libgtkspell-3-dev</tt>. On more recent versions of Debian, the instructions should be exactly the same as Ubuntu.</p>
 
-<h5>TAILS</h5>
-<p>TAILS only supports the cli mode of operation for Pond as it is based on an old Debian-stable.
-Build, install and usage instructions for TAILS users:</p>
+<h5>Tails</h5>
+<p>Tails only supports the CLI mode of operation for Pond as it is based on an old Debian-stable.
+Build, install and usage instructions for Tails users:</p>
 <pre>sudo apt-get update --fix-missing
 sudo apt-get install -t unstable golang
 sudo apt-get install mercurial trousers gcc
@@ -69,9 +68,7 @@ sudo apt-get install -t backports libtspi-dev
 mkdir ~/amnesia/Persistent/go/
 export GOPATH=$HOME/Persistent/go/
 export PATH=$PATH:$GOPATH/bin
-go get -d github.com/agl/pond/client
-go build -tags nogui github.com/agl/pond/client
-go install -tags nogui github.com/agl/pond/client
+go get -tags nogui github.com/agl/pond/client
 alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
 
 <h5>Fedora 19</h5>
@@ -89,7 +86,7 @@ export PATH=$PATH:$HOME/go/bin
 mkdir gopkg
 export GOPATH=$HOME/gopkg
 go get github.com/agl/pond/client
-go install github.com/agl/pond/client</pre>
+$GOPATH/bin/client</pre>
 
 <h5>Arch</h5>
 <pre>
@@ -98,7 +95,6 @@ cd
 mkdir gopkg
 export GOPATH=$HOME/gopkg
 go get github.com/agl/pond/client
-go install github.com/agl/pond/client
 systemctl start tor.service
 $GOPATH/bin/client
 </pre>
@@ -120,7 +116,6 @@ export PATH=$PATH:$GOPATH/bin
 export PKG_CONFIG_PATH=/opt/X11/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 
 go get github.com/agl/pond/client
-go install github.com/agl/pond/client
 // now `client` should be in your path
 </pre>
 
