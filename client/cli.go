@@ -553,74 +553,10 @@ func (c *cliClient) mainUI() {
 }
 
 func (c *cliClient) showState() {
-	if len(c.inbox) > 0 {
-		c.Printf("%s Inbox:\n", termPrefix)
-	}
-	for _, msg := range c.inbox {
-		var subline string
-		i := indicatorNone
-
-		if msg.message == nil {
-			subline = "pending"
-		} else {
-			if len(msg.message.Body) == 0 {
-				continue
-			}
-			if !msg.read {
-				i = indicatorBlue
-			}
-			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
-		}
-		fromString := "Home Server"
-		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
-		}
-		if msg.cliId == invalidCliId {
-			msg.cliId = c.newCliId()
-		}
-
-		c.Printf(" %s %s : %s (%s%s%s)\n", i.Star(), terminalEscape(fromString, false), subline, termCliIdStart, msg.cliId.String(), termReset)
-	}
-
-	if len(c.outbox) > 0 {
-		c.Printf("\n%s Outbox:\n", termPrefix)
-	}
-	for _, msg := range c.outbox {
-		if msg.revocation {
-			c.Printf(" %s Revocation : %s\n", msg.indicator().Star(), msg.created.Format(shortTimeFormat))
-			continue
-		}
-		if len(msg.message.Body) > 0 {
-			if msg.cliId == invalidCliId {
-				msg.cliId = c.newCliId()
-			}
-
-			subline := msg.created.Format(shortTimeFormat)
-			c.Printf(" %s %s : %s (%s%s%s)\n", msg.indicator().Star(), terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
-		}
-	}
-
-	if len(c.drafts) > 0 {
-		c.Printf("\n%s Drafts:\n", termPrefix)
-	}
-	for _, msg := range c.drafts {
-		if msg.cliId == invalidCliId {
-			msg.cliId = c.newCliId()
-		}
-
-		subline := msg.created.Format(shortTimeFormat)
-		c.Printf("   %s : %s (%s%s%s)\n", terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
-	}
-
-	if len(c.contacts) > 0 {
-		c.Printf("\n%s Contacts:\n", termPrefix)
-	}
-	for _, contact := range c.contacts {
-		if contact.cliId == invalidCliId {
-			contact.cliId = c.newCliId()
-		}
-		c.Printf("   %s %s (%s%s%s)\n", terminalEscape(contact.name, false), contact.subline(), termCliIdStart, contact.cliId.String(), termReset)
-	}
+	c.showInboxSummary()
+	c.showOutboxSummary()
+	c.showDraftsSummary()
+	c.showContacts()
 
 	c.Printf("\n")
 	c.showQueueState()
