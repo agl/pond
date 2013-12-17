@@ -626,6 +626,20 @@ func (c *cliClient) showState() {
 	c.showQueueState()
 }
 
+func (c *cliClient) showContacts() {
+	if len(c.contacts) > 0 {
+		c.Printf("\n%s Contacts:\n", termPrefix)
+	}
+	for _, contact := range c.contacts {
+		if contact.cliId == invalidCliId {
+			contact.cliId = c.newCliId()
+		}
+		c.Printf("   %s %s (%s%s%s)\n", terminalEscape(contact.name, false), contact.subline(), termCliIdStart, contact.cliId.String(), termReset)
+	}
+
+	c.Printf("\n")
+}
+
 func (c *cliClient) showQueueState() {
 	c.queueMutex.Lock()
 	queueLength := len(c.queue)
@@ -725,6 +739,8 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 			c.Printf("%s Select contact first\n", termWarnPrefix)
 		}
 
+	case contactsCommand:
+		c.showContacts()
 	case editCommand:
 		if draft, ok := c.currentObj.(*Draft); ok {
 			c.compose(nil, draft, nil)
@@ -1209,6 +1225,7 @@ func (c *cliClient) showInbox(msg *InboxMessage) {
 	}
 	c.Printf("\n")
 	c.term.Write([]byte(terminalEscape(string(msgText), true /* line breaks ok */)))
+	c.Printf("\n")
 }
 
 func (c *cliClient) showOutbox(msg *queuedMessage) {
@@ -1226,7 +1243,9 @@ func (c *cliClient) showOutbox(msg *queuedMessage) {
 	c.Printf("%s Sent: %s\n", termHeaderPrefix, sentTime)
 	c.Printf("%s Acknowledged: %s\n", termHeaderPrefix, formatTime(msg.acked))
 	c.Printf("%s Erase: %s\n\n", termHeaderPrefix, eraseTime)
+	c.Printf("\n")
 	c.term.Write([]byte(terminalEscape(string(msg.message.Body), true /* line breaks ok */)))
+	c.Printf("\n")
 }
 
 func (c *cliClient) showDraft(msg *Draft) {
@@ -1247,6 +1266,7 @@ func (c *cliClient) showDraft(msg *Draft) {
 	}
 	c.Printf("\n")
 	c.term.Write([]byte(terminalEscape(string(msg.body), true /* line breaks ok */)))
+	c.Printf("\n")
 }
 
 func (c *cliClient) showContact(contact *Contact) {

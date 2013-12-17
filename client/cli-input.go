@@ -25,6 +25,7 @@ var cliCommands = []cliCommand{
 	{"acknowledge", ackCommand{}, "Acknowledge the inbox message"},
 	{"attach", attachCommand{}, "Attach a file to the current draft"},
 	{"compose", composeCommand{}, "Compose a new message"},
+	{"contacts", contactsCommand{}, "Show all known contacts"},
 	{"delete", deleteCommand{}, "Delete a message"},
 	{"download", downloadCommand{}, "Download a numbered detachment to disk"},
 	{"edit", editCommand{}, "Edit the draft message"},
@@ -43,6 +44,7 @@ var cliCommands = []cliCommand{
 
 type ackCommand struct{}
 type composeCommand struct{}
+type contactsCommand struct{}
 type deleteCommand struct{}
 type editCommand struct{}
 type helpCommand struct{}
