@@ -1086,6 +1086,12 @@ Handle:
 		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 		c.Printf("%s Key exchange running in background.\n", termPrefix)
 
+	case rmContactCommand:
+		c.rmContact(cmd.Name)
+
+	case mvContactCommand:
+		c.renameContact(cmd.OldName, cmd.NewName)
+
 	default:
 		panic(fmt.Sprintf("Unhandled command: %#v", cmd))
 	}
@@ -1280,6 +1286,34 @@ func (c *cliClient) showDraft(msg *Draft) {
 	c.Printf("\n")
 	c.term.Write([]byte(terminalEscape(string(msg.body), true /* line breaks ok */)))
 	c.Printf("\n")
+}
+
+func (c *cliClient) renameContact(oldName string, newName string) bool {
+	for _, contact := range c.contacts {
+		if contact.name == newName {
+			return false
+		}
+	}
+
+        for _, contact := range c.contacts {
+		if contact.name == oldName {
+			contact.name = newName
+			c.save()
+			return true
+		}
+	}
+	return false
+}
+
+func (c *cliClient) rmContact(name string) bool {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			delete(c.contacts, contact.id)
+				c.save()
+				return true
+		}
+	}
+	return false
 }
 
 func (c *cliClient) showContact(contact *Contact) {

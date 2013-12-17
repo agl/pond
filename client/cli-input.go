@@ -32,6 +32,8 @@ var cliCommands = []cliCommand{
 	{"help", helpCommand{}, "List known commands"},
 	{"log", logCommand{}, "Show recent log entries"},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact"},
+	{"rm-contact", rmContactCommand{}, "Remove an existing contact"},
+	{"mv-contact", mvContactCommand{}, "Rename an existing contact"},
 	{"quit", quitCommand{}, "Exit Pond"},
 	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message"},
 	{"reply", replyCommand{}, "Reply to the current message"},
@@ -65,6 +67,15 @@ type statusCommand struct{}
 
 type newContactCommand struct {
 	Name string
+}
+
+type rmContactCommand struct {
+	Name string
+}
+
+type mvContactCommand struct {
+	OldName string
+	NewName string
 }
 
 type attachCommand struct {
