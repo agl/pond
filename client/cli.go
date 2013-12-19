@@ -922,6 +922,37 @@ Handle:
 		}
 		c.save()
 
+	case abortCommand:
+		if c.currentObj == nil {
+			c.Printf("Select object first\n")
+			return
+		}
+		switch o := c.currentObj.(type) {
+		case *queuedMessage:
+			var index int
+			var draft *Draft
+
+			c.queueMutex.Lock()
+			index = c.indexOfQueuedMessage(o)
+			if index == -1 || o.sending {
+				c.queueMutex.Unlock()
+				c.Printf("Too Late to Abort!\n")
+				return
+			}
+			c.removeQueuedMessage(index)
+			c.queueMutex.Unlock()
+
+			draft = c.outboxToDraft(o)
+			c.deleteOutboxMsg(o.id)
+			c.drafts[draft.id] = draft
+
+			c.Printf("%s Aborted %s%s%s and moved to Drafts\n", termInfoPrefix, termCliIdStart, o.cliId.String(), termReset)
+			c.save()
+			c.setCurrentObject(draft)
+		default:
+		}
+
+
 	case ackCommand:
 		msg, ok := c.currentObj.(*InboxMessage)
 		if !ok {

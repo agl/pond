@@ -47,6 +47,7 @@ var cliCommands = []cliCommand{
 	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft"},
 }
 
+type abortCommand struct{}
 type ackCommand struct{}
 type composeCommand struct{}
 type contactsCommand struct{}
