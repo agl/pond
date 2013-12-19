@@ -866,6 +866,9 @@ Handle:
 		default:
 		}
 
+	case closeCommand:
+		c.setCurrentObject(nil)
+
 	case quitCommand:
 		c.ShutdownAndSuspend()
 		c.Printf("Goodbye!\n")
