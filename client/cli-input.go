@@ -58,6 +58,7 @@ var cliCommands = []cliCommand{
 	{"send", sendCommand{}, "Send the current draft", contextDraft},
 	{"show", showCommand{}, "Show the current object", contextDraft | contextInbox | contextOutbox | contextContact},
 	{"status", statusCommand{}, "Show overall Pond status", 0},
+	{"transact-now", transactNowCommand{}, "Perform a network transaction now", 0},
 	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft", contextDraft},
 }
 
@@ -78,6 +79,7 @@ type showInboxSummaryCommand struct{}
 type showOutboxSummaryCommand struct{}
 type showQueueStateCommand struct{}
 type statusCommand struct{}
+type transactNowCommand struct{}
 
 type newContactCommand struct {
 	Name string

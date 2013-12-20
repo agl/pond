@@ -859,6 +859,13 @@ Handle:
 			c.Printf("%s (%s) %s\n", termHeaderPrefix, entry.Format(logTimeFormat), terminalEscape(entry.s, false))
 		}
 
+	case transactNowCommand:
+		c.Printf("%s Triggering immediate network transaction.\n", termPrefix)
+		select {
+		case c.fetchNowChan <- nil:
+		default:
+		}
+
 	case quitCommand:
 		c.ShutdownAndSuspend()
 		c.Printf("Goodbye!\n")
