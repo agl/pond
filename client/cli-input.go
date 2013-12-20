@@ -19,33 +19,34 @@ type cliCommand struct {
 	name      string
 	prototype interface{}
 	desc      string
+	context   string
 }
 
 var cliCommands = []cliCommand{
-	{"abort", abortCommand{}, "Abort sending the current outbox message"},
-	{"acknowledge", ackCommand{}, "Acknowledge the inbox message"},
-	{"attach", attachCommand{}, "Attach a file to the current draft"},
-	{"compose", composeCommand{}, "Compose a new message"},
-	{"contacts", contactsCommand{}, "Show all known contacts"},
-	{"delete", deleteCommand{}, "Delete a message or contact"},
-	{"download", downloadCommand{}, "Download a numbered detachment to disk"},
-	{"drafts", showDraftsSummaryCommand{}, "Show the Draftbox"},
-	{"edit", editCommand{}, "Edit the draft message"},
-	{"help", helpCommand{}, "List known commands"},
-	{"inbox", showInboxSummaryCommand{}, "Show the Inbox"},
-	{"log", logCommand{}, "Show recent log entries"},
-	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact"},
-	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox"},
-	{"queue", showQueueStateCommand{}, "Show the queue"},
-	{"quit", quitCommand{}, "Exit Pond"},
-	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message"},
-	{"rename", renameCommand{}, "Rename an existing contact"},
-	{"reply", replyCommand{}, "Reply to the current message"},
-	{"save", saveCommand{}, "Save a numbered attachment to disk"},
-	{"send", sendCommand{}, "Send the current draft"},
-	{"show", showCommand{}, "Show the current object"},
-	{"status", statusCommand{}, "Show overall Pond status"},
-	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft"},
+	{"abort", abortCommand{}, "Abort sending the current outbox message", ""},
+	{"acknowledge", ackCommand{}, "Acknowledge the inbox message", ""},
+	{"attach", attachCommand{}, "Attach a file to the current draft", ""},
+	{"compose", composeCommand{}, "Compose a new message", ""},
+	{"contacts", contactsCommand{}, "Show all known contacts", ""},
+	{"delete", deleteCommand{}, "Delete a message or contact", ""},
+	{"download", downloadCommand{}, "Download a numbered detachment to disk", ""},
+	{"drafts", showDraftsSummaryCommand{}, "Show the Draftbox", ""},
+	{"edit", editCommand{}, "Edit the draft message", ""},
+	{"help", helpCommand{}, "List known commands", ""},
+	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", ""},
+	{"log", logCommand{}, "Show recent log entries", ""},
+	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", ""},
+	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox", ""},
+	{"queue", showQueueStateCommand{}, "Show the queue", ""},
+	{"quit", quitCommand{}, "Exit Pond", ""},
+	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message", ""},
+	{"rename", renameCommand{}, "Rename an existing contact", ""},
+	{"reply", replyCommand{}, "Reply to the current message", ""},
+	{"save", saveCommand{}, "Save a numbered attachment to disk", ""},
+	{"send", sendCommand{}, "Send the current draft", ""},
+	{"show", showCommand{}, "Show the current object", ""},
+	{"status", statusCommand{}, "Show overall Pond status", ""},
+	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft", ""},
 }
 
 type abortCommand struct{}
@@ -344,11 +345,12 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 			ackChan = nil
 			continue
 		}
-		if _, ok := cmd.(helpCommand); ok {
+		// Disabled to enable context-aware help messages.
+		/*if _, ok := cmd.(helpCommand); ok {
 			i.showHelp()
 			ackChan = nil
 			continue
-		}
+		}*/
 		if cmd != nil {
 			commandsChan <- cliTerminalLine{command: cmd, ackChan: ackChan}
 		}
@@ -356,7 +358,7 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 	}
 }
 
-func (input *cliInput) showHelp() {
+func (input *cliInput) showHelp(context string) {
 	examples := make([]string, len(cliCommands))
 	maxLen := 0
 
@@ -369,6 +371,8 @@ func (input *cliInput) showHelp() {
 			} else {
 				line += " <" + strings.ToLower(prototype.Field(j).Name) + ">"
 			}
+
+			line += cmd.context
 		}
 		if l := len(line); l > maxLen {
 			maxLen = l
@@ -377,6 +381,12 @@ func (input *cliInput) showHelp() {
 	}
 
 	for i, cmd := range cliCommands {
+		// Check if the provided context is the same as the one specified at
+		// the definition of the CLI command. Also accept generic commands.
+		if (cmd.context != "" && cmd.context != context) {
+			continue
+		}
+
 		line := examples[i]
 		numSpaces := 1 + (maxLen - len(line))
 		for j := 0; j < numSpaces; j++ {

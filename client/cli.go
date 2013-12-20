@@ -792,6 +792,26 @@ Handle:
 	c.termWrapper.Restart()
 
 	switch cmd := cmd.(type) {
+	case helpCommand:
+		if c.currentObj == nil {
+			c.input.showHelp("")	
+		} else {
+			switch c.currentObj.(type) {
+			case *Contact:
+				c.input.showHelp("contact")
+			case *Draft:
+				c.input.showHelp("draft")
+			case *InboxMessage:
+				c.input.showHelp("inbox")
+			case *queuedMessage:
+				c.input.showHelp("queue")
+			default:
+				c.input.showHelp("")
+			}
+		}
+		
+		return
+
 	case tagCommand:
 		if len(cmd.tag) == 0 {
 			c.showState()
