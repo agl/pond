@@ -11,7 +11,7 @@ The code here is broken down as follows:
 
  - `bbssig` contains an implementation of the BBS group signature scheme. This is used in Pond to allow servers to reject messages from non-contacts without the server being able to identify those contacts.
  - `bn256cgo` contains a wrapping of Naehrig, Niederhagen and Schwabe's pairing library. This is a drop in replacement for the bn256 package from go.crypto and speeds up bbssig. See https://github.com/agl/dclxvi.
- - `client` contains the Pond GUI client and package for manipulating state files.
+ - `client` contains the Pond GUI and CLI client and package for manipulating state files.
  - `doc` contains the https://pond.imperialviolet.org site in Jeykll format.
  - `editstate` contains a debugging utility for manipulating state files.
  - `panda` contains a library for performing shared-key exchanges. It's used by `client/` to implement that functionality.
