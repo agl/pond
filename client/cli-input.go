@@ -62,6 +62,7 @@ var cliCommands = []cliCommand{
 
 type abortCommand struct{}
 type ackCommand struct{}
+type clearCommand struct{}
 type composeCommand struct{}
 type contactsCommand struct{}
 type deleteCommand struct{}
