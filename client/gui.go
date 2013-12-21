@@ -1651,14 +1651,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.removeQueuedMessage(indexOfMessage)
 			c.queueMutex.Unlock()
 
-			var newOutbox []*queuedMessage
-			for _, outboxMsg := range c.outbox {
-				if outboxMsg == msg {
-					continue
-				}
-				newOutbox = append(newOutbox, outboxMsg)
-			}
-			c.outbox = newOutbox
+			c.deleteOutboxMsg(msg.id)
 			c.outboxUI.Remove(msg.id)
 
 			draft := c.outboxToDraft(msg)

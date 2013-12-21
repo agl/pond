@@ -923,35 +923,33 @@ Handle:
 		c.save()
 
 	case abortCommand:
-		if c.currentObj == nil {
-			c.Printf("Select object first\n")
+		msg, ok := c.currentObj.(*queuedMessage)
+		if !ok {
+			c.Printf("%s Select outbox message first\n", termErrPrefix)
 			return
 		}
-		switch o := c.currentObj.(type) {
-		case *queuedMessage:
-			var index int
-			var draft *Draft
 
-			c.queueMutex.Lock()
-			index = c.indexOfQueuedMessage(o)
-			if index == -1 || o.sending {
-				c.queueMutex.Unlock()
-				c.Printf("Too Late to Abort!\n")
-				return
-			}
-			c.removeQueuedMessage(index)
+		c.queueMutex.Lock()
+		index := c.indexOfQueuedMessage(msg)
+		if index == -1 || msg.sending {
 			c.queueMutex.Unlock()
-
-			draft = c.outboxToDraft(o)
-			c.deleteOutboxMsg(o.id)
-			c.drafts[draft.id] = draft
-
-			c.Printf("%s Aborted %s%s%s and moved to Drafts\n", termInfoPrefix, termCliIdStart, o.cliId.String(), termReset)
-			c.save()
-			c.setCurrentObject(draft)
-		default:
+			c.Printf("%s Too Late to Abort!\n", termErrPrefix)
+			return
 		}
 
+		c.removeQueuedMessage(index)
+		c.queueMutex.Unlock()
+
+		c.deleteOutboxMsg(msg.id)
+		draft := c.outboxToDraft(msg)
+		c.drafts[draft.id] = draft
+		if draft.cliId == invalidCliId {
+			draft.cliId = c.newCliId()
+		}
+
+		c.Printf("%s Aborted sending %s%s%s and moved to Drafts as %s%s%s\n", termInfoPrefix, termCliIdStart, msg.cliId.String(), termReset, termCliIdStart, draft.cliId.String(), termReset)
+		c.save()
+		c.setCurrentObject(draft)
 
 	case ackCommand:
 		msg, ok := c.currentObj.(*InboxMessage)
