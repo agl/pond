@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sync"
 	"syscall"
 
 	"code.google.com/p/go.crypto/nacl/secretbox"
@@ -54,6 +55,10 @@ type StateFile struct {
 	key    [kdfKeyLen]byte
 	mask   [erasureKeyLen]byte
 	valid  bool
+	// lockFd contains the file descriptor that any outstanding Locks refer
+	// to. This is protected by lockFdMutex.
+	lockFd      *int
+	lockFdMutex sync.Mutex
 }
 
 func NewStateFile(rand io.Reader, path string) *StateFile {
@@ -64,6 +69,13 @@ func NewStateFile(rand io.Reader, path string) *StateFile {
 }
 
 func (sf *StateFile) Lock(create bool) (*Lock, error) {
+	sf.lockFdMutex.Lock()
+	defer sf.lockFdMutex.Unlock()
+
+	if sf.lockFd != nil {
+		return &Lock{sf.lockFd}, nil
+	}
+
 	flags := os.O_RDWR
 	if create {
 		flags |= os.O_CREATE | os.O_EXCL
@@ -83,7 +95,8 @@ func (sf *StateFile) Lock(create bool) (*Lock, error) {
 		syscall.Close(newFd)
 		return nil, nil
 	}
-	return &Lock{newFd}, nil
+	sf.lockFd = &newFd
+	return &Lock{sf.lockFd}, nil
 }
 
 func (sf *StateFile) deriveKey(pw string) error {
@@ -328,6 +341,22 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 			panic(err)
 		}
 		out.Sync()
+
+		var newFd int
+
+		// If we had a lock on the old state file then we need to also
+		// lock the new file. First we lock the temp file.
+		sf.lockFdMutex.Lock()
+		if sf.lockFd != nil {
+			newFd, err = syscall.Dup(int(out.Fd()))
+			if err != nil {
+				panic(err)
+			}
+			if err := syscall.Flock(newFd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+				panic(err)
+			}
+		}
+		sf.lockFdMutex.Unlock()
 		out.Close()
 
 		// Remove any previous temporary statefile
@@ -343,16 +372,35 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 		if err := os.Rename(sf.Path+".tmp", sf.Path); err != nil {
 			panic(err)
 		}
+		// Remove the old file.
+		if err := os.Remove(sf.Path + "~"); err != nil {
+			panic(err)
+		}
+
+		sf.lockFdMutex.Lock()
+		if sf.lockFd != nil {
+			// Duplicate the new file descriptor over the old one.
+			// This will unlock the old inode.
+			if err := syscall.Dup2(newFd, *sf.lockFd); err != nil {
+				panic(err)
+			}
+			syscall.Close(newFd)
+		}
+		sf.lockFdMutex.Unlock()
 	}
 }
 
 type Lock struct {
-	fd int
+	fd *int
 }
 
 func (l *Lock) Close() {
-	syscall.Flock(l.fd, syscall.LOCK_UN)
-	syscall.Close(l.fd)
+	if *l.fd < 0 {
+		return
+	}
+	syscall.Flock(*l.fd, syscall.LOCK_UN)
+	syscall.Close(*l.fd)
+	*l.fd = -1
 }
 
 var BadPasswordError = errors.New("bad password")
