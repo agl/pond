@@ -753,6 +753,7 @@ func TestRevocation(t *testing.T) {
 	t.Parallel()
 
 	message := []byte{1, 2, 3}
+	var revocation *bbssig.Revocation
 
 	runScript(t, script{
 		numPlayers:             2,
@@ -760,14 +761,21 @@ func TestRevocation(t *testing.T) {
 		actions: []action{
 			{
 				player: 0,
-				request: &pond.Request{
-					Revocation: &pond.SignedRevocation{
-						SignedRevocation: &pond.SignedRevocation_SignedRevocation{
-							Generation: proto.Uint32(0x1234),
-							Revocation: []byte{4, 5, 6},
+				buildRequest: func(s *scriptState) *pond.Request {
+					memberKey, err := s.groupPrivateKeys[0].NewMember(rand.Reader)
+					if err != nil {
+						t.Errorf("Failed to create group member key: %s", err)
+					}
+					revocation = s.groupPrivateKeys[0].GenerateRevocation(memberKey)
+					return &pond.Request{
+						Revocation: &pond.SignedRevocation{
+							Revocation: &pond.SignedRevocation_Revocation{
+								Generation: proto.Uint32(0x1234),
+								Revocation: revocation.Marshal(),
+							},
+							Signature: []byte{7, 8, 9},
 						},
-						Signature: []byte{7, 8, 9},
-					},
+					}
 				},
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status != nil {
@@ -792,6 +800,7 @@ func TestRevocation(t *testing.T) {
 			{
 				player: 1,
 				buildRequest: func(s *scriptState) *pond.Request {
+					s.groupPrivateKeys[0].Update(revocation)
 					return s.buildDelivery(0, message, 0x1235)
 				},
 				validate: func(t *testing.T, reply *pond.Reply) {
