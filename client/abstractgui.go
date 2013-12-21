@@ -321,6 +321,10 @@ type SetFocus struct {
 	name string
 }
 
+type ScrollTextViewToEnd struct {
+	name string
+}
+
 type Destroy struct {
 	name string
 }

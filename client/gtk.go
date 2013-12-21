@@ -598,6 +598,10 @@ func (ui *GTKUI) handle(action interface{}) {
 		buffer := gtk.TextBuffer(gtk.TextTagTable())
 		buffer.SetText(action.text)
 		widget.SetBuffer(buffer)
+	case ScrollTextViewToEnd:
+		widget := gtk.GtkTextView{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}
+		mark := widget.GetBuffer().GetMark("insert")
+		widget.ScrollToMark(mark, 0.0, true, 0, 1)
 	case SetImage:
 		widget := gtk.GtkImage{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.SetFromPixbuf(action.image.Image())
