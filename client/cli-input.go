@@ -37,6 +37,7 @@ var cliCommands = []cliCommand{
 	{"abort", abortCommand{}, "Abort sending the current outbox message", contextOutbox},
 	{"acknowledge", ackCommand{}, "Acknowledge the inbox message", contextInbox},
 	{"attach", attachCommand{}, "Attach a file to the current draft", contextDraft},
+	{"clear", clearCommand{}, "Clear terminal", 0},
 	{"compose", composeCommand{}, "Compose a new message", contextContact},
 	{"contacts", contactsCommand{}, "Show all known contacts", 0},
 	{"delete", deleteCommand{}, "Delete a message or contact", contextContact | contextDraft},

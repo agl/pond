@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -794,17 +793,7 @@ Handle:
 
 	switch cmd := cmd.(type) {
 	case clearCommand:
-		switch runtime.GOOS {
-		case "windows":
-			cls := exec.Command("cmd", "/c", "cls")
-			cls.Stdout = os.Stdout
-			cls.Run()
-		
-		default:
-			cls := exec.Command("clear")
-			cls.Stdout = os.Stdout
-			cls.Run()
-		}
+		c.Printf("\x1b[2J")
 
 	case helpCommand:
 		if cmd.ShowAll {
