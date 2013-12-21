@@ -16,9 +16,9 @@ import (
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 
+	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/server/protos"
 	"github.com/agl/pond/transport"
-	pond "github.com/agl/pond/protos"
 )
 
 var baseDirectory *string = flag.String("base-directory", "", "directory to store server state and config")
