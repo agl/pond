@@ -66,7 +66,6 @@ type composeCommand struct{}
 type contactsCommand struct{}
 type deleteCommand struct{}
 type editCommand struct{}
-type helpCommand struct{}
 type logCommand struct{}
 type quitCommand struct{}
 type replyCommand struct{}
@@ -110,6 +109,10 @@ type removeCommand struct {
 
 type tagCommand struct {
 	tag string
+}
+
+type helpCommand struct {
+	ShowAll bool `flag:all`
 }
 
 func numPositionalFields(t reflect.Type) int {
@@ -363,13 +366,13 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 	}
 }
 
-func (input *cliInput) showHelp(context inputContext) {
+func (input *cliInput) showHelp(context inputContext, showAll bool) {
 	examples := make([]string, len(cliCommands))
 	maxLen := 0
 	hasContextCommands := false
 
 	for i, cmd := range cliCommands {
-		if cmd.context != 0 && context&cmd.context == 0 {
+		if !showAll && cmd.context != 0 && context&cmd.context == 0 {
 			continue
 		}
 
@@ -386,7 +389,7 @@ func (input *cliInput) showHelp(context inputContext) {
 			maxLen = l
 		}
 		examples[i] = line
-		if context&cmd.context != 0 {
+		if !showAll && context&cmd.context != 0 {
 			hasContextCommands = true
 		}
 	}
@@ -415,7 +418,7 @@ func (input *cliInput) showHelp(context inputContext) {
 	}
 
 	for i, cmd := range cliCommands {
-		if cmd.context != 0 {
+		if !showAll && cmd.context != 0 {
 			continue
 		}
 
