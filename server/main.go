@@ -109,7 +109,8 @@ func main() {
 		log.Fatalf("Failed to parse config: %s", err)
 	}
 
-	ip := net.IPv4zero
+	ip := net.IPv4(127, 0, 0, 1)  // IPv4 loopback interface
+
 	if config.Address != nil {
 		if ip = net.ParseIP(*config.Address); ip == nil {
 			log.Fatalf("Failed to parse address from config: %s", ip)
