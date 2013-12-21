@@ -656,7 +656,7 @@ func (c *cliClient) showQueueState() {
 
 func (c *cliClient) showOutboxSummary() {
 	if len(c.outbox) > 0 {
-		c.Printf("\n%s Outbox:\n", termPrefix)
+		c.Printf("%s Outbox:\n", termPrefix)
 	}
 	for _, msg := range c.outbox {
 		if msg.revocation {
