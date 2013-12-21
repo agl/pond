@@ -793,23 +793,18 @@ Handle:
 
 	switch cmd := cmd.(type) {
 	case helpCommand:
-		if c.currentObj == nil {
-			c.input.showHelp("")	
-		} else {
-			switch c.currentObj.(type) {
-			case *Contact:
-				c.input.showHelp("contact")
-			case *Draft:
-				c.input.showHelp("draft")
-			case *InboxMessage:
-				c.input.showHelp("inbox")
-			case *queuedMessage:
-				c.input.showHelp("queue")
-			default:
-				c.input.showHelp("")
-			}
+		switch c.currentObj.(type) {
+		case *Contact:
+			c.input.showHelp(contextContact)
+		case *Draft:
+			c.input.showHelp(contextDraft)
+		case *InboxMessage:
+			c.input.showHelp(contextInbox)
+		case *queuedMessage:
+			c.input.showHelp(contextOutbox)
+		default:
+			c.input.showHelp(0)
 		}
-		
 		return
 
 	case tagCommand:

@@ -19,34 +19,45 @@ type cliCommand struct {
 	name      string
 	prototype interface{}
 	desc      string
-	context   string
+	context   inputContext
 }
 
+// inputContext is a flags type that indicates which contexts a given CLI
+// command is valid in.
+type inputContext int
+
+const (
+	contextInbox inputContext = 1 << iota
+	contextOutbox
+	contextDraft
+	contextContact
+)
+
 var cliCommands = []cliCommand{
-	{"abort", abortCommand{}, "Abort sending the current outbox message", ""},
-	{"acknowledge", ackCommand{}, "Acknowledge the inbox message", ""},
-	{"attach", attachCommand{}, "Attach a file to the current draft", ""},
-	{"compose", composeCommand{}, "Compose a new message", ""},
-	{"contacts", contactsCommand{}, "Show all known contacts", ""},
-	{"delete", deleteCommand{}, "Delete a message or contact", ""},
-	{"download", downloadCommand{}, "Download a numbered detachment to disk", ""},
-	{"drafts", showDraftsSummaryCommand{}, "Show the Draftbox", ""},
-	{"edit", editCommand{}, "Edit the draft message", ""},
-	{"help", helpCommand{}, "List known commands", ""},
-	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", ""},
-	{"log", logCommand{}, "Show recent log entries", ""},
-	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", ""},
-	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox", ""},
-	{"queue", showQueueStateCommand{}, "Show the queue", ""},
-	{"quit", quitCommand{}, "Exit Pond", ""},
-	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message", ""},
-	{"rename", renameCommand{}, "Rename an existing contact", ""},
-	{"reply", replyCommand{}, "Reply to the current message", ""},
-	{"save", saveCommand{}, "Save a numbered attachment to disk", ""},
-	{"send", sendCommand{}, "Send the current draft", ""},
-	{"show", showCommand{}, "Show the current object", ""},
-	{"status", statusCommand{}, "Show overall Pond status", ""},
-	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft", ""},
+	{"abort", abortCommand{}, "Abort sending the current outbox message", contextOutbox},
+	{"acknowledge", ackCommand{}, "Acknowledge the inbox message", contextInbox},
+	{"attach", attachCommand{}, "Attach a file to the current draft", contextDraft},
+	{"compose", composeCommand{}, "Compose a new message", contextContact},
+	{"contacts", contactsCommand{}, "Show all known contacts", 0},
+	{"delete", deleteCommand{}, "Delete a message or contact", contextContact | contextDraft},
+	{"download", downloadCommand{}, "Download a numbered detachment to disk", contextInbox},
+	{"drafts", showDraftsSummaryCommand{}, "Show drafts", 0},
+	{"edit", editCommand{}, "Edit the draft message", contextDraft},
+	{"help", helpCommand{}, "List known commands", 0},
+	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", 0},
+	{"log", logCommand{}, "Show recent log entries", 0},
+	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", 0},
+	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox", 0},
+	{"queue", showQueueStateCommand{}, "Show the queue", 0},
+	{"quit", quitCommand{}, "Exit Pond", 0},
+	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message", contextDraft},
+	{"rename", renameCommand{}, "Rename an existing contact", contextContact},
+	{"reply", replyCommand{}, "Reply to the current message", contextInbox},
+	{"save", saveCommand{}, "Save a numbered attachment to disk", contextInbox},
+	{"send", sendCommand{}, "Send the current draft", contextDraft},
+	{"show", showCommand{}, "Show the current object", contextDraft | contextInbox | contextOutbox | contextContact},
+	{"status", statusCommand{}, "Show overall Pond status", 0},
+	{"upload", uploadCommand{}, "Upload a file to home server and include key in current draft", contextDraft},
 }
 
 type abortCommand struct{}
@@ -345,12 +356,6 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 			ackChan = nil
 			continue
 		}
-		// Disabled to enable context-aware help messages.
-		/*if _, ok := cmd.(helpCommand); ok {
-			i.showHelp()
-			ackChan = nil
-			continue
-		}*/
 		if cmd != nil {
 			commandsChan <- cliTerminalLine{command: cmd, ackChan: ackChan}
 		}
@@ -358,12 +363,17 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 	}
 }
 
-func (input *cliInput) showHelp(context string) {
+func (input *cliInput) showHelp(context inputContext) {
 	examples := make([]string, len(cliCommands))
 	maxLen := 0
+	hasContextCommands := false
 
 	for i, cmd := range cliCommands {
-		line := "/" + cmd.name
+		if cmd.context != 0 && context&cmd.context == 0 {
+			continue
+		}
+
+		line := cmd.name
 		prototype := reflect.TypeOf(cmd.prototype)
 		for j := 0; j < prototype.NumField(); j++ {
 			if strings.HasPrefix(string(prototype.Field(j).Tag), "flag:") {
@@ -371,22 +381,17 @@ func (input *cliInput) showHelp(context string) {
 			} else {
 				line += " <" + strings.ToLower(prototype.Field(j).Name) + ">"
 			}
-
-			line += cmd.context
 		}
 		if l := len(line); l > maxLen {
 			maxLen = l
 		}
 		examples[i] = line
+		if context&cmd.context != 0 {
+			hasContextCommands = true
+		}
 	}
 
-	for i, cmd := range cliCommands {
-		// Check if the provided context is the same as the one specified at
-		// the definition of the CLI command. Also accept generic commands.
-		if (cmd.context != "" && cmd.context != context) {
-			continue
-		}
-
+	printCommand := func(i int, cmd *cliCommand) {
 		line := examples[i]
 		numSpaces := 1 + (maxLen - len(line))
 		for j := 0; j < numSpaces; j++ {
@@ -394,6 +399,27 @@ func (input *cliInput) showHelp(context string) {
 		}
 		line += cmd.desc
 		fmt.Fprintf(input.term, "%s %s\n", termInfoPrefix, line)
+	}
+
+	if hasContextCommands {
+		fmt.Fprintf(input.term, "%s These commands operate on the current object:\n\n", termInfoPrefix)
+
+		for i, cmd := range cliCommands {
+			if context&cmd.context == 0 {
+				continue
+			}
+			printCommand(i, &cmd)
+		}
+
+		fmt.Fprintf(input.term, "\n%s These commands are global:\n\n", termInfoPrefix)
+	}
+
+	for i, cmd := range cliCommands {
+		if cmd.context != 0 {
+			continue
+		}
+
+		printCommand(i, &cmd)
 	}
 }
 
