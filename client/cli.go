@@ -751,6 +751,7 @@ func (c *cliClient) runBackgroundProcess(id uint64, cancelThunk func()) (*pond.M
 			return nil, false
 		}
 	}
+        return nil, false
 }
 
 func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
