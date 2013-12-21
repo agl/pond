@@ -4,14 +4,14 @@ import (
 	"strconv"
 )
 
-// Suite represents one of the four suites in a standard deck of cards.
-type Suite int
+// Suit represents one of the four suits in a standard deck of cards.
+type Suit int
 
 const (
-	SuiteSpades Suite = iota
-	SuiteHearts
-	SuiteDimonds
-	SuiteClubs
+	SuitSpades Suit = iota
+	SuitHearts
+	SuitDimonds
+	SuitClubs
 )
 
 const (
@@ -21,12 +21,12 @@ const (
 
 // Card represents a playing card (except for the jokers).
 type Card struct {
-	face  int
-	suite Suite
+	face int
+	suit Suit
 }
 
 // String converts a Card to a two-glyph, string representation where the
-// second glyph is a code-point for the suite.
+// second glyph is a code-point for the suit.
 func (c Card) String() string {
 	var ret string
 
@@ -45,14 +45,14 @@ func (c Card) String() string {
 		ret = "?"
 	}
 
-	switch c.suite {
-	case SuiteSpades:
+	switch c.suit {
+	case SuitSpades:
 		ret += "♠"
-	case SuiteHearts:
+	case SuitHearts:
 		ret += "♥"
-	case SuiteDimonds:
+	case SuitDimonds:
 		ret += "♦"
-	case SuiteClubs:
+	case SuitClubs:
 		ret += "♣"
 	}
 
@@ -60,19 +60,19 @@ func (c Card) String() string {
 }
 
 func (c Card) IsRed() bool {
-	return c.suite == SuiteDimonds || c.suite == SuiteHearts
+	return c.suit == SuitDimonds || c.suit == SuitHearts
 }
 
 func (c Card) Number() int {
-	return maxFace*int(c.suite) + (c.face - 1)
+	return maxFace*int(c.suit) + (c.face - 1)
 }
 
 // ParseCard parses a card from a simple, two or three character string
 // representation where the first character specifies the face value as one of
-// "a23456789jqk" and the second the suite as one of "shdc". Case is ignored.
+// "a23456789jqk" and the second the suit as one of "shdc". Case is ignored.
 // The 10 is the exception and takes three charactors.
 func ParseCard(s string) (card Card, ok bool) {
-	var suiteRune uint8
+	var suitRune uint8
 
 	switch len(s) {
 	case 2:
@@ -90,26 +90,26 @@ func ParseCard(s string) (card Card, ok bool) {
 		default:
 			return
 		}
-		suiteRune = s[1]
+		suitRune = s[1]
 	case 3:
 		if s[:2] != "10" {
 			return
 		}
 		card.face = 10
-		suiteRune = s[2]
+		suitRune = s[2]
 	default:
 		return
 	}
 
-	switch suiteRune {
+	switch suitRune {
 	case 's', 'S':
-		card.suite = SuiteSpades
+		card.suit = SuitSpades
 	case 'h', 'H':
-		card.suite = SuiteHearts
+		card.suit = SuitHearts
 	case 'd', 'D':
-		card.suite = SuiteDimonds
+		card.suit = SuitDimonds
 	case 'c', 'C':
-		card.suite = SuiteClubs
+		card.suit = SuitClubs
 	default:
 		return
 	}
