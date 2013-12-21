@@ -1890,60 +1890,6 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	panic("unreachable")
 }
 
-func (c *guiClient) deleteContact(contact *Contact) {
-	var newInbox []*InboxMessage
-	for _, msg := range c.inbox {
-		if msg.from == contact.id {
-			if msg.message == nil || len(msg.message.Body) > 0 {
-				c.inboxUI.Remove(msg.id)
-			}
-			continue
-		}
-		newInbox = append(newInbox, msg)
-	}
-	c.inbox = newInbox
-
-	for _, draft := range c.drafts {
-		if draft.to == contact.id {
-			draft.to = 0
-		}
-	}
-
-	c.queueMutex.Lock()
-	var newQueue []*queuedMessage
-	for _, msg := range c.queue {
-		if msg.to == contact.id && !msg.revocation {
-			continue
-		}
-		newQueue = append(newQueue, msg)
-	}
-	c.queue = newQueue
-	c.queueMutex.Unlock()
-
-	var newOutbox []*queuedMessage
-	for _, msg := range c.outbox {
-		if msg.to == contact.id && !msg.revocation {
-			if msg.revocation || len(msg.message.Body) > 0 {
-				c.outboxUI.Remove(msg.id)
-			}
-			continue
-		}
-		newOutbox = append(newOutbox, msg)
-	}
-	c.outbox = newOutbox
-
-	revocationMessage := c.revoke(contact)
-	c.outboxUI.Add(revocationMessage.id, "Revocation", revocationMessage.created.Format(shortTimeFormat), indicatorRed)
-	c.outboxUI.SetInsensitive(revocationMessage.id)
-
-	if contact.pandaShutdownChan != nil {
-		close(contact.pandaShutdownChan)
-	}
-
-	c.contactsUI.Remove(contact.id)
-	delete(c.contacts, contact.id)
-}
-
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
 	var name string
 	existing := contact != nil
@@ -3202,6 +3148,27 @@ func (c *guiClient) processPANDAUpdateUI(update pandaUpdate) {
 		c.gui.Actions() <- UIState{uiStatePANDAComplete}
 		c.gui.Signal()
 	}
+}
+
+func (c *guiClient) removeInboxMessageUI(msg *InboxMessage) {
+	if msg.message == nil || len(msg.message.Body) > 0 {
+		c.inboxUI.Remove(msg.id)
+	}
+}
+
+func (c *guiClient) removeOutboxMessageUI(msg *queuedMessage) {
+	if msg.revocation || len(msg.message.Body) > 0 {
+		c.outboxUI.Remove(msg.id)
+	}
+}
+
+func (c *guiClient) addRevocationMessageUI(msg *queuedMessage) {
+	c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), indicatorRed)
+	c.outboxUI.SetInsensitive(msg.id)
+}
+
+func (c *guiClient) removeContactUI(contact *Contact) {
+	c.contactsUI.Remove(contact.id)
 }
 
 func (c *guiClient) logUI() interface{} {

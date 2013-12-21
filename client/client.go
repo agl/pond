@@ -247,6 +247,15 @@ type UI interface {
 	// processPANDAUpdateUI is called on each PANDA update to update the
 	// UI and unseal pending messages.
 	processPANDAUpdateUI(update pandaUpdate)
+	// removeInboxMessageUI removes a message from the inbox UI.
+	removeInboxMessageUI(msg *InboxMessage)
+	// removeOutboxMessageUI removes a message from the outbox UI.
+	removeOutboxMessageUI(msg *queuedMessage)
+	// addRevocationMessageUI notifies the UI that a new revocation message
+	// has been created.
+	addRevocationMessageUI(msg *queuedMessage)
+	// removeContactUI removes a contact from the UI.
+	removeContactUI(contact *Contact)
 	// mainUI starts the main interface.
 	mainUI()
 }
@@ -973,6 +982,55 @@ func (c *client) removeQueuedMessage(index int) {
 		}
 	}
 	c.queue = newQueue
+}
+
+func (c *client) deleteContact(contact *Contact) {
+	var newInbox []*InboxMessage
+	for _, msg := range c.inbox {
+		if msg.from == contact.id {
+			c.ui.removeInboxMessageUI(msg)
+			continue
+		}
+		newInbox = append(newInbox, msg)
+	}
+	c.inbox = newInbox
+
+	for _, draft := range c.drafts {
+		if draft.to == contact.id {
+			draft.to = 0
+		}
+	}
+
+	c.queueMutex.Lock()
+	var newQueue []*queuedMessage
+	for _, msg := range c.queue {
+		if msg.to == contact.id && !msg.revocation {
+			continue
+		}
+		newQueue = append(newQueue, msg)
+	}
+	c.queue = newQueue
+	c.queueMutex.Unlock()
+
+	var newOutbox []*queuedMessage
+	for _, msg := range c.outbox {
+		if msg.to == contact.id && !msg.revocation {
+			c.ui.removeOutboxMessageUI(msg)
+			continue
+		}
+		newOutbox = append(newOutbox, msg)
+	}
+	c.outbox = newOutbox
+
+	revocationMessage := c.revoke(contact)
+	c.ui.addRevocationMessageUI(revocationMessage)
+
+	if contact.pandaShutdownChan != nil {
+		close(contact.pandaShutdownChan)
+	}
+
+	c.ui.removeContactUI(contact)
+	delete(c.contacts, contact.id)
 }
 
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.

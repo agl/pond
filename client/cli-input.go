@@ -26,16 +26,15 @@ var cliCommands = []cliCommand{
 	{"attach", attachCommand{}, "Attach a file to the current draft"},
 	{"compose", composeCommand{}, "Compose a new message"},
 	{"contacts", contactsCommand{}, "Show all known contacts"},
-	{"delete", deleteCommand{}, "Delete a message"},
+	{"delete", deleteCommand{}, "Delete a message or contact"},
 	{"download", downloadCommand{}, "Download a numbered detachment to disk"},
 	{"edit", editCommand{}, "Edit the draft message"},
 	{"help", helpCommand{}, "List known commands"},
 	{"log", logCommand{}, "Show recent log entries"},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact"},
-	{"rm-contact", rmContactCommand{}, "Remove an existing contact"},
-	{"mv-contact", mvContactCommand{}, "Rename an existing contact"},
 	{"quit", quitCommand{}, "Exit Pond"},
 	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message"},
+	{"rename", renameCommand{}, "Rename an existing contact"},
 	{"reply", replyCommand{}, "Reply to the current message"},
 	{"save", saveCommand{}, "Save a numbered attachment to disk"},
 	{"send", sendCommand{}, "Send the current draft"},
@@ -59,9 +58,9 @@ type quitCommand struct{}
 type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
-type showOutboxSummaryCommand struct{}
-type showInboxSummaryCommand struct{}
 type showDraftsSummaryCommand struct{}
+type showInboxSummaryCommand struct{}
+type showOutboxSummaryCommand struct{}
 type showQueueStateCommand struct{}
 type statusCommand struct{}
 
@@ -69,12 +68,7 @@ type newContactCommand struct {
 	Name string
 }
 
-type rmContactCommand struct {
-	Name string
-}
-
-type mvContactCommand struct {
-	OldName string
+type renameCommand struct {
 	NewName string
 }
 

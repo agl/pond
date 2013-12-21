@@ -38,6 +38,12 @@ type cliClient struct {
 	// session to avoid giving the same cliId to two different objects.
 	cliIdsAssigned map[cliId]bool
 
+	// deleteArmed is set to true after an attempt to delete a contact. The
+	// first attempt sets this flag, the second will actually delete a
+	// contact. This flag is cleared after any command that is not a delete
+	// command.
+	deleteArmed bool
+
 	// currentObj is either a *Draft or *InboxMessage and is the object
 	// that the user is currently interacting with.
 	currentObj interface{}
@@ -479,6 +485,19 @@ func (c *cliClient) processMessageDelivered(msg *queuedMessage) {
 	c.showQueueState()
 }
 
+func (c *cliClient) removeInboxMessageUI(msg *InboxMessage) {
+}
+
+func (c *cliClient) removeOutboxMessageUI(msg *queuedMessage) {
+}
+
+func (c *cliClient) addRevocationMessageUI(msg *queuedMessage) {
+	c.Printf("%s New revocation message created and pending transmission to home server.\n", termPrefix)
+}
+
+func (c *cliClient) removeContactUI(contact *Contact) {
+}
+
 func (c *cliClient) setCurrentObject(o interface{}) {
 	c.currentObj = o
 
@@ -534,6 +553,11 @@ func (c *cliClient) mainUI() {
 			}
 
 			shouldQuit := c.processCommand(line.command)
+			// Any command other than a delete command clears the
+			// delete confirmation flag.
+			if _, ok := line.command.(deleteCommand); !ok {
+				c.deleteArmed = false
+			}
 			close(line.ackChan)
 			if shouldQuit {
 				return
@@ -829,6 +853,10 @@ Handle:
 			delete(c.drafts, o.id)
 			c.save()
 			c.setCurrentObject(nil)
+		case *Contact:
+			c.maybeDeleteContact(o)
+			// maybeDeleteContact may need confirmation so
+			// setCurrentObject is handled in there.
 		default:
 			c.Printf("%s Cannot delete current object\n", termWarnPrefix)
 		}
@@ -1086,11 +1114,12 @@ Handle:
 		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 		c.Printf("%s Key exchange running in background.\n", termPrefix)
 
-	case rmContactCommand:
-		c.rmContact(cmd.Name)
-
-	case mvContactCommand:
-		c.renameContact(cmd.OldName, cmd.NewName)
+	case renameCommand:
+		if contact, ok := c.currentObj.(*Contact); ok {
+			c.renameContact(contact, cmd.NewName)
+		} else {
+			c.Printf("%s Select contact first\n", termWarnPrefix)
+		}
 
 	default:
 		panic(fmt.Sprintf("Unhandled command: %#v", cmd))
@@ -1288,32 +1317,32 @@ func (c *cliClient) showDraft(msg *Draft) {
 	c.Printf("\n")
 }
 
-func (c *cliClient) renameContact(oldName string, newName string) bool {
+func (c *cliClient) renameContact(contact *Contact, newName string) {
+	if contact.name == newName {
+		return
+	}
+
 	for _, contact := range c.contacts {
 		if contact.name == newName {
-			return false
+			c.Printf("%s Another contact already has that name.\n", termErrPrefix)
+			return
 		}
 	}
 
-        for _, contact := range c.contacts {
-		if contact.name == oldName {
-			contact.name = newName
-			c.save()
-			return true
-		}
-	}
-	return false
+	contact.name = newName
+	c.save()
 }
 
-func (c *cliClient) rmContact(name string) bool {
-	for _, contact := range c.contacts {
-		if contact.name == name {
-			delete(c.contacts, contact.id)
-				c.save()
-				return true
-		}
+func (c *cliClient) maybeDeleteContact(contact *Contact) {
+	if !c.deleteArmed {
+		c.Printf("%s You attempted to delete a contact (%s). Doing so removes all messages to and from that contact and revokes their ability to send you messages. To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(contact.name, false))
+		c.deleteArmed = true
+		return
 	}
-	return false
+
+	c.deleteArmed = false
+	c.deleteContact(contact)
+	c.save()
 }
 
 func (c *cliClient) showContact(contact *Contact) {
