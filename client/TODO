@@ -15,3 +15,36 @@ Expose server queue length in fetches
 BUGS:
 
 A key exchange should send the group that's currently on the server, not the current group.
+
+
+This is a TODO list for the CLI interface to Pond:
+
+Add a message that indicates the inbox queue as well as the outbox queue.
+Add an emergency flush command to flush the queue.
+Add a Delete button to the outbox.
+Add the status of the to-be-flushed messages to the status()
+Add an Audio alert for a new message?
+Add an abort command for outgoing messages.
+Add a delete command for the outgoing messages.
+Document the Pond Key Exchange blob:
+
+  https://github.com/agl/pond/blob/master/protos/pond.proto#L161
+
+Show timer for next fetch
+Confirm password on CLI when it is set for the first time
+Ensure that messages don't flush and PANDA doesn't run at startup.
+
+Document errors such as the following:
+> error from server: GENERATION_REVOKED
+
+"It means that the contact revoked a group member key. That means that everyone
+who has a group member key needs to process the update (and the revoked contact
+will end up with a divide by zero and cannot update). The server rejected your
+message because it was signed under an old group key, but the server will have
+returned the update with the error. Pond will resign the outgoing message and
+it'll be transmitted again in two cycles."
+
+
+Document the easy way to build the CLI:
+
+go build -tags nogui && go install -tags nogui
