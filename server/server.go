@@ -344,6 +344,10 @@ func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 		return &pond.Reply{Status: pond.Reply_IDENTITY_ALREADY_KNOWN.Enum()}
 	}
 
+	if _, ok := new(bbssig.Group).Unmarshal(req.Group); !ok {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
 	if err := os.MkdirAll(path, 0700); err != nil {
 		log.Printf("failed to create directory: %s", err)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
@@ -776,6 +780,9 @@ func (s *Server) revocation(from *[32]byte, signedRevocation *pond.SignedRevocat
 	}
 
 	group := account.Group()
+	if group == nil {
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
 	groupCopy, _ := new(bbssig.Group).Unmarshal(group.Marshal())
 	groupCopy.Update(revocation)
 
