@@ -1342,6 +1342,7 @@ func (c *cliClient) maybeDeleteContact(contact *Contact) {
 
 	c.deleteArmed = false
 	c.deleteContact(contact)
+	c.setCurrentObject(nil)
 	c.save()
 }
 
