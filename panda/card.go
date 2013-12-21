@@ -21,7 +21,7 @@ const (
 
 // Card represents a playing card (except for the jokers).
 type Card struct {
-	face  int
+	face int
 	suit Suit
 }
 
