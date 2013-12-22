@@ -12,10 +12,10 @@ import (
 	"code.google.com/p/go.crypto/scrypt"
 )
 
-var stateFile *string = flag.String("state-file", "", "File in which to save persistent state")
-var pandaScrypt *bool = flag.Bool("panda-scrypt", false, "Run in subprocess mode to process passphrase")
-
 func main() {
+	stateFile := flag.String("state-file", "", "File in which to save persistent state")
+	pandaScrypt := flag.Bool("panda-scrypt", false, "Run in subprocess mode to process passphrase")
+	cliFlag := flag.Bool("cli", false, "If true, the CLI will be used, even if the GUI is available")
 	devFlag := flag.Bool("dev", false, "Is this a development environment?")
 	flag.Parse()
 
@@ -57,7 +57,7 @@ func main() {
 		*stateFile = filepath.Join(configDir, "pond")
 	}
 
-	if !haveGUI || len(os.Getenv("PONDCLI")) > 0 {
+	if !haveGUI || *cliFlag || len(os.Getenv("PONDCLI")) > 0 {
 		client := NewCLIClient(*stateFile, rand.Reader, false /* testing */, true /* autoFetch */)
 		client.disableV2Ratchet = true
 		client.dev = dev
