@@ -798,6 +798,7 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 		}
 
 		c.gui.Actions() <- Sensitive{name: "next", sensitive: false}
+		c.gui.Actions() <- Sensitive{name: "pw", sensitive: false}
 		c.gui.Signal()
 
 		if err := c.loadState(stateFile, pw); err != disk.BadPasswordError {
@@ -806,6 +807,8 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 
 		c.gui.Actions() <- SetText{name: "status", text: msgIncorrectPassword}
 		c.gui.Actions() <- SetEntry{name: "pw", text: ""}
+		c.gui.Actions() <- Sensitive{name: "pw", sensitive: true}
+		c.gui.Actions() <- SetFocus{name: "pw"}
 		c.gui.Actions() <- Sensitive{name: "next", sensitive: true}
 		c.gui.Signal()
 	}
