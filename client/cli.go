@@ -280,6 +280,8 @@ const (
 
 	termHeaderPrefix = "  " + termInfoCol3 + "-" + termReset
 
+	termGray = "\x1b[38;5;250m"
+
 	termCliIdStart = "\x1b[38;5;045m"
 
 	termReset = "\x1b[0m"
@@ -525,7 +527,7 @@ func (c *cliClient) setCurrentObject(o interface{}) {
 		panic("unknown currentObj type")
 	}
 
-	c.term.SetPrompt(fmt.Sprintf("%s%s/%s%s>%s ", termCliIdStart, typ, id.String(), termCol1, termReset))
+	c.term.SetPrompt(fmt.Sprintf("%s%s%s/%s%s%s>%s ", termGray, typ, termReset, termCliIdStart, id.String(), termCol1, termReset))
 }
 
 func (c *cliClient) mainUI() {
