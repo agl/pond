@@ -3185,6 +3185,9 @@ func (c *guiClient) logUI() interface{} {
 			},
 			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 			HBox{
+				widgetBase: widgetBase{
+					padding: 5,
+				},
 				children: []Widget{
 					VBox{
 						widgetBase: widgetBase{
