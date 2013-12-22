@@ -507,20 +507,25 @@ func (c *cliClient) setCurrentObject(o interface{}) {
 	}
 
 	var id cliId
+	var typ string
 	switch o := c.currentObj.(type) {
 	case *Draft:
+		typ = "draft"
 		id = o.cliId
 	case *InboxMessage:
+		typ = "inbox"
 		id = o.cliId
 	case *Contact:
+		typ = "contact"
 		id = o.cliId
 	case *queuedMessage:
+		typ = "outbox"
 		id = o.cliId
 	default:
 		panic("unknown currentObj type")
 	}
 
-	c.term.SetPrompt(fmt.Sprintf("%s%s%s>%s ", termCliIdStart, id.String(), termCol1, termReset))
+	c.term.SetPrompt(fmt.Sprintf("%s%s/%s%s>%s ", termCliIdStart, typ, id.String(), termCol1, termReset))
 }
 
 func (c *cliClient) mainUI() {
