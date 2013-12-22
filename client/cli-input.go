@@ -46,6 +46,7 @@ var cliCommands = []cliCommand{
 	{"drafts", showDraftsSummaryCommand{}, "Show drafts", 0},
 	{"edit", editCommand{}, "Edit the draft message", contextDraft},
 	{"help", helpCommand{}, "List known commands", 0},
+	{"identity", showIdentityCommand{}, "Show identity", 0},
 	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", 0},
 	{"log", logCommand{}, "Show recent log entries", 0},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", 0},
@@ -77,6 +78,7 @@ type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
 type showDraftsSummaryCommand struct{}
+type showIdentityCommand struct{}
 type showInboxSummaryCommand struct{}
 type showOutboxSummaryCommand struct{}
 type showQueueStateCommand struct{}
