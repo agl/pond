@@ -641,6 +641,15 @@ func (c *cliClient) showOutboxSummary() {
 	}
 }
 
+func (c *cliClient) showIdentity() {
+	c.Printf("%s Identity:\n", termPrefix)
+	c.Printf("    Server: %s\n", c.server)
+	c.Printf("    Public Identity: %x\n", c.identityPublic[:])
+	c.Printf("    Public Key: %x\n", c.pub[:])
+	c.Printf("    State File: %s\n", c.stateFilename)
+	c.Printf("    Group Generation: %d\n", c.generation)
+}
+
 func (c *cliClient) showInboxSummary() {
 	if len(c.inbox) > 0 {
 		c.Printf("%s Inbox:\n", termPrefix)
@@ -1025,6 +1034,9 @@ Handle:
 
 	case showOutboxSummaryCommand:
 		c.showOutboxSummary()
+
+	case showIdentityCommand:
+		c.showIdentity()
 
 	case showInboxSummaryCommand:
 		c.showInboxSummary()
