@@ -3185,6 +3185,9 @@ func (c *guiClient) logUI() interface{} {
 			},
 			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 			HBox{
+				widgetBase: widgetBase{
+					padding: 5,
+				},
 				children: []Widget{
 					VBox{
 						widgetBase: widgetBase{
@@ -3192,11 +3195,18 @@ func (c *guiClient) logUI() interface{} {
 							fill:   true,
 						},
 					},
-					VBox{
+					HBox{
 						widgetBase: widgetBase{
 							padding: 10,
 						},
 						children: []Widget{
+							Button{
+								widgetBase: widgetBase{
+									name:    "clear-log",
+									padding: 2,
+								},
+								text: "Clear",
+							},
 							Button{
 								widgetBase: widgetBase{
 									name:    "transact",
@@ -3213,7 +3223,7 @@ func (c *guiClient) logUI() interface{} {
 				widgetBase: widgetBase{expand: true, fill: true},
 				child: TextView{
 					widgetBase: widgetBase{expand: true, fill: true, name: "log"},
-					editable:   true,
+					editable:   false,
 				},
 			},
 		},
@@ -3247,6 +3257,16 @@ func (c *guiClient) logUI() interface{} {
 			case c.fetchNowChan <- nil:
 			default:
 			}
+			continue
+		}
+
+		if click, ok := event.(Click); ok && click.name == "clear-log" {
+			c.log = NewLog()
+			logEpoch = c.log.epoch
+			lastProcessedIndex = -1
+			log = ""
+			c.gui.Actions() <- SetTextView{name: "log", text: log}
+			c.gui.Signal()
 			continue
 		}
 
