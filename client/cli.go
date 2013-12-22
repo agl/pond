@@ -130,9 +130,6 @@ func (c *cliClient) Start() {
 	if c.fetchNowChan != nil {
 		close(c.fetchNowChan)
 	}
-	if c.revocationUpdateChan != nil {
-		close(c.revocationUpdateChan)
-	}
 	if c.stateLock != nil {
 		c.stateLock.Close()
 	}
@@ -544,6 +541,9 @@ func (c *cliClient) mainUI() {
 
 	for {
 		select {
+		case sigReq := <-c.signingRequestChan:
+			c.processSigningRequest(sigReq)
+			return
 		case line := <-termChan:
 			if line.err != nil {
 				return
@@ -1451,19 +1451,20 @@ func (c *cliClient) showContact(contact *Contact) {
 func NewCLIClient(stateFilename string, rand io.Reader, testing, autoFetch bool) *cliClient {
 	c := &cliClient{
 		client: client{
-			testing:         testing,
-			dev:             testing,
-			autoFetch:       autoFetch,
-			stateFilename:   stateFilename,
-			log:             NewLog(),
-			rand:            rand,
-			contacts:        make(map[uint64]*Contact),
-			drafts:          make(map[uint64]*Draft),
-			newMessageChan:  make(chan NewMessage),
-			messageSentChan: make(chan messageSendResult, 1),
-			backgroundChan:  make(chan interface{}, 8),
-			pandaChan:       make(chan pandaUpdate, 1),
-			usedIds:         make(map[uint64]bool),
+			testing:            testing,
+			dev:                testing,
+			autoFetch:          autoFetch,
+			stateFilename:      stateFilename,
+			log:                NewLog(),
+			rand:               rand,
+			contacts:           make(map[uint64]*Contact),
+			drafts:             make(map[uint64]*Draft),
+			newMessageChan:     make(chan NewMessage),
+			messageSentChan:    make(chan messageSendResult, 1),
+			backgroundChan:     make(chan interface{}, 8),
+			pandaChan:          make(chan pandaUpdate, 1),
+			usedIds:            make(map[uint64]bool),
+			signingRequestChan: make(chan signingRequest),
 		},
 		cliIdsAssigned: make(map[cliId]bool),
 	}

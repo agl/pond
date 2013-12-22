@@ -72,6 +72,37 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 		return errors.New("message too large")
 	}
 
+	out := &queuedMessage{
+		id:      *message.Id,
+		to:      to.id,
+		server:  to.theirServer,
+		message: message,
+		created: time.Unix(*message.Time, 0),
+	}
+	c.enqueue(out)
+	c.outbox = append(c.outbox, out)
+
+	return nil
+}
+
+// processSigningRequest is run on the main goroutine in response to a request
+// from the network thread to apply a group signature to a message that is just
+// about to be sent to the destination server.
+func (c *client) processSigningRequest(sigReq signingRequest) {
+	defer close(sigReq.resultChan)
+	to := c.contacts[sigReq.msg.to]
+
+	messageBytes, err := proto.Marshal(sigReq.msg.message)
+	if err != nil {
+		c.log.Printf("Failed to sign outgoing message: %s", err)
+		return
+	}
+
+	if len(messageBytes) > pond.MaxSerializedMessage {
+		c.log.Printf("Failed to sign outgoing message because it's too large")
+		return
+	}
+
 	// All messages are padded to the maximum length.
 	plaintext := make([]byte, pond.MaxSerializedMessage+4)
 	binary.LittleEndian.PutUint32(plaintext, uint32(len(messageBytes)))
@@ -100,7 +131,8 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 
 		public, private, err := box.GenerateKey(c.rand)
 		if err != nil {
-			return err
+			c.log.Printf("Failed to generate key for outgoing message: %s", err)
+			return
 		}
 		box.Seal(x[:0], public[:], &outerNonce, &to.theirCurrentDHPublic, &to.lastDHPrivate)
 		x = x[len(public)+box.Overhead:]
@@ -118,7 +150,8 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	sha.Reset()
 	groupSig, err := to.myGroupKey.Sign(c.rand, digest, sha)
 	if err != nil {
-		return err
+		c.log.Printf("Failed to sign outgoing message: %s", err)
+		return
 	}
 
 	request := &pond.Request{
@@ -129,18 +162,8 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 			Message:    sealed,
 		},
 	}
-	out := &queuedMessage{
-		request: request,
-		id:      *message.Id,
-		to:      to.id,
-		server:  to.theirServer,
-		message: message,
-		created: time.Unix(*message.Time, 0),
-	}
-	c.enqueue(out)
-	c.outbox = append(c.outbox, out)
 
-	return nil
+	sigReq.resultChan <- request
 }
 
 // revocationSignaturePrefix is prepended to a SignedRevocation_Revocation
@@ -535,12 +558,8 @@ func (c *client) processMessageSent(msr messageSendResult) {
 			c.queueMutex.Unlock()
 		} else {
 			to.myGroupKey.Group.Update(rev)
-			// We need to update all pending messages to this
-			// contact with a new group signature. However, we
-			// can't mutate entries in c.queue here because the
-			// trasact goroutine is running concurrently.
-			dupKey, _ := new(bbssig.MemberKey).Unmarshal(to.myGroupKey.Group, to.myGroupKey.Marshal())
-			c.revocationUpdateChan <- revocationUpdate{msg.to, dupKey, to.generation}
+			// Outgoing messages will be resigned when the network
+			// goroutine next attempts to send them.
 		}
 
 		c.ui.processRevocation(to)
@@ -717,31 +736,6 @@ func (c *client) doCreateAccount(displayMsg func(string)) error {
 	return nil
 }
 
-// resignQueuedMessages runs on the network goroutine and resigns all queued
-// messages to the given contact id.
-func (c *client) resignQueuedMessages(revUpdate revocationUpdate) {
-	sha := sha256.New()
-	var digest []byte
-
-	for _, m := range c.queue {
-		if m.to != revUpdate.id {
-			continue
-		}
-
-		sha.Write(m.request.Deliver.Message)
-		digest = sha.Sum(digest[:0])
-		sha.Reset()
-		groupSig, err := revUpdate.key.Sign(c.rand, digest, sha)
-		if err != nil {
-			c.log.Printf("Error while resigning after revocation: %s", err)
-		}
-		sha.Reset()
-
-		m.request.Deliver.Signature = groupSig
-		m.request.Deliver.Generation = proto.Uint32(revUpdate.generation)
-	}
-}
-
 // transactionRateSeconds is the mean of the exponential distribution that
 // we'll sample in order to distribute the time between our network
 // connections.
@@ -784,46 +778,15 @@ func (c *client) transact() {
 				timerChan = time.After(delay)
 			}
 
-			// Revocation updates are always processed first.
-		NextEvent:
-			for {
-				select {
-				case revUpdate, ok := <-c.revocationUpdateChan:
-					if !ok {
-						return
-					}
-					// This signals that the contact with the given
-					// id has had their group signature key updated
-					// and all messages in c.queue to that contact
-					// need to be resigned.
-					c.resignQueuedMessages(revUpdate)
-					continue NextEvent
-				default:
-					break
+			var ok bool
+			select {
+			case ackChan, ok = <-c.fetchNowChan:
+				if !ok {
+					return
 				}
-
-				var ok bool
-				select {
-				case ackChan, ok = <-c.fetchNowChan:
-					if !ok {
-						return
-					}
-					c.log.Printf("Starting fetch because of fetchNow signal")
-					break NextEvent
-				case <-timerChan:
-					c.log.Printf("Starting fetch because of timer")
-					break NextEvent
-				case revUpdate, ok := <-c.revocationUpdateChan:
-					if !ok {
-						return
-					}
-					// This signals that the contact with the given
-					// id has had their group signature key updated
-					// and all messages in c.queue to that contact
-					// need to be resigned.
-					c.resignQueuedMessages(revUpdate)
-					continue NextEvent
-				}
+				c.log.Printf("Starting fetch because of fetchNow signal")
+			case <-timerChan:
+				c.log.Printf("Starting fetch because of timer")
 			}
 		}
 		startup = false
@@ -867,6 +830,15 @@ func (c *client) transact() {
 		if err != nil {
 			c.log.Printf("Failed to connect to %s: %s", server, err)
 			continue
+		}
+		if lastWasSend && req == nil {
+			resultChan := make(chan *pond.Request, 1)
+			c.signingRequestChan <- signingRequest{head, resultChan}
+			req = <-resultChan
+			if req == nil {
+				conn.Close()
+				continue
+			}
 		}
 		if err := conn.WriteProto(req); err != nil {
 			c.log.Printf("Failed to send to %s: %s", server, err)

@@ -95,6 +95,9 @@ type guiClient struct {
 func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bool) {
 	var ok bool
 	select {
+	case sigReq := <-c.signingRequestChan:
+		c.processSigningRequest(sigReq)
+		return
 	case event, ok = <-c.gui.Events():
 		if !ok {
 			c.ShutdownAndSuspend()
@@ -1029,9 +1032,6 @@ func (c *guiClient) Shutdown() {
 	}
 	if c.fetchNowChan != nil {
 		close(c.fetchNowChan)
-	}
-	if c.revocationUpdateChan != nil {
-		close(c.revocationUpdateChan)
 	}
 	if c.stateLock != nil {
 		c.stateLock.Close()
@@ -3289,19 +3289,20 @@ func (c *guiClient) logUI() interface{} {
 func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool) *guiClient {
 	c := &guiClient{
 		client: client{
-			testing:         testing,
-			dev:             testing,
-			autoFetch:       autoFetch,
-			stateFilename:   stateFilename,
-			log:             NewLog(),
-			rand:            rand,
-			contacts:        make(map[uint64]*Contact),
-			drafts:          make(map[uint64]*Draft),
-			newMessageChan:  make(chan NewMessage),
-			messageSentChan: make(chan messageSendResult, 1),
-			backgroundChan:  make(chan interface{}, 8),
-			pandaChan:       make(chan pandaUpdate, 1),
-			usedIds:         make(map[uint64]bool),
+			testing:            testing,
+			dev:                testing,
+			autoFetch:          autoFetch,
+			stateFilename:      stateFilename,
+			log:                NewLog(),
+			rand:               rand,
+			contacts:           make(map[uint64]*Contact),
+			drafts:             make(map[uint64]*Draft),
+			newMessageChan:     make(chan NewMessage),
+			messageSentChan:    make(chan messageSendResult, 1),
+			backgroundChan:     make(chan interface{}, 8),
+			pandaChan:          make(chan pandaUpdate, 1),
+			signingRequestChan: make(chan signingRequest),
+			usedIds:            make(map[uint64]bool),
 		},
 		gui: gui,
 	}

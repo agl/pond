@@ -160,12 +160,6 @@ type client struct {
 	// that triggers an immediate network transaction. Mostly intended for
 	// testing.
 	fetchNowChan chan chan bool
-	// revocationUpdateChan is a channel that the network goroutine reads
-	// from. It contains contact ids and group member keys for contacts who
-	// have updated their signature group because of a revocation event.
-	// The network goroutine needs to resign all pending messages for that
-	// contact.
-	revocationUpdateChan chan revocationUpdate
 
 	log *Log
 
@@ -193,6 +187,9 @@ type client struct {
 	pandaChan chan pandaUpdate
 	// pandaWaitGroup is incremented for each running PANDA goroutine.
 	pandaWaitGroup sync.WaitGroup
+	// signingRequestChan receives requests to sign messages for delivery,
+	// just before they are sent to the destination server.
+	signingRequestChan chan signingRequest
 
 	// usedIds records ID numbers that have been assigned in the current
 	// state file.
@@ -275,13 +272,12 @@ type messageSendResult struct {
 	revocation *pond.SignedRevocation
 }
 
-type revocationUpdate struct {
-	// id contains the contact id that needs to be updated.
-	id  uint64
-	key *bbssig.MemberKey
-	// generation contains the new (i.e. post update) generation number for
-	// the contact.
-	generation uint32
+// signingRequest is a structure that is sent from the network thread to the
+// main thread to request that a message be signed with a group signature for
+// delivery.
+type signingRequest struct {
+	msg        *queuedMessage
+	resultChan chan *pond.Request
 }
 
 // pendingDecryption represents a detachment decryption/download operation
@@ -763,7 +759,6 @@ func (c *client) loadUI() error {
 	c.writerChan = make(chan disk.NewState)
 	c.writerDone = make(chan struct{})
 	c.fetchNowChan = make(chan chan bool, 1)
-	c.revocationUpdateChan = make(chan revocationUpdate, 8)
 
 	// Start disk and network workers.
 	go stateFile.StartWriter(c.writerChan, c.writerDone)
