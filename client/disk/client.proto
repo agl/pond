@@ -80,6 +80,7 @@ message RatchetState {
 	required uint32 recv_count = 11;
 	required uint32 prev_send_count = 12;
 	required bool ratchet = 13;
+	optional bool v2 = 17;
 
 	optional bytes private0 = 14;
 	optional bytes private1 = 15;

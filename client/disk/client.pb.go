@@ -324,6 +324,7 @@ type RatchetState struct {
 	RecvCount          *uint32                   `protobuf:"varint,11,req,name=recv_count" json:"recv_count,omitempty"`
 	PrevSendCount      *uint32                   `protobuf:"varint,12,req,name=prev_send_count" json:"prev_send_count,omitempty"`
 	Ratchet            *bool                     `protobuf:"varint,13,req,name=ratchet" json:"ratchet,omitempty"`
+	V2                 *bool                     `protobuf:"varint,17,opt,name=v2" json:"v2,omitempty"`
 	Private0           []byte                    `protobuf:"bytes,14,opt,name=private0" json:"private0,omitempty"`
 	Private1           []byte                    `protobuf:"bytes,15,opt,name=private1" json:"private1,omitempty"`
 	SavedKeys          []*RatchetState_SavedKeys `protobuf:"bytes,16,rep,name=saved_keys" json:"saved_keys,omitempty"`
@@ -421,6 +422,13 @@ func (this *RatchetState) GetPrevSendCount() uint32 {
 func (this *RatchetState) GetRatchet() bool {
 	if this != nil && this.Ratchet != nil {
 		return *this.Ratchet
+	}
+	return false
+}
+
+func (this *RatchetState) GetV2() bool {
+	if this != nil && this.V2 != nil {
+		return *this.V2
 	}
 	return false
 }

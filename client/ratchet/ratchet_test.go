@@ -49,10 +49,10 @@ func pairedRatchet() (a, b *Ratchet) {
 	if err := b.FillKeyExchange(kxB); err != nil {
 		panic(err)
 	}
-	if err := a.CompleteKeyExchange(kxB); err != nil {
+	if err := a.CompleteKeyExchange(kxB, true); err != nil {
 		panic(err)
 	}
-	if err := b.CompleteKeyExchange(kxA); err != nil {
+	if err := b.CompleteKeyExchange(kxA, true); err != nil {
 		panic(err)
 	}
 
@@ -96,7 +96,7 @@ const (
 )
 
 func reinitRatchet(t *testing.T, r *Ratchet) *Ratchet {
-	state := r.Marshal(nowFunc(), 1 * time.Hour)
+	state := r.Marshal(nowFunc(), 1*time.Hour)
 	newR := New(rand.Reader)
 	newR.Now = nowFunc
 	newR.MyIdentityPrivate = r.MyIdentityPrivate

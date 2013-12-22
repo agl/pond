@@ -2192,7 +2192,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			c.gui.Signal()
 			continue
 		}
-		if err := contact.processKeyExchange(block.Bytes, c.dev, c.simulateOldClient); err != nil {
+		if err := contact.processKeyExchange(block.Bytes, c.dev, c.simulateOldClient, c.disableV2Ratchet); err != nil {
 			c.gui.Actions() <- SetText{name: "error2", text: err.Error()}
 			c.gui.Actions() <- UIError{err}
 			c.gui.Signal()

@@ -678,11 +678,6 @@ func (c *client) doCreateAccount(displayMsg func(string)) error {
 		testConn.Close()
 	}
 
-	displayMsg("Generating keys...")
-
-	c.randBytes(c.identity[:])
-	curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
-
 	displayMsg("Connecting...")
 
 	conn, err := c.dialServer(c.server, false)
