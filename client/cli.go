@@ -558,10 +558,10 @@ func (c *cliClient) mainUI() {
 			if _, ok := line.command.(deleteCommand); !ok {
 				c.deleteArmed = false
 			}
-			close(line.ackChan)
 			if shouldQuit {
 				return
 			}
+			close(line.ackChan)
 		case newMessage := <-c.newMessageChan:
 			c.processNewMessage(newMessage)
 		case msr := <-c.messageSentChan:
