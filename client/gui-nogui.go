@@ -7,7 +7,7 @@ import "io"
 const haveGUI = false
 
 type noGUIClient struct {
-	dev bool
+	client
 }
 
 type GUI int
