@@ -49,6 +49,7 @@ message Contact {
 	optional string their_server = 8;
 	optional bytes their_pub = 9;
 	optional bytes their_identity_public = 10;
+	optional bool revoked_us = 21;
 
 	optional bytes last_private = 11;
 	optional bytes current_private = 12;

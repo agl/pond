@@ -89,6 +89,7 @@ func (c *client) unmarshal(state *disk.State) error {
 			kxsBytes:         cont.KeyExchangeBytes,
 			pandaKeyExchange: cont.PandaKeyExchange,
 			pandaResult:      cont.GetPandaError(),
+			revokedUs:        cont.GetRevokedUs(),
 		}
 		c.registerId(contact.id)
 		c.contacts[contact.id] = contact
@@ -212,7 +213,7 @@ func (c *client) unmarshal(state *disk.State) error {
 
 		c.outbox = append(c.outbox, msg)
 
-		if msg.sent.IsZero() {
+		if msg.sent.IsZero() && (msg.to == 0 || !c.contacts[msg.to].revokedUs) {
 			// This message hasn't been sent yet.
 			c.enqueue(msg)
 		}
@@ -256,6 +257,7 @@ func (c *client) marshal() []byte {
 			SupportedVersion: proto.Int32(contact.supportedVersion),
 			PandaKeyExchange: contact.pandaKeyExchange,
 			PandaError:       proto.String(contact.pandaResult),
+			RevokedUs:        proto.Bool(contact.revokedUs),
 		}
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()

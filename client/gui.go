@@ -527,7 +527,7 @@ func (c *guiClient) mainUI() {
 	}
 
 	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), indicatorNone)
+		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
@@ -569,13 +569,13 @@ func (c *guiClient) mainUI() {
 
 	for _, msg := range c.outbox {
 		if msg.revocation {
-			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
+			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator(nil))
 			c.outboxUI.SetInsensitive(msg.id)
 			continue
 		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
+			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator(c.contacts[msg.to]))
 		}
 	}
 

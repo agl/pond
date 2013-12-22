@@ -627,7 +627,7 @@ func (c *cliClient) showOutboxSummary() {
 	}
 	for _, msg := range c.outbox {
 		if msg.revocation {
-			c.Printf(" %s Revocation : %s\n", msg.indicator().Star(), msg.created.Format(shortTimeFormat))
+			c.Printf(" %s Revocation : %s\n", msg.indicator(nil).Star(), msg.created.Format(shortTimeFormat))
 			continue
 		}
 		if len(msg.message.Body) > 0 {
@@ -636,7 +636,7 @@ func (c *cliClient) showOutboxSummary() {
 			}
 
 			subline := msg.created.Format(shortTimeFormat)
-			c.Printf(" %s %s : %s (%s%s%s)\n", msg.indicator().Star(), terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
+			c.Printf(" %s %s : %s (%s%s%s)\n", msg.indicator(c.contacts[msg.to]).Star(), terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
 		}
 	}
 }

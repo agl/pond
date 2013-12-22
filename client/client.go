@@ -564,7 +564,7 @@ type queuedMessage struct {
 	cliId cliId
 }
 
-func (qm *queuedMessage) indicator() Indicator {
+func (qm *queuedMessage) indicator(contact *Contact) Indicator {
 	switch {
 	case !qm.acked.IsZero():
 		return indicatorGreen
@@ -575,6 +575,8 @@ func (qm *queuedMessage) indicator() Indicator {
 			return indicatorGreen
 		}
 		return indicatorYellow
+	case contact != nil && contact.revokedUs:
+		return indicatorBlack
 	}
 	return indicatorRed
 }
@@ -786,12 +788,25 @@ func (c *client) loadUI() error {
 }
 
 func (contact *Contact) subline() string {
-	if contact.isPending {
+	switch {
+	case contact.revokedUs:
+		return "has revoked"
+	case contact.isPending:
 		return "pending"
-	} else if len(contact.pandaResult) > 0 {
+	case len(contact.pandaResult) > 0:
 		return "failed"
 	}
 	return ""
+}
+
+func (contact *Contact) indicator() Indicator {
+	switch {
+	case contact.revokedUs:
+		return indicatorBlack
+	case contact.isPending:
+		return indicatorYellow
+	}
+	return indicatorNone
 }
 
 func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient, disableV2Ratchet bool) error {

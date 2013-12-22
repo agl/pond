@@ -130,6 +130,7 @@ type Contact struct {
 	TheirServer         *string                `protobuf:"bytes,8,opt,name=their_server" json:"their_server,omitempty"`
 	TheirPub            []byte                 `protobuf:"bytes,9,opt,name=their_pub" json:"their_pub,omitempty"`
 	TheirIdentityPublic []byte                 `protobuf:"bytes,10,opt,name=their_identity_public" json:"their_identity_public,omitempty"`
+	RevokedUs           *bool                  `protobuf:"varint,21,opt,name=revoked_us" json:"revoked_us,omitempty"`
 	LastPrivate         []byte                 `protobuf:"bytes,11,opt,name=last_private" json:"last_private,omitempty"`
 	CurrentPrivate      []byte                 `protobuf:"bytes,12,opt,name=current_private" json:"current_private,omitempty"`
 	TheirLastPublic     []byte                 `protobuf:"bytes,13,opt,name=their_last_public" json:"their_last_public,omitempty"`
@@ -235,6 +236,13 @@ func (this *Contact) GetTheirIdentityPublic() []byte {
 		return this.TheirIdentityPublic
 	}
 	return nil
+}
+
+func (this *Contact) GetRevokedUs() bool {
+	if this != nil && this.RevokedUs != nil {
+		return *this.RevokedUs
+	}
+	return false
 }
 
 func (this *Contact) GetLastPrivate() []byte {
