@@ -1,10 +1,15 @@
 package panda
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"sync"
 
 	"code.google.com/p/go.crypto/curve25519"
@@ -255,9 +260,30 @@ func (kx *KeyExchange) derivePassword() error {
 		h.Write(serialised)
 		h.Sum(kx.meeting2[:0])
 	} else {
-		data, err := scrypt.Key(serialised, nil, 1<<17, 16, 4, 32*3)
-		if err != nil {
-			return err
+		var data []byte
+		if runtime.GOARCH == "386" && runtime.GOOS == "linux" {
+			// We're having GC problems on 32-bit systems with the
+			// scrypt allocation. In order to help the GC out, the
+			// scrypt computation is done in a subprocess.
+			cmd := exec.Command("/proc/self/exe", "--panda-scrypt")
+			var in, out bytes.Buffer
+			binary.Write(&in, binary.LittleEndian, uint32(len(serialised)))
+			in.Write(serialised)
+
+			cmd.Stdin = &in
+			cmd.Stdout = &out
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return err
+			}
+			data = out.Bytes()
+			if len(data) != 32*3 {
+				return errors.New("scrypt subprocess returned wrong number of bytes: " + strconv.Itoa(len(data)))
+			}
+		} else {
+			if data, err = scrypt.Key(serialised, nil, 1<<17, 16, 4, 32*3); err != nil {
+				return err
+			}
 		}
 
 		copy(kx.key[:], data)
