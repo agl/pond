@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -2094,5 +2095,41 @@ func TestOutboxDeletion(t *testing.T) {
 
 	if n := len(client1.outbox); n != 0 {
 		t.Fatalf("Outbox message not deleted")
+	}
+}
+
+func TestStateFileLocking(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	stateFile, err := os.Open(filepath.Join(client1.stateDir, "state"))
+	if err != nil {
+		t.Fatalf("Failed to open state file")
+	}
+	defer stateFile.Close()
+	if syscall.Flock(int(stateFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
+		t.Fatalf("Was able to lock state file")
 	}
 }
