@@ -425,7 +425,30 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 			log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
 			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
 		}
-		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation}
+
+		// maxRevocationBytes is the maximum number of bytes that we'll
+		// take up in extra revocations.
+		const maxRevocationBytes = 14000
+		revLength := len(revBytes)
+		var extraRevocations []*pond.SignedRevocation
+		for gen := *del.Generation + 1; revLength < maxRevocationBytes; gen++ {
+			revPath := filepath.Join(account.RevocationPath(), fmt.Sprintf("%08x", gen))
+			revBytes, err := ioutil.ReadFile(revPath)
+			if err != nil {
+				break
+			}
+
+			var revocation pond.SignedRevocation
+			if err := proto.Unmarshal(revBytes, &revocation); err != nil {
+				log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
+				break
+			}
+
+			extraRevocations = append(extraRevocations, &revocation)
+			revLength += len(revBytes)
+		}
+
+		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation, ExtraRevocations: extraRevocations}
 	}
 
 	sha := sha256.New()

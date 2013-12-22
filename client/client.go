@@ -270,6 +270,9 @@ type messageSendResult struct {
 	// revocation optionally contains a revocation update that resulted
 	// from attempting to send a message.
 	revocation *pond.SignedRevocation
+	// extraRevocations optionally contains revocations further to
+	// |revocation|. This is only non-empty if |revocation| is non-nil.
+	extraRevocations []*pond.SignedRevocation
 }
 
 // signingRequest is a structure that is sent from the network thread to the

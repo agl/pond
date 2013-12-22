@@ -641,7 +641,7 @@ func selectContact(t *testing.T, client *TestClient, name string) {
 
 func sendMessage(client *TestClient, to string, message string) {
 	composeMessage(client, to, message)
-	transmitMessage(client)
+	transmitMessage(client, false)
 }
 
 func composeMessage(client *TestClient, to string, message string) {
@@ -657,7 +657,7 @@ func composeMessage(client *TestClient, to string, message string) {
 	client.AdvanceTo(uiStateOutbox)
 }
 
-func transmitMessage(client *TestClient) {
+func transmitMessage(client *TestClient, readActions bool) {
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
 
@@ -665,6 +665,16 @@ WaitForAck:
 	for {
 		select {
 		case ack := <-client.gui.signal:
+			if readActions {
+			ReadActions:
+				for {
+					select {
+					case <-client.gui.actions:
+					default:
+						break ReadActions
+					}
+				}
+			}
 			ack <- true
 		case <-ackChan:
 			break WaitForAck
@@ -1411,25 +1421,7 @@ func TestRevoke(t *testing.T) {
 		t.Errorf("No revocation entry found after reload")
 	}
 
-	ackChan := make(chan bool)
-	client1.fetchNowChan <- ackChan
-NextEvent:
-	for {
-		select {
-		case ack := <-client1.gui.signal:
-		ReadActions:
-			for {
-				select {
-				case <-client1.gui.actions:
-				default:
-					break ReadActions
-				}
-			}
-			ack <- true
-		case <-ackChan:
-			break NextEvent
-		}
-	}
+	transmitMessage(client1, true)
 
 	sendMessage(client2, "client1", "test1")
 	client2.AdvanceTo(uiStateRevocationProcessed)
@@ -1452,16 +1444,7 @@ NextEvent:
 	}
 
 	// Have client3 resend.
-	client3.fetchNowChan <- ackChan
-WaitForAck:
-	for {
-		select {
-		case ack := <-client3.gui.signal:
-			ack <- true
-		case <-ackChan:
-			break WaitForAck
-		}
-	}
+	transmitMessage(client3, false)
 
 	// Have client1 fetch the resigned message from client3, and the
 	// message from client4 using previousTags.
@@ -1486,6 +1469,82 @@ WaitForAck:
 			}
 			seenClient4 = true
 		}
+	}
+}
+
+func TestMultiRevoke(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	client3, err := NewTestClient(t, "client3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client3.Close()
+
+	client4, err := NewTestClient(t, "client4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client4.Close()
+
+	proceedToPaired(t, client1, client2, server)
+	proceedToPairedWithNames(t, client1, client3, "client1", "client3", server)
+	proceedToPairedWithNames(t, client1, client4, "client1", "client4", server)
+
+	revokeContact := func(client *TestClient, name string) {
+		found := false
+		for _, ent := range client.contactsUI.entries {
+			if client.contacts[ent.id].name == name {
+				client.gui.events <- Click{name: ent.boxName}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("Couldn't find contact %s", name)
+		}
+		client.AdvanceTo(uiStateShowContact)
+		client.gui.events <- Click{name: "delete"}
+		client.gui.WaitForSignal() // button changes to "Confirm"
+		client.gui.events <- Click{name: "delete"}
+		client.AdvanceTo(uiStateRevocationComplete)
+
+		transmitMessage(client, true)
+	}
+
+	// Revoke client3 and 4 from client1.
+	revokeContact(client1, "client3")
+	revokeContact(client1, "client4")
+
+	// Send a message from client2 to client1. It should hit two
+	// revocations, which should be returned in a single error from the
+	// server.
+	sendMessage(client2, "client1", "test")
+	client2.AdvanceTo(uiStateRevocationProcessed)
+	client2.AdvanceTo(uiStateRevocationProcessed)
+
+	if g := client2.contacts[client2.contactsUI.entries[0].id].generation; g != client1.generation {
+		t.Errorf("Generations don't match: %d vs %d", g, client1.generation)
 	}
 }
 
@@ -2225,7 +2284,7 @@ func TestMergedACKs(t *testing.T) {
 	client2.AdvanceTo(uiStateInbox)
 
 	// Send only one message from client2.
-	transmitMessage(client2)
+	transmitMessage(client2, false)
 
 	// Both messages should be ACKed in client1 on receipt.
 	fetchMessage(client1)

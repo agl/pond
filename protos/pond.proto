@@ -57,6 +57,7 @@ message Reply {
 	optional UploadReply upload = 5;
 	optional DownloadReply download = 6;
 	optional SignedRevocation revocation = 7;
+	repeated SignedRevocation extra_revocations = 8;
 }
 
 // NewAccount is a request that the client may send to the server to request a

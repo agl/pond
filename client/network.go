@@ -553,61 +553,77 @@ func (c *client) processMessageSent(msr messageSendResult) {
 		// us that there's a pending revocation.
 		to := c.contacts[msg.to]
 
-		if gen := *msr.revocation.Revocation.Generation; gen != to.generation {
-			c.log.Printf("Message to '%s' resulted in revocation for generation %d, but current generation is %d", to.name, gen, to.generation)
-			return
-		}
-
-		// Check the signature on the revocation.
-		revBytes, err := proto.Marshal(msr.revocation.Revocation)
-		if err != nil {
-			c.log.Printf("Failed to marshal revocation message: %s", err)
-			return
-		}
-
-		var sig [ed25519.SignatureSize]byte
-		if revSig := msr.revocation.Signature; copy(sig[:], revSig) != len(sig) {
-			c.log.Printf("Bad signature length on revocation (%d bytes) from %s", len(revSig), to.name)
-			return
-		}
-
-		var signed []byte
-		signed = append(signed, revocationSignaturePrefix...)
-		signed = append(signed, revBytes...)
-		if !ed25519.Verify(&to.theirPub, signed, &sig) {
-			c.log.Printf("Bad signature on revocation from %s", to.name)
-			return
-		}
-		rev, ok := new(bbssig.Revocation).Unmarshal(msr.revocation.Revocation.Revocation)
-		if !ok {
-			c.log.Printf("Failed to parse revocation from %s", to.name)
-			return
-		}
-		to.generation++
-		if !to.myGroupKey.Update(rev) {
-			// We were revoked.
-			to.revokedUs = true
-			c.log.Printf("Revoked by %s", to.name)
-			c.ui.processRevocationOfUs(to)
-
-			// Mark all pending messages to this contact as
-			// undeliverable.
-			newQueue := make([]*queuedMessage, 0, len(c.queue))
-			c.queueMutex.Lock()
-			for _, m := range c.queue {
-				if m.to != msg.to {
-					newQueue = append(newQueue, m)
+		for revNum := 0; !to.revokedUs; revNum++ {
+			var rev *pond.SignedRevocation
+			if revNum == 0 {
+				rev = msr.revocation
+			} else {
+				if n := revNum - 1; n < len(msr.extraRevocations) {
+					rev = msr.extraRevocations[n]
+				} else {
+					break
 				}
 			}
-			c.queue = newQueue
-			c.queueMutex.Unlock()
-		} else {
-			to.myGroupKey.Group.Update(rev)
-			// Outgoing messages will be resigned when the network
-			// goroutine next attempts to send them.
+
+			if gen := *rev.Revocation.Generation; gen != to.generation {
+				c.log.Printf("Message to '%s' resulted in revocation for generation %d, but current generation is %d", to.name, gen, to.generation)
+				return
+			}
+
+			// Check the signature on the revocation.
+			revBytes, err := proto.Marshal(rev.Revocation)
+			if err != nil {
+				c.log.Printf("Failed to marshal revocation message: %s", err)
+				return
+			}
+
+			var sig [ed25519.SignatureSize]byte
+			if revSig := rev.Signature; copy(sig[:], revSig) != len(sig) {
+				c.log.Printf("Bad signature length on revocation (%d bytes) from %s", len(revSig), to.name)
+				return
+			}
+
+			var signed []byte
+			signed = append(signed, revocationSignaturePrefix...)
+			signed = append(signed, revBytes...)
+			if !ed25519.Verify(&to.theirPub, signed, &sig) {
+				c.log.Printf("Bad signature on revocation from %s", to.name)
+				return
+			}
+			bbsRev, ok := new(bbssig.Revocation).Unmarshal(rev.Revocation.Revocation)
+			if !ok {
+				c.log.Printf("Failed to parse revocation from %s", to.name)
+				return
+			}
+			to.generation++
+			if !to.myGroupKey.Update(bbsRev) {
+				// We were revoked.
+				to.revokedUs = true
+				// Further revocations will not be applied
+				// because the loop conditional is false now.
+				c.log.Printf("Revoked by %s", to.name)
+				c.ui.processRevocationOfUs(to)
+
+				// Mark all pending messages to this contact as
+				// undeliverable.
+				newQueue := make([]*queuedMessage, 0, len(c.queue))
+				c.queueMutex.Lock()
+				for _, m := range c.queue {
+					if m.to != msg.to {
+						newQueue = append(newQueue, m)
+					}
+				}
+				c.queue = newQueue
+				c.queueMutex.Unlock()
+			} else {
+				to.myGroupKey.Group.Update(bbsRev)
+				// Outgoing messages will be resigned when the network
+				// goroutine next attempts to send them.
+			}
+
+			c.ui.processRevocation(to)
 		}
 
-		c.ui.processRevocation(to)
 		return
 	}
 
@@ -920,7 +936,7 @@ func (c *client) transact() {
 			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
 				reply.Revocation != nil {
 				c.queueMutex.Unlock()
-				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation}
+				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation, extraRevocations: reply.ExtraRevocations}
 			} else {
 				c.queueMutex.Unlock()
 			}
