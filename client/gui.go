@@ -3261,7 +3261,7 @@ func (c *guiClient) logUI() interface{} {
 		}
 
 		if click, ok := event.(Click); ok && click.name == "clear-log" {
-			c.log = NewLog()
+			c.log.clear()
 			logEpoch = c.log.epoch
 			lastProcessedIndex = -1
 			log = ""

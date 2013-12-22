@@ -75,3 +75,11 @@ func (l *Log) add(isError bool, format string, args ...interface{}) {
 		fmt.Fprintf(os.Stderr, "%s%s: %s\n", name, entry.Format(logTimeFormat), entry.s)
 	}
 }
+
+func (l *Log) clear() {
+	l.Lock()
+	defer l.Unlock()
+
+	l.entries = nil
+	l.epoch = 0
+}
