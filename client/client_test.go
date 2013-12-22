@@ -640,6 +640,11 @@ func selectContact(t *testing.T, client *TestClient, name string) {
 }
 
 func sendMessage(client *TestClient, to string, message string) {
+	composeMessage(client, to, message)
+	transmitMessage(client)
+}
+
+func composeMessage(client *TestClient, to string, message string) {
 	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
@@ -650,6 +655,9 @@ func sendMessage(client *TestClient, to string, message string) {
 	}
 
 	client.AdvanceTo(uiStateOutbox)
+}
+
+func transmitMessage(client *TestClient) {
 	ackChan := make(chan bool)
 	client.fetchNowChan <- ackChan
 
@@ -2161,5 +2169,70 @@ func TestStateFileLocking(t *testing.T) {
 	defer stateFile.Close()
 	if syscall.Flock(int(stateFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
 		t.Fatalf("Was able to lock state file")
+	}
+}
+
+func TestMergedACKs(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	// Send two messages to client2.
+	sendMessage(client1, "client2", "foo1")
+	fetchMessage(client2)
+	sendMessage(client1, "client2", "foo2")
+	fetchMessage(client2)
+
+	// Ack the two messages in client2. The second ack should merge with
+	// the first.
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[0].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name: "ack",
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	client2.gui.events <- Click{
+		name: client2.inboxUI.entries[1].boxName,
+	}
+	client2.AdvanceTo(uiStateInbox)
+	client2.gui.events <- Click{
+		name: "ack",
+	}
+	client2.AdvanceTo(uiStateInbox)
+
+	// Send only one message from client2.
+	transmitMessage(client2)
+
+	// Both messages should be ACKed in client1 on receipt.
+	fetchMessage(client1)
+
+	for _, msg := range client1.outbox {
+		if msg.acked.IsZero() {
+			t.Errorf("Unacked message in client1's outbox.")
+		}
 	}
 }
