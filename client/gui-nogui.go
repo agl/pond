@@ -8,7 +8,6 @@ const haveGUI = false
 
 type noGUIClient struct {
 	client
-	dev bool
 }
 
 type GUI int
