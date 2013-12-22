@@ -280,6 +280,8 @@ const (
 
 	termHeaderPrefix = "  " + termInfoCol3 + "-" + termReset
 
+	termGray = "\x1b[38;5;250m"
+
 	termCliIdStart = "\x1b[38;5;045m"
 
 	termReset = "\x1b[0m"
@@ -507,20 +509,25 @@ func (c *cliClient) setCurrentObject(o interface{}) {
 	}
 
 	var id cliId
+	var typ string
 	switch o := c.currentObj.(type) {
 	case *Draft:
+		typ = "draft"
 		id = o.cliId
 	case *InboxMessage:
+		typ = "inbox"
 		id = o.cliId
 	case *Contact:
+		typ = "contact"
 		id = o.cliId
 	case *queuedMessage:
+		typ = "outbox"
 		id = o.cliId
 	default:
 		panic("unknown currentObj type")
 	}
 
-	c.term.SetPrompt(fmt.Sprintf("%s%s%s>%s ", termCliIdStart, id.String(), termCol1, termReset))
+	c.term.SetPrompt(fmt.Sprintf("%s%s%s/%s%s%s>%s ", termGray, typ, termReset, termCliIdStart, id.String(), termCol1, termReset))
 }
 
 func (c *cliClient) mainUI() {
@@ -558,10 +565,10 @@ func (c *cliClient) mainUI() {
 			if _, ok := line.command.(deleteCommand); !ok {
 				c.deleteArmed = false
 			}
-			close(line.ackChan)
 			if shouldQuit {
 				return
 			}
+			close(line.ackChan)
 		case newMessage := <-c.newMessageChan:
 			c.processNewMessage(newMessage)
 		case msr := <-c.messageSentChan:
