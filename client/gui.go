@@ -378,11 +378,7 @@ func (c *guiClient) processRevocation(by *Contact) {
 }
 
 func (c *guiClient) processMessageDelivered(msg *queuedMessage) {
-	if msg.revocation {
-		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
-	} else {
-		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
-	}
+	c.outboxUI.SetIndicator(msg.id, indicatorYellow)
 }
 
 func (c *guiClient) mainUI() {
