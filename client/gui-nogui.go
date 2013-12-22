@@ -7,6 +7,7 @@ import "io"
 const haveGUI = false
 
 type noGUIClient struct {
+	client
 	dev bool
 }
 
