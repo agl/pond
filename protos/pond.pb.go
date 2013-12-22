@@ -662,6 +662,7 @@ type Message struct {
 	BodyEncoding     *Message_Encoding     `protobuf:"varint,4,opt,name=body_encoding,enum=protos.Message_Encoding" json:"body_encoding,omitempty"`
 	MyNextDh         []byte                `protobuf:"bytes,5,opt,name=my_next_dh" json:"my_next_dh,omitempty"`
 	InReplyTo        *uint64               `protobuf:"varint,6,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
+	AlsoAck          []uint64              `protobuf:"varint,10,rep,name=also_ack" json:"also_ack,omitempty"`
 	Files            []*Message_Attachment `protobuf:"bytes,7,rep,name=files" json:"files,omitempty"`
 	DetachedFiles    []*Message_Detachment `protobuf:"bytes,8,rep,name=detached_files" json:"detached_files,omitempty"`
 	SupportedVersion *int32                `protobuf:"varint,9,opt,name=supported_version" json:"supported_version,omitempty"`
@@ -712,6 +713,13 @@ func (this *Message) GetInReplyTo() uint64 {
 		return *this.InReplyTo
 	}
 	return 0
+}
+
+func (this *Message) GetAlsoAck() []uint64 {
+	if this != nil {
+		return this.AlsoAck
+	}
+	return nil
 }
 
 func (this *Message) GetFiles() []*Message_Attachment {

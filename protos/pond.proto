@@ -211,6 +211,9 @@ message Message {
 	// in_reply_to, if set, contains the |id| value of a previous message
 	// sent by the recipient.
 	optional uint64 in_reply_to = 6;
+	// also_ack contains message ids for other messages that are also
+	// acknowledged by this message.
+	repeated uint64 also_ack = 10;
 
 	message Attachment {
 		required string filename = 1;

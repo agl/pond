@@ -37,6 +37,31 @@ const (
 )
 
 func (c *client) sendAck(msg *InboxMessage) {
+	// First, see if we can merge this ack with a message to the same
+	// contact that is pending transmission.
+	c.queueMutex.Lock()
+	for _, queuedMsg := range c.queue {
+		if queuedMsg.sending {
+			continue
+		}
+		if msg.from == queuedMsg.to && !queuedMsg.revocation {
+			proto := queuedMsg.message
+			proto.AlsoAck = append(proto.AlsoAck, msg.message.GetId())
+			if !tooLarge(queuedMsg) {
+				c.queueMutex.Unlock()
+				c.log.Printf("ACK merged with queued message.")
+				// All done.
+				return
+			}
+
+			proto.AlsoAck = proto.AlsoAck[:len(proto.AlsoAck)-1]
+			if len(proto.AlsoAck) == 0 {
+				proto.AlsoAck = nil
+			}
+		}
+	}
+	c.queueMutex.Unlock()
+
 	to := c.contacts[msg.from]
 
 	var myNextDH []byte
@@ -83,6 +108,16 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	c.outbox = append(c.outbox, out)
 
 	return nil
+}
+
+// tooLarge returns true if the given message is too large to serialise.
+func tooLarge(msg *queuedMessage) bool {
+	messageBytes, err := proto.Marshal(msg.message)
+	if err != nil {
+		return true
+	}
+
+	return len(messageBytes) > pond.MaxSerializedMessage
 }
 
 // processSigningRequest is run on the main goroutine in response to a request
@@ -466,13 +501,23 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		}
 	}
 
+	var ackedIds []uint64
+	ackedIds = append(ackedIds, msg.AlsoAck...)
 	if msg.InReplyTo != nil {
-		id := *msg.InReplyTo
+		ackedIds = append(ackedIds, *msg.InReplyTo)
+	}
 
+	var now time.Time
+	if len(ackedIds) > 0 {
+		now = time.Now()
+	}
+
+	for _, ackedId := range ackedIds {
 		for _, candidate := range c.outbox {
-			if candidate.id == id {
-				candidate.acked = time.Now()
+			if candidate.id == ackedId {
+				candidate.acked = now
 				c.ui.processAcknowledgement(candidate)
+				break
 			}
 		}
 	}
