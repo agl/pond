@@ -548,7 +548,12 @@ func (c *client) processMessageSent(msr messageSendResult) {
 	}
 
 	msg.sent = time.Now()
-	c.ui.processMessageDelivered(msg)
+	if msg.revocation {
+		c.deleteOutboxMsg(msg.id)
+		c.ui.removeOutboxMessageUI(msg)
+	} else {
+		c.ui.processMessageDelivered(msg)
+	}
 	c.save()
 }
 
@@ -677,11 +682,6 @@ func (c *client) doCreateAccount(displayMsg func(string)) error {
 		}
 		testConn.Close()
 	}
-
-	displayMsg("Generating keys...")
-
-	c.randBytes(c.identity[:])
-	curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
 
 	displayMsg("Connecting...")
 

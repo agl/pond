@@ -9,18 +9,20 @@ import (
 // listUI manages the sections in the left-hand side list. It contains a number
 // of items, which may have subheadlines and indicators (coloured dots).
 type listUI struct {
-	gui      GUI
-	vboxName string
-	entries  []listItem
-	selected uint64
-	nextId   int
+	gui        GUI
+	vboxName   string
+	entries    []listItem
+	selected   uint64
+	nextId     int
+	hasSubline bool
 }
 
 type listItem struct {
-	id                                                           uint64
-	name, sepName, boxName, imageName, lineName, sublineTextName string
-	insensitive                                                  bool
-	background                                                   uint32
+	id                                                                           uint64
+	name, sepName, boxName, imageName, lineName, sublineTextName, sublineBoxName string
+	insensitive                                                                  bool
+	hasSubline                                                                   bool
+	background                                                                   uint32
 }
 
 func (cs *listUI) Event(event interface{}) (uint64, bool) {
@@ -38,6 +40,18 @@ func (cs *listUI) Event(event interface{}) (uint64, bool) {
 	return 0, false
 }
 
+func sublineLabel(name, text string) Label {
+	return Label{
+		widgetBase: widgetBase{
+			padding:    5,
+			foreground: colorSubline,
+			font:       fontListSubline,
+			name:       name,
+		},
+		text: text,
+	}
+}
+
 func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 	c := listItem{
 		id:              id,
@@ -47,7 +61,9 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		imageName:       cs.newIdent(),
 		lineName:        cs.newIdent(),
 		sublineTextName: cs.newIdent(),
+		sublineBoxName:  cs.newIdent(),
 		background:      colorGray,
+		hasSubline:      len(subline) > 0,
 	}
 	cs.entries = append(cs.entries, c)
 	index := len(cs.entries) - 1
@@ -80,15 +96,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 	var sublineChildren []Widget
 
 	if len(subline) > 0 {
-		sublineChildren = append(sublineChildren, Label{
-			widgetBase: widgetBase{
-				padding:    5,
-				foreground: colorSubline,
-				font:       fontListSubline,
-				name:       c.sublineTextName,
-			},
-			text: subline,
-		})
+		sublineChildren = append(sublineChildren, sublineLabel(c.sublineTextName, subline))
 	}
 
 	sublineChildren = append(sublineChildren, Image{
@@ -104,7 +112,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 	})
 
 	children = append(children, HBox{
-		widgetBase: widgetBase{padding: 1},
+		widgetBase: widgetBase{padding: 1, name: c.sublineBoxName},
 		children:   sublineChildren,
 	})
 
@@ -224,10 +232,20 @@ func (cs *listUI) SetLine(id uint64, line string) {
 func (cs *listUI) SetSubline(id uint64, subline string) {
 	for _, entry := range cs.entries {
 		if entry.id == id {
-			if len(subline) > 0 {
-				cs.gui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
-			} else {
-				cs.gui.Actions() <- Destroy{name: entry.sublineTextName}
+			if entry.hasSubline {
+				if len(subline) > 0 {
+					cs.gui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
+				} else {
+					cs.gui.Actions() <- Destroy{name: entry.sublineTextName}
+					entry.hasSubline = false
+				}
+			} else if len(subline) > 0 {
+				cs.gui.Actions() <- AddToBox{
+					box:   entry.sublineBoxName,
+					pos:   0,
+					child: sublineLabel(entry.sublineTextName, subline),
+				}
+				entry.hasSubline = true
 			}
 			cs.gui.Signal()
 			break

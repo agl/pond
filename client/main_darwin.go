@@ -35,6 +35,7 @@ func main() {
 	ui := NewGTKUI()
 	client := NewGUIClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
 	client.dev = dev
+	client.disableV2Ratchet = true
 	client.Start()
 	ui.Run()
 }

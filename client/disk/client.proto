@@ -49,6 +49,7 @@ message Contact {
 	optional string their_server = 8;
 	optional bytes their_pub = 9;
 	optional bytes their_identity_public = 10;
+	optional bool revoked_us = 21;
 
 	optional bytes last_private = 11;
 	optional bytes current_private = 12;
@@ -80,6 +81,7 @@ message RatchetState {
 	required uint32 recv_count = 11;
 	required uint32 prev_send_count = 12;
 	required bool ratchet = 13;
+	optional bool v2 = 17;
 
 	optional bytes private0 = 14;
 	optional bytes private1 = 15;

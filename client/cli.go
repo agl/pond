@@ -627,7 +627,7 @@ func (c *cliClient) showOutboxSummary() {
 	}
 	for _, msg := range c.outbox {
 		if msg.revocation {
-			c.Printf(" %s Revocation : %s\n", msg.indicator().Star(), msg.created.Format(shortTimeFormat))
+			c.Printf(" %s Revocation : %s\n", msg.indicator(nil).Star(), msg.created.Format(shortTimeFormat))
 			continue
 		}
 		if len(msg.message.Body) > 0 {
@@ -636,9 +636,18 @@ func (c *cliClient) showOutboxSummary() {
 			}
 
 			subline := msg.created.Format(shortTimeFormat)
-			c.Printf(" %s %s : %s (%s%s%s)\n", msg.indicator().Star(), terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
+			c.Printf(" %s %s : %s (%s%s%s)\n", msg.indicator(c.contacts[msg.to]).Star(), terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
 		}
 	}
+}
+
+func (c *cliClient) showIdentity() {
+	c.Printf("%s Identity:\n", termPrefix)
+	c.Printf("    Server: %s\n", c.server)
+	c.Printf("    Public Identity: %x\n", c.identityPublic[:])
+	c.Printf("    Public Key: %x\n", c.pub[:])
+	c.Printf("    State File: %s\n", c.stateFilename)
+	c.Printf("    Group Generation: %d\n", c.generation)
 }
 
 func (c *cliClient) showInboxSummary() {
@@ -1025,6 +1034,9 @@ Handle:
 
 	case showOutboxSummaryCommand:
 		c.showOutboxSummary()
+
+	case showIdentityCommand:
+		c.showIdentity()
 
 	case showInboxSummaryCommand:
 		c.showInboxSummary()

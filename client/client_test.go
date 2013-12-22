@@ -486,19 +486,33 @@ func proceedToPaired(t *testing.T, client1, client2 *TestClient, server *TestSer
 	proceedToPairedWithNames(t, client1, client2, "client1", "client2", server)
 }
 
+const (
+	simulateOldRatchet = iota
+	simulateNewRatchet
+	simulateNewRatchetV2
+)
+
 func TestKeyExchange(t *testing.T) {
-	testKeyExchange(t, false)
-}
-
-func TestKeyExchangeCrossVersion(t *testing.T) {
-	testKeyExchange(t, true)
-}
-
-func testKeyExchange(t *testing.T, crossVersion bool) {
 	if parallel {
 		t.Parallel()
 	}
 
+	testKeyExchange(t, simulateNewRatchetV2, simulateNewRatchetV2)
+}
+
+func TestKeyExchangeCrossVersion(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	testKeyExchange(t, simulateNewRatchetV2, simulateNewRatchet)
+	testKeyExchange(t, simulateNewRatchetV2, simulateOldRatchet)
+	testKeyExchange(t, simulateNewRatchet, simulateNewRatchet)
+	testKeyExchange(t, simulateNewRatchet, simulateOldRatchet)
+	testKeyExchange(t, simulateOldRatchet, simulateOldRatchet)
+}
+
+func testKeyExchange(t *testing.T, versionA, versionB int) {
 	server, err := NewTestServer(t)
 	if err != nil {
 		t.Fatal(err)
@@ -511,13 +525,29 @@ func testKeyExchange(t *testing.T, crossVersion bool) {
 	}
 	defer client1.Close()
 
-	client1.simulateOldClient = crossVersion
+	switch versionA {
+	case simulateOldRatchet:
+		client1.simulateOldClient = true
+	case simulateNewRatchet:
+		client1.disableV2Ratchet = true
+	case simulateNewRatchetV2:
+		client1.disableV2Ratchet = false
+	}
 
 	client2, err := NewTestClient(t, "client2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client2.Close()
+
+	switch versionB {
+	case simulateOldRatchet:
+		client2.simulateOldClient = true
+	case simulateNewRatchet:
+		client2.disableV2Ratchet = true
+	case simulateNewRatchetV2:
+		client1.disableV2Ratchet = false
+	}
 
 	proceedToKeyExchange(t, client1, server, "client2")
 	proceedToKeyExchange(t, client2, server, "client1")

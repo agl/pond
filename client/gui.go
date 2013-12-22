@@ -378,11 +378,7 @@ func (c *guiClient) processRevocation(by *Contact) {
 }
 
 func (c *guiClient) processMessageDelivered(msg *queuedMessage) {
-	if msg.revocation {
-		c.outboxUI.SetIndicator(msg.id, indicatorGreen)
-	} else {
-		c.outboxUI.SetIndicator(msg.id, indicatorYellow)
-	}
+	c.outboxUI.SetIndicator(msg.id, indicatorYellow)
 }
 
 func (c *guiClient) mainUI() {
@@ -531,7 +527,7 @@ func (c *guiClient) mainUI() {
 	}
 
 	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), indicatorNone)
+		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
@@ -573,13 +569,13 @@ func (c *guiClient) mainUI() {
 
 	for _, msg := range c.outbox {
 		if msg.revocation {
-			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator())
+			c.outboxUI.Add(msg.id, "Revocation", msg.created.Format(shortTimeFormat), msg.indicator(nil))
 			c.outboxUI.SetInsensitive(msg.id)
 			continue
 		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator())
+			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator(c.contacts[msg.to]))
 		}
 	}
 
@@ -2192,7 +2188,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			c.gui.Signal()
 			continue
 		}
-		if err := contact.processKeyExchange(block.Bytes, c.dev, c.simulateOldClient); err != nil {
+		if err := contact.processKeyExchange(block.Bytes, c.dev, c.simulateOldClient, c.disableV2Ratchet); err != nil {
 			c.gui.Actions() <- SetText{name: "error2", text: err.Error()}
 			c.gui.Actions() <- UIError{err}
 			c.gui.Signal()
@@ -3185,6 +3181,9 @@ func (c *guiClient) logUI() interface{} {
 			},
 			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
 			HBox{
+				widgetBase: widgetBase{
+					padding: 5,
+				},
 				children: []Widget{
 					VBox{
 						widgetBase: widgetBase{
@@ -3192,11 +3191,18 @@ func (c *guiClient) logUI() interface{} {
 							fill:   true,
 						},
 					},
-					VBox{
+					HBox{
 						widgetBase: widgetBase{
 							padding: 10,
 						},
 						children: []Widget{
+							Button{
+								widgetBase: widgetBase{
+									name:    "clear-log",
+									padding: 2,
+								},
+								text: "Clear",
+							},
 							Button{
 								widgetBase: widgetBase{
 									name:    "transact",
@@ -3213,7 +3219,7 @@ func (c *guiClient) logUI() interface{} {
 				widgetBase: widgetBase{expand: true, fill: true},
 				child: TextView{
 					widgetBase: widgetBase{expand: true, fill: true, name: "log"},
-					editable:   true,
+					editable:   false,
 				},
 			},
 		},
@@ -3247,6 +3253,16 @@ func (c *guiClient) logUI() interface{} {
 			case c.fetchNowChan <- nil:
 			default:
 			}
+			continue
+		}
+
+		if click, ok := event.(Click); ok && click.name == "clear-log" {
+			c.log.clear()
+			logEpoch = c.log.epoch
+			lastProcessedIndex = -1
+			log = ""
+			c.gui.Actions() <- SetTextView{name: "log", text: log}
+			c.gui.Signal()
 			continue
 		}
 

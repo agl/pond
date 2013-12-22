@@ -163,6 +163,8 @@ message KeyExchange {
 	required bytes public_key = 1;
 	// Curve25519 public key. (Used to tell the server which account to
 	// deliver a message to.)
+	// Note: in the most up-to-date revision of the Pond ratchet, this
+	// should be equal to |public_key|, modulo isomorphism.
 	required bytes identity_public = 2;
 	// The URL of this user's home server.
 	required string server = 3;

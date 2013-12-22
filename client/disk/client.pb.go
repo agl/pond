@@ -130,6 +130,7 @@ type Contact struct {
 	TheirServer         *string                `protobuf:"bytes,8,opt,name=their_server" json:"their_server,omitempty"`
 	TheirPub            []byte                 `protobuf:"bytes,9,opt,name=their_pub" json:"their_pub,omitempty"`
 	TheirIdentityPublic []byte                 `protobuf:"bytes,10,opt,name=their_identity_public" json:"their_identity_public,omitempty"`
+	RevokedUs           *bool                  `protobuf:"varint,21,opt,name=revoked_us" json:"revoked_us,omitempty"`
 	LastPrivate         []byte                 `protobuf:"bytes,11,opt,name=last_private" json:"last_private,omitempty"`
 	CurrentPrivate      []byte                 `protobuf:"bytes,12,opt,name=current_private" json:"current_private,omitempty"`
 	TheirLastPublic     []byte                 `protobuf:"bytes,13,opt,name=their_last_public" json:"their_last_public,omitempty"`
@@ -237,6 +238,13 @@ func (this *Contact) GetTheirIdentityPublic() []byte {
 	return nil
 }
 
+func (this *Contact) GetRevokedUs() bool {
+	if this != nil && this.RevokedUs != nil {
+		return *this.RevokedUs
+	}
+	return false
+}
+
 func (this *Contact) GetLastPrivate() []byte {
 	if this != nil {
 		return this.LastPrivate
@@ -324,6 +332,7 @@ type RatchetState struct {
 	RecvCount          *uint32                   `protobuf:"varint,11,req,name=recv_count" json:"recv_count,omitempty"`
 	PrevSendCount      *uint32                   `protobuf:"varint,12,req,name=prev_send_count" json:"prev_send_count,omitempty"`
 	Ratchet            *bool                     `protobuf:"varint,13,req,name=ratchet" json:"ratchet,omitempty"`
+	V2                 *bool                     `protobuf:"varint,17,opt,name=v2" json:"v2,omitempty"`
 	Private0           []byte                    `protobuf:"bytes,14,opt,name=private0" json:"private0,omitempty"`
 	Private1           []byte                    `protobuf:"bytes,15,opt,name=private1" json:"private1,omitempty"`
 	SavedKeys          []*RatchetState_SavedKeys `protobuf:"bytes,16,rep,name=saved_keys" json:"saved_keys,omitempty"`
@@ -421,6 +430,13 @@ func (this *RatchetState) GetPrevSendCount() uint32 {
 func (this *RatchetState) GetRatchet() bool {
 	if this != nil && this.Ratchet != nil {
 		return *this.Ratchet
+	}
+	return false
+}
+
+func (this *RatchetState) GetV2() bool {
+	if this != nil && this.V2 != nil {
+		return *this.V2
 	}
 	return false
 }

@@ -71,6 +71,7 @@ import (
 	"sync"
 	"time"
 
+	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
@@ -206,6 +207,10 @@ type client struct {
 	// simulateOldClient causes the client to act like a pre-ratchet client
 	// for testing purposes.
 	simulateOldClient bool
+
+	// disableV2Ratchet causes the client to advertise and process V1
+	// axolotl ratchet support.
+	disableV2Ratchet bool
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -559,7 +564,7 @@ type queuedMessage struct {
 	cliId cliId
 }
 
-func (qm *queuedMessage) indicator() Indicator {
+func (qm *queuedMessage) indicator(contact *Contact) Indicator {
 	switch {
 	case !qm.acked.IsZero():
 		return indicatorGreen
@@ -570,6 +575,8 @@ func (qm *queuedMessage) indicator() Indicator {
 			return indicatorGreen
 		}
 		return indicatorYellow
+	case contact != nil && contact.revokedUs:
+		return indicatorBlack
 	}
 	return indicatorRed
 }
@@ -698,6 +705,13 @@ func (c *client) loadUI() error {
 		copy(c.priv[:], priv[:])
 		copy(c.pub[:], pub[:])
 
+		if c.disableV2Ratchet {
+			c.randBytes(c.identity[:])
+		} else {
+			ed25519.PrivateKeyToCurve25519(&c.identity, priv)
+		}
+		curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
+
 		c.groupPriv, err = bbssig.GenerateGroup(rand.Reader)
 		if err != nil {
 			panic(err)
@@ -774,15 +788,28 @@ func (c *client) loadUI() error {
 }
 
 func (contact *Contact) subline() string {
-	if contact.isPending {
+	switch {
+	case contact.revokedUs:
+		return "has revoked"
+	case contact.isPending:
 		return "pending"
-	} else if len(contact.pandaResult) > 0 {
+	case len(contact.pandaResult) > 0:
 		return "failed"
 	}
 	return ""
 }
 
-func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient bool) error {
+func (contact *Contact) indicator() Indicator {
+	switch {
+	case contact.revokedUs:
+		return indicatorBlack
+	case contact.isPending:
+		return indicatorYellow
+	}
+	return indicatorNone
+}
+
+func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient, disableV2Ratchet bool) error {
 	var kxs pond.SignedKeyExchange
 	if err := proto.Unmarshal(kxsBytes, &kxs); err != nil {
 		return err
@@ -841,7 +868,13 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOld
 		copy(contact.theirCurrentDHPublic[:], kx.Dh)
 		contact.ratchet = nil
 	} else {
-		if err := contact.ratchet.CompleteKeyExchange(&kx); err != nil {
+		// If the identity and ed25519 public keys are the same (modulo
+		// isomorphism) then the contact is using the v2 ratchet.
+		var ed25519Public, curve25519Public [32]byte
+		copy(ed25519Public[:], kx.PublicKey)
+		ed25519.PublicKeyToCurve25519(&curve25519Public, &ed25519Public)
+		v2 := !disableV2Ratchet && bytes.Equal(curve25519Public[:], kx.IdentityPublic[:])
+		if err := contact.ratchet.CompleteKeyExchange(&kx, v2); err != nil {
 			return err
 		}
 	}
@@ -1091,7 +1124,7 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 		contact.pandaShutdownChan = nil
 		contact.isPending = false
 
-		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient); err != nil {
+		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient, c.disableV2Ratchet); err != nil {
 			contact.pandaResult = err.Error()
 			update.err = err
 			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
