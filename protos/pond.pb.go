@@ -190,14 +190,15 @@ func (this *Request) GetRevocation() *SignedRevocation {
 }
 
 type Reply struct {
-	Status           *Reply_Status     `protobuf:"varint,1,opt,name=status,enum=protos.Reply_Status,def=0" json:"status,omitempty"`
-	AccountCreated   *AccountCreated   `protobuf:"bytes,2,opt,name=account_created" json:"account_created,omitempty"`
-	Fetched          *Fetched          `protobuf:"bytes,3,opt,name=fetched" json:"fetched,omitempty"`
-	Announce         *ServerAnnounce   `protobuf:"bytes,4,opt,name=announce" json:"announce,omitempty"`
-	Upload           *UploadReply      `protobuf:"bytes,5,opt,name=upload" json:"upload,omitempty"`
-	Download         *DownloadReply    `protobuf:"bytes,6,opt,name=download" json:"download,omitempty"`
-	Revocation       *SignedRevocation `protobuf:"bytes,7,opt,name=revocation" json:"revocation,omitempty"`
-	XXX_unrecognized []byte            `json:"-"`
+	Status           *Reply_Status       `protobuf:"varint,1,opt,name=status,enum=protos.Reply_Status,def=0" json:"status,omitempty"`
+	AccountCreated   *AccountCreated     `protobuf:"bytes,2,opt,name=account_created" json:"account_created,omitempty"`
+	Fetched          *Fetched            `protobuf:"bytes,3,opt,name=fetched" json:"fetched,omitempty"`
+	Announce         *ServerAnnounce     `protobuf:"bytes,4,opt,name=announce" json:"announce,omitempty"`
+	Upload           *UploadReply        `protobuf:"bytes,5,opt,name=upload" json:"upload,omitempty"`
+	Download         *DownloadReply      `protobuf:"bytes,6,opt,name=download" json:"download,omitempty"`
+	Revocation       *SignedRevocation   `protobuf:"bytes,7,opt,name=revocation" json:"revocation,omitempty"`
+	ExtraRevocations []*SignedRevocation `protobuf:"bytes,8,rep,name=extra_revocations" json:"extra_revocations,omitempty"`
+	XXX_unrecognized []byte              `json:"-"`
 }
 
 func (this *Reply) Reset()         { *this = Reply{} }
@@ -251,6 +252,13 @@ func (this *Reply) GetDownload() *DownloadReply {
 func (this *Reply) GetRevocation() *SignedRevocation {
 	if this != nil {
 		return this.Revocation
+	}
+	return nil
+}
+
+func (this *Reply) GetExtraRevocations() []*SignedRevocation {
+	if this != nil {
+		return this.ExtraRevocations
 	}
 	return nil
 }

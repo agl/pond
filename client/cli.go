@@ -543,7 +543,6 @@ func (c *cliClient) mainUI() {
 		select {
 		case sigReq := <-c.signingRequestChan:
 			c.processSigningRequest(sigReq)
-			return
 		case line := <-termChan:
 			if line.err != nil {
 				return
@@ -691,7 +690,11 @@ func (c *cliClient) showDraftsSummary() {
 		}
 
 		subline := msg.created.Format(shortTimeFormat)
-		c.Printf("   %s : %s (%s%s%s)\n", terminalEscape(c.contacts[msg.to].name, false), subline, termCliIdStart, msg.cliId.String(), termReset)
+		to := ""
+		if msg.to != 0 {
+			to = c.contacts[msg.to].name
+		}
+		c.Printf("   %s : %s (%s%s%s)\n", terminalEscape(to, false), subline, termCliIdStart, msg.cliId.String(), termReset)
 	}
 }
 
