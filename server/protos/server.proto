@@ -6,4 +6,7 @@ message Config {
 	// address is an optional IP address. If given, the server will only
 	// listen on this address.
 	optional string address = 2;
+	// allow_registration controls whether new account requests will be
+	// processed.
+	optional bool allow_registration = 3 [ default = true ];
 }

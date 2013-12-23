@@ -194,13 +194,15 @@ type Server struct {
 	accounts map[string]*Account
 	// lastSweepTime is the time when the server last performed a sweep for
 	// expired files.
-	lastSweepTime time.Time
+	lastSweepTime     time.Time
+	allowRegistration bool
 }
 
-func NewServer(dir string) *Server {
+func NewServer(dir string, allowRegistration bool) *Server {
 	return &Server{
-		baseDirectory: dir,
-		accounts:      make(map[string]*Account),
+		baseDirectory:     dir,
+		accounts:          make(map[string]*Account),
+		allowRegistration: allowRegistration,
 	}
 }
 
@@ -332,6 +334,11 @@ func (s *Server) sweep() {
 
 func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 	account := NewAccount(s, from)
+
+	if !s.allowRegistration {
+		log.Printf("rejected registration of new account")
+		return &pond.Reply{Status: pond.Reply_REGISTRATION_DISABLED.Enum()}
+	}
 
 	var ok bool
 	account.group, ok = new(bbssig.Group).Unmarshal(req.Group)

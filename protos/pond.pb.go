@@ -34,6 +34,7 @@ const (
 	Reply_RESUME_PAST_END_OF_FILE    Reply_Status = 21
 	Reply_GENERATION_REVOKED         Reply_Status = 22
 	Reply_CANNOT_PARSE_REVOCATION    Reply_Status = 23
+	Reply_REGISTRATION_DISABLED      Reply_Status = 24
 )
 
 var Reply_Status_name = map[int32]string{
@@ -55,6 +56,7 @@ var Reply_Status_name = map[int32]string{
 	21: "RESUME_PAST_END_OF_FILE",
 	22: "GENERATION_REVOKED",
 	23: "CANNOT_PARSE_REVOCATION",
+	24: "REGISTRATION_DISABLED",
 }
 var Reply_Status_value = map[string]int32{
 	"OK":                         0,
@@ -75,6 +77,7 @@ var Reply_Status_value = map[string]int32{
 	"RESUME_PAST_END_OF_FILE":    21,
 	"GENERATION_REVOKED":         22,
 	"CANNOT_PARSE_REVOCATION":    23,
+	"REGISTRATION_DISABLED":      24,
 }
 
 func (x Reply_Status) Enum() *Reply_Status {

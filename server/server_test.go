@@ -96,7 +96,7 @@ func NewTestServer(setup func(dir string)) *TestServer {
 		listener: listener,
 		addr:     listener.Addr().(*net.TCPAddr),
 		dir:      dir,
-		server:   NewServer(dir),
+		server:   NewServer(dir, true),
 	}
 	io.ReadFull(rand.Reader, testServer.identity[:])
 	curve25519.ScalarBaseMult(&testServer.identityPublic, &testServer.identity)

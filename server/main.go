@@ -131,7 +131,7 @@ func main() {
 	identityString := strings.Replace(base32.StdEncoding.EncodeToString(identityPublic[:]), "=", "", -1)
 	log.Printf("Started. Listening on port %d with identity %s", listener.Addr().(*net.TCPAddr).Port, identityString)
 
-	server := NewServer(*baseDirectory)
+	server := NewServer(*baseDirectory, config.GetAllowRegistration())
 
 	for {
 		conn, err := listener.Accept()
