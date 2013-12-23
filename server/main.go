@@ -25,6 +25,7 @@ var baseDirectory *string = flag.String("base-directory", "", "directory to stor
 var initFlag *bool = flag.Bool("init", false, "if true, setup a new base directory")
 var port *int = flag.Int("port", 16333, "TCP port to use when setting up a new base directory")
 var makeAnnounce *string = flag.String("make-announce", "", "If set, the location of a text file containing an announcement message which will be written to stdout in binary.")
+var disableRegistration *bool = flag.Bool("disable-registration", false, "if true, disable registration of new accounts")
 
 const configFilename = "config"
 const identityFilename = "identity"
@@ -131,7 +132,7 @@ func main() {
 	identityString := strings.Replace(base32.StdEncoding.EncodeToString(identityPublic[:]), "=", "", -1)
 	log.Printf("Started. Listening on port %d with identity %s", listener.Addr().(*net.TCPAddr).Port, identityString)
 
-	server := NewServer(*baseDirectory)
+	server := NewServer(*baseDirectory, *disableRegistration)
 
 	for {
 		conn, err := listener.Accept()

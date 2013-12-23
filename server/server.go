@@ -195,12 +195,15 @@ type Server struct {
 	// lastSweepTime is the time when the server last performed a sweep for
 	// expired files.
 	lastSweepTime time.Time
+	// disable registration of new accounts
+	disableRegistration bool
 }
 
-func NewServer(dir string) *Server {
+func NewServer(dir string, disablereg bool) *Server {
 	return &Server{
 		baseDirectory: dir,
 		accounts:      make(map[string]*Account),
+		disableRegistration: disablereg,
 	}
 }
 
@@ -332,6 +335,12 @@ func (s *Server) sweep() {
 
 func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 	account := NewAccount(s, from)
+
+	// reject registration if it is disabled
+	if s.disableRegistration {
+		log.Printf("blocked registration of new account")
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
 
 	var ok bool
 	account.group, ok = new(bbssig.Group).Unmarshal(req.Group)
