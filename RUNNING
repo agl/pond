@@ -1,0 +1,16 @@
+Ensure that your environment is configured for running golang programs. See
+http://golang.org/doc/code.html for details, but you should have something
+similar to the following setup:
+
+  export GOPATH=$HOME/go
+  export PATH=$PATH:$GOPATH/bin
+
+Adjust these path locations to fit your Go environment.
+
+Launch the GUI for Pond on GNU/Linux and similar operating systems:
+
+  $GOPATH/bin/client
+
+To run the Pond CLI:
+
+  $GOPATH/bin/client --cli
