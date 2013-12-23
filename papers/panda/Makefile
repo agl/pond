@@ -1,7 +1,7 @@
 #
 # To use this on Debian:
 #   apt-get install texlive-fonts-recommended texlive-base \
-#     biblatex texlive-bibtex-extra texlive-extra-utils
+#     biblatex texlive-bibtex-extra texlive-extra-utils make
 #
 # Then type `make` to produce the $PAPER
 #
