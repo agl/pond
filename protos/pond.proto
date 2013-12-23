@@ -48,6 +48,10 @@ message Reply {
 		GENERATION_REVOKED = 22;
 
 		CANNOT_PARSE_REVOCATION = 23;
+		// REGISTRATION_DISABLED may be returned after a NewAccount
+		// request to indicate the the server doesn't accept new
+		// registrations.
+		REGISTRATION_DISABLED = 24;
 	}
 	optional Status status = 1 [ default = OK ];
 
