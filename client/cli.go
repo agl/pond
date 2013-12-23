@@ -364,7 +364,26 @@ func (c *cliClient) ShutdownAndSuspend() error {
 
 func (c *cliClient) createPassphraseUI() (string, error) {
 	c.Printf("%s %s\n", termInfoPrefix, msgCreatePassphrase)
-	return c.term.ReadPassword("password> ")
+
+	for {
+		pw1, err := c.term.ReadPassword("passphrase> ")
+		if err != nil {
+			return "", err
+		}
+		if len(pw1) == 0 {
+			return "", nil
+		}
+		c.Printf("%s Please confirm by entering the same passphrase again\n", termInfoPrefix)
+		pw2, err := c.term.ReadPassword("passphrase> ")
+		if err != nil {
+			return "", err
+		}
+		if pw1 == pw2 {
+			return pw1, nil
+		}
+		c.Printf("%s Passphrases don't match. Please start over\n", termInfoPrefix)
+	}
+
 }
 
 func (c *cliClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {
