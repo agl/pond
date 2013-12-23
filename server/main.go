@@ -24,6 +24,7 @@ import (
 var baseDirectory *string = flag.String("base-directory", "", "directory to store server state and config")
 var initFlag *bool = flag.Bool("init", false, "if true, setup a new base directory")
 var port *int = flag.Int("port", 16333, "TCP port to use when setting up a new base directory")
+var listenIP *string = flag.String("listen-ip", "127.0.0.1", "IP to listen to")
 var makeAnnounce *string = flag.String("make-announce", "", "If set, the location of a text file containing an announcement message which will be written to stdout in binary.")
 
 const configFilename = "config"
@@ -76,6 +77,7 @@ func main() {
 		}
 
 		defaultConfig := &protos.Config{
+			Address: proto.String(*listenIP),
 			Port: proto.Uint32(uint32(*port)),
 		}
 
@@ -109,8 +111,11 @@ func main() {
 		log.Fatalf("Failed to parse config: %s", err)
 	}
 
-	ip := net.IPv4(127, 0, 0, 1) // IPv4 loopback interface
-
+	// this merely sets the type for ip
+	// the default value is define above in listenIP
+	// which gets written to the config file
+        ip := net.IPv4zero
+	
 	if config.Address != nil {
 		if ip = net.ParseIP(*config.Address); ip == nil {
 			log.Fatalf("Failed to parse address from config: %s", ip)
