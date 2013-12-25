@@ -28,6 +28,12 @@ import (
 
 const haveCLI = true
 
+const (
+	tpmIntroMsg      = "It's very difficult to erase information on modern computers so Pond tries to use the TPM chip if possible."
+	tpmPresentMsg    = "Your computer appears to have a TPM chip. You'll need tcsd (the TPM daemon) running in order to use it."
+	tpmNotPresentMsg = "Your computer does not appear to have a TPM chip. Without one, it's possible that someone in physical possession of your computer and passphrase could extract old messages that should have been deleted. Using a computer with a TPM is strongly preferable until alternatives can be implemented."
+)
+
 type cliClient struct {
 	client
 
@@ -384,7 +390,7 @@ func (c *cliClient) createPassphraseUI() (string, error) {
 		}
 		c.Printf("%s Passphrases don't match. Please start over\n", termInfoPrefix)
 	}
-
+	return "", nil
 }
 
 func (c *cliClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {

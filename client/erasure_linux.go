@@ -10,12 +10,6 @@ import (
 	"github.com/agl/pond/client/tpm"
 )
 
-const (
-	tpmIntroMsg      = "It's very difficult to erase information on modern computers so Pond tries to use the TPM chip if possible."
-	tpmPresentMsg    = "Your computer appears to have a TPM chip. You'll need tcsd (the TPM daemon) running in order to use it."
-	tpmNotPresentMsg = "Your computer does not appear to have a TPM chip. Without one, it's possible that someone in physical possession of your computer and passphrase could extract old messages that should have been deleted. Using a computer with a TPM is strongly preferable until alternatives can be implemented."
-)
-
 func (c *guiClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {
 	var tpmInfo string
 	present := tpm.Present()
