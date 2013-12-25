@@ -74,6 +74,7 @@ import (
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
+	"github.com/agl/ed25519/extra25519"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/client/ratchet"
@@ -707,7 +708,7 @@ func (c *client) loadUI() error {
 		if c.disableV2Ratchet {
 			c.randBytes(c.identity[:])
 		} else {
-			ed25519.PrivateKeyToCurve25519(&c.identity, priv)
+			extra25519.PrivateKeyToCurve25519(&c.identity, priv)
 		}
 		curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
 
@@ -870,7 +871,7 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOld
 		// isomorphism) then the contact is using the v2 ratchet.
 		var ed25519Public, curve25519Public [32]byte
 		copy(ed25519Public[:], kx.PublicKey)
-		ed25519.PublicKeyToCurve25519(&curve25519Public, &ed25519Public)
+		extra25519.PublicKeyToCurve25519(&curve25519Public, &ed25519Public)
 		v2 := !disableV2Ratchet && bytes.Equal(curve25519Public[:], kx.IdentityPublic[:])
 		if err := contact.ratchet.CompleteKeyExchange(&kx, v2); err != nil {
 			return err
