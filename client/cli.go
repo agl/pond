@@ -384,7 +384,7 @@ func (c *cliClient) createPassphraseUI() (string, error) {
 		}
 		c.Printf("%s Passphrases don't match. Please start over\n", termInfoPrefix)
 	}
-
+	return "", nil
 }
 
 func (c *cliClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {
