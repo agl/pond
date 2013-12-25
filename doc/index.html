@@ -122,3 +122,68 @@ go get github.com/agl/pond/client
 <p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
 
 <p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
+
+<h4>Running a Pond server</h4>
+
+<p>Note: this documentation is included for completeness but most users are not expected to run their own servers. At this point in the development, things are still changing and one may need to observe the development in order to know when server updates are needed.</p>
+
+<h5>Go environment</h5>
+
+<p>Create a user called <tt>pond</tt> and make sure its go environment is setup:</p>
+
+<pre>export GOPATH=/home/pond/go
+export PATH=$PATH:$GOPATH/bin</pre>
+
+<h5>Create pond server identity</h5>
+
+<p>Note that the pond server logs to stdout.</p>
+
+<pre>
+% cd /home/pond
+% mkdir pond-server-base
+% server --init --base-directory /home/pond/pond-server-base
+2013/12/24 16:35:46 Started. Listening on port 16333 with identity FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A
+</pre>
+
+<h5>Start pond server normally</h5>
+
+<pre>% cd /home/pond
+% server --base-directory /home/pond/pond-server-base
+2013/12/24 16:35:46 Started. Listening on port 16333 with identity FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A</pre>
+
+<h5>Setup a Tor hidden service</h5>
+
+<p>Make a <tt>torrc</tt> for your hidden service, as in this snippet:</p>
+
+<pre>HiddenServiceDir /var/lib/tor/pond_server/
+HiddenServicePort 16333 127.0.0.1:16333
+ORPort 9001</pre>
+
+Restart tor and then get your .onion addr:
+
+<pre>% service tor restart
+% cat /var/lib/tor/pond_server/hostname
+aj642zdpke4dzgf3.onion</pre>
+
+<h5>Construct Pond server URL</h5>
+
+<p>Construct your Pond server url like this: <tt>pondserver://</tt> + pond_server_id + <tt>@</tt> + onion_address. The example above would yield:</p>
+
+<pre>pondserver://FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A@aj642zdpke4dzgf3.onion</pre>
+
+<h5>Running under <tt>systemd</tt></h5>
+
+<p>The Pond server doesn't fork into the background so <tt>systemd</tt> provides a nice way to run it as a service. Here's an example unit for doing so:</p>
+
+<pre>[Unit]
+Description=Pond
+After=network.target
+
+[Service]
+User=pond
+ExecStart=/home/pond/go/bin/server --base-directory /home/pond/pond-server-base
+StandardOutput=syslog
+StandardError=syslog
+
+[Install]
+WantedBy=multi-user.target</pre>
