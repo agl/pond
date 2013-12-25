@@ -122,3 +122,64 @@ go get github.com/agl/pond/client
 <p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
 
 <p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
+
+
+
+<h3>Running a Pond server</h2>
+
+<h4>go environment</h4>
+<p>
+Create a user called pond and make sure it's go environment is setup:
+<pre>
+export PATH=$PATH:/home/pond/projects/go/bin:/home/pond/go/bin
+export GOROOT=/home/pond/projects/go
+export GOPATH=/home/pond/go
+</pre>
+
+<h4>create pond server identity</h4>
+Note that the pond server logs to stdout.
+
+<pre>
+cd /home/pond
+mkdir pond-server-base
+server --init --base-directory /home/pond/pond-server-base
+2013/12/24 16:35:46 Started. Listening on port 16333 with identity FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A
+...
+</pre>
+
+<h4>start pond server normally</h4>
+<pre>
+server --base-directory /home/pond/pond-server-base
+2013/12/24 16:35:46 Started. Listening on port 16333 with identity FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A
+...
+</pre>
+
+<h4>tor hidden service</h4>
+
+Make a torrc for your hidden service:
+
+<pre>
+HiddenServiceDir /var/lib/tor/pond_server/
+HiddenServicePort 16333 127.0.0.1:16333
+ORPort 9001
+</pre>
+
+Restart tor and then get your .onion addr:
+
+<pre>
+service tor restart
+cat /var/lib/tor/pond_server/hostname
+aj642zdpke4dzgf3.onion
+</pre>
+
+<h4>construct Pond server url</h4>
+
+Construct your Pond server url like this: pondserver:// + pond_server_id + @ + onion_address
+
+The example above would yield:
+
+<pre>
+pondserver://FJPZWT4E6Y3BOYYXSLJII4EMZPFCU7CDL7DM3AZ4V65X4TGDKN6A@aj642zdpke4dzgf3.onion
+</pre>
+
+
