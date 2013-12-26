@@ -729,7 +729,7 @@ func (tab cliTable) WriteToWithWidths(w io.Writer, widths []int) {
 		buf.WriteString("\n")
 	}
 
-	if !tab.noTrailingNewline {
+	if len(tab.rows) > 0 && !tab.noTrailingNewline {
 		buf.WriteString("\n")
 	}
 	buf.Flush()
