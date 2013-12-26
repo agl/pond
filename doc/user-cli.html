@@ -1,0 +1,173 @@
+---
+layout: default
+title: User guide
+---
+
+<div>
+
+<style scoped>
+.cli {
+	background-color: black;
+	border-radius: 3px;
+	color: white;
+	margin: 0.3cm;
+	padding: 4px;
+	max-width: 65em;
+	font-family: monospace;
+	white-space: pre-wrap;
+	line-height: normal;
+}
+</style>
+
+<h3>User Guide (CLI)</h3>
+
+<p>This documentation is for the command-line interface to Pond. You can start the CLI by passing the <tt>--cli</tt> option to Pond or, if your Pond binary doesn't have the GUI compiled in, it'll always start in CLI mode.</p>
+
+<p>Before running Pond, you need to have <a href="https://torproject.org">Tor</a> running. Pond makes all connections over Tor. Simply having the <a href="https://www.torproject.org/projects/torbrowser.html.en">browser bundle</a> running should be sufficient. There's no danger to having Pond running without Tor, it'll simply not work.</p>
+
+<p>When first starting Pond, you'll be prompted to set a passphrase for Pond's <i>state file</i>, which should look like this:</p>
+
+<div class="cli"><span style="color: #af00ff">&gt;</span><span style="color: #af5fff">&gt;</span><span style="color: #af87ff">&gt;</span> Pond...
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Pond keeps private keys, messages etc on disk for a limited amount of time and that information can be encrypted with a passphrase. If you are comfortable with the security of your home directory, this passphrase can be empty and you won't be prompted for it again. If you set a passphrase and forget it, it cannot be recovered. You will have to start afresh.
+passphrase&gt;</div>
+
+<p>The state file contains all of Pond's persistent state and may be encrypted with a passphrase if you wish. If you set a passphrase and then forget it, there is no recovery mechanism. If you believe that the security of your home directory is sufficiently good then you may omit the passphrase completely.</p>
+
+<p><b>The state file should not be copied.</b> Pond depends on the ability to delete past information and making copies of the state file may allow information that should have been deleted, to be recovered. Additionally, Pond is not designed to operate concurrently on multiple computers.</p>
+
+<p>After setting the passphrase (or not), you may be prompted to setup TPM storage if your computer has a TPM chip. Pond depends on being able to erase old information but it is not clear how well modern computers, using SSDs or log-structured filesystems, are able to erase anything. Without some form of special storage, such as a TPM chip, it may be possible to recover &ldquo;deleted&rdquo; messages given the passphrase.</p>
+
+<div class="cli"><span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> It's very difficult to erase information on modern computers so Pond tries to use the TPM chip if possible.
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Your computer appears to have a TPM chip. You'll need tcsd (the TPM daemon) running in order to use it.
+Try to configure TPM (y/n)&gt;</div>
+
+<p>&nbsp;</p>
+
+<p>Once the passphrase and TPM have been configured, you'll be prompted to create an account on a Pond server.</p>
+
+<div class="cli"><span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> In order to use Pond you have to have an account on a server. Servers may set their own account policies, but the default server allows anyone to create an account. Just hit enter to use the default server [pondserver://ICYUHSAYGIXTKYKXSAHIBWEAQCTEF26WUWEPOVC764WYELCJMUPA@jb644zapje5dvgk3.onion]
+server&gt;</div>
+
+<p>A Pond server accepts and stores messages for you since most computers are not constantly connected to the Internet. Anyone can run a Pond server, and you can even run your own if you wish, but there is a default Pond server that is already filled out should you wish to use that one.</p>
+
+<p>Note that one doesn't provide a name, email or any other identifying information when creating a Pond account. A Pond server knows almost nothing about you. For details, see the threat model document.</p>
+
+<p>In order to prevent abuse, the Pond server may ask your computer to perform a certain amount of work before allowing an account to be created. Please be patient, esp on slower computers.</p>
+
+<p>Creating the account will be the first time that Pond tries to connect through Tor and so any errors at this point are likely caused by a problem with network. Ensure that Tor is running and listening for SOCKS5 connections on port 9050 or 9150.</p>
+
+<p>&nbsp;</p>
+
+<p>Once your account has been created, and every time you subsequently start Pond, you'll see a summary of Pond's state. At the moment, there are no messages nor contacts so the summary will be very brief:</p>
+
+<div class="cli"><span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> There are no messages waiting to be transmitted.</div>
+
+<p>At any point you can run the <tt>help</tt> command to list the other commands that are currently available to you:</p>
+
+<div class="cli"><span style="color: #af00ff">&gt;</span> help
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> clear              Clear terminal
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> contacts           Show all known contacts
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> drafts             Show drafts
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> help [--all]       List known commands
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> identity           Show identity
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> inbox              Show the Inbox
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> log                Show recent log entries
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> new-contact &lt;name&gt; Start a key exchange with a new contact
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> outbox             Show the Outbox
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> queue              Show the queue
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> quit               Exit Pond
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> status             Show overall Pond status
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> transact-now       Perform a network transaction now</div>
+
+
+<p><b>Unlike regular email, Pond is a closed system.</b> This means that you cannot send messages to another Pond user without establishing a relationship with them first. (This also means that nobody unwelcome can send messages to you - i.e. there is no spam.)</p>
+
+<p>So the first order to business is to add a contact by running the <tt>new-contact</tt> command. (If you don't know anyone else using Pond then I'm afraid that you're rather stuck - such is the nature of network effects.)</p>
+
+<p>Feel free when choosing a name for the contact. The name must be locally unique, but will only be used to refer to the contact. The name that you choose for a contact will not be shared with anyone else.</p>
+
+<p>There are two methods of establishing a new contact - manual keying and shared secrets. Manual keying is suitable if you already have an existing secure channel to the contact, i.e. you have each other's PGP keys, or have OTR setup. However, most people should use shared secrets and that's the default in the CLI.</p>
+
+<p>Shared secret keying allows one to bootstrap secure communication from some shared secret. This may be a random string generated by one of the parties, a physical meeting or perhaps a secure, but low capacity, channel.</p>
+
+<p>Shared secret keying involves contacting a central server (using Tor) and performing a key exchange based on the shared secret. This means that, so long as a MITM attack isn't performed against the shared secret in real time then it's secure for the future.</p>
+
+<p>In the interests of practicality, it's pretty secure to exchange a shared secret over IM or email. Pond will suggest a randomly generated secret if you don't already have one:</p>
+
+<div class="cli"><span style="color: #af00ff">&gt;</span> new-contact Alice
+Enter shared secret with contact, or hit enter to generate, print and use a random one
+secret: 
+<span style="color: #af00ff">&gt;</span><span style="color: #af5fff">&gt;</span><span style="color: #af87ff">&gt;</span> Shared secret: ff947f1bad0945d763247aafa6255dcc
+<span style="color: #af00ff">&gt;</span><span style="color: #af5fff">&gt;</span><span style="color: #af87ff">&gt;</span> Key exchange running in background.</div>
+
+
+<p>Now that the key exchange is pending, there is a contact. The current state of Pond is shown whenever an empty command is entered. So just hit enter and you'll see something like:</p>
+
+<div class="cli"><span style="color: #af00ff">&gt;</span>
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Contacts
+   Alice | pending (<span style="color: #00d7ff">qu6</span>)
+
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> There are no messages waiting to be transmitted</div>
+
+<p>The Pond CLI has the concept of a &lsquo;current&rsquo; object and whenever you see three letters written like <tt>qu6</tt> in the example above, that's an object that can be selected by entering those three letters. It's called a tag. Go ahead, enter the tag for your pending contact now - they'll be differnt than the example.</p>
+
+<p>The prompt will change to indicate the current object and the type of the object, which is <tt>contact</tt> in this case. Some commands apply to the current object, for example <tt>show</tt>:</p>
+
+<div class="cli"><span style="color: #af00ff">&gt;</span> qu6
+<span style="color: #bcbcbc">contact</span>/<span style="color: #00d7ff">qu6</span><span style="color: #af00ff">&gt;</span> show
+<span style="color: #ff0000">&gt;</span><span style="color: #ff5f00">&gt;</span><span style="color: #ff8700">&gt;</span> This contact is pending
+  <span style="color: #0087ff">-</span> Name           | Alice
+  <span style="color: #0087ff">-</span> Server
+  <span style="color: #0087ff">-</span> Generation     | 0
+  <span style="color: #0087ff">-</span> Public key     | 0000000000000000000000000000000000000000000000000000000000000000
+  <span style="color: #0087ff">-</span> Identity key   | 0000000000000000000000000000000000000000000000000000000000000000
+  <span style="color: #0087ff">-</span> Client version | 0</div>
+
+<p>Once the key exchange has been completed, messages can be exchanged. <b>Messages are ephemeral.</b> Pond is only software and cannot force the recipient of a message not to retain it, but <b>it is the social norm, and the default in the software, that messages are permanently erased a week from receipt</b>.</p>
+
+<p>In order to send a message, select a contact as the current object and run the <tt>compose</tt> command. Vim will start to let you enter the message. When you save and quit from Vim (by pressing escape and then <tt>ZZ</tt>) the prompt will have changed because the draft message is now the current object.</p>
+
+<p>Since the type of the current object has changed, so will the set of applicable commands. Running help will show the commands that can now be used.</p>
+
+<div class="cli"><span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Created new draft: <span style="color: #00d7ff">u3u</span>
+<span style="color: #af00ff">&gt;</span><span style="color: #af5fff">&gt;</span><span style="color: #af87ff">&gt;</span> Message using 67 of 15758 bytes
+<span style="color: #bcbcbc">draft</span>/<span style="color: #00d7ff">u3u</span><span style="color: #af00ff">&gt;</span> help
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> These commands operate on the current object:
+
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> attach &lt;filename&gt;  Attach a file to the current draft
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> close              Close currently opened object
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> delete             Delete a message or contact
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> edit               Edit the draft message
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> remove &lt;number&gt;    Remove an attachment or detachment from a draft message
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> send               Send the current draft
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> show               Show the current object
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> upload &lt;filename&gt;  Upload a file to home server and include key in current draft</div>
+
+<p>When typing and attaching files, you'll see that the size counter changes. Pond messages are always a fixed size in order to make them indistinguishable. But while a short message can always be padded out to the correct size, a long message cannot always be compressed down to fit. While it's unlikely that you'll hit the limit while typing, attachments can quickly balloon the size of a message.</p>
+
+<p>In order to attach a file to a message, use the <tt>attach</tt> command. If the file is small enough then it'll be included in the message directly. Otherwise you'll be prompted to either save an encrypted version of the file, or to upload the file. These are both methods where encryption is used to separate the bulk transfer of the file from from the security of that transfer. By encrypting the file, the problem of securing the transfer is reduced to the problem of securing the encryption key, and the encryption key is small enough to fit in the Pond message. The bulk transfer is called a &ldquo;detachment&rdquo;.</p>
+
+<p>By opting to save an encrypted version of the file, you are taking on the job of getting the encrypted file to the recipient yourself. For huge files, this may be the only method. Perhaps you'll put the file on a USB stick and physically hand it to them.</p>
+
+<p>For modest sized detachments (up to a few megabytes - i.e. something that you might attach to an email), you can upload it to your Pond server. The advantage of this is that the upload will occur over Tor and that it's convenient. Your Pond server will have a limit on the amount that it'll store for you however and be aware that the upload is visible to anyone watching your network connection. The contents of the upload are hidden, of course, but the rough size of the file can be observed during the transfer. Likewise, the rough size of the file can be observed when the recipient downloads it.</p>
+
+<p>&nbsp;</p>
+
+<p>When you send a message, it'll appear in your outbox with a red dot. Hit enter to see Pond's state, including the outbox:</p>
+
+<div class="cli"><span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Created new outbox entry <span style="color: #00d7ff">r7p</span>
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> There is one message waiting to be transmitted
+<span style="color: #bcbcbc">outbox</span>/<span style="color: #00d7ff">r7p</span><span style="color: #af00ff">&gt;</span>
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Outbox
+ <span style="color: red">*</span> Alice | Dec 26 17:18 (<span style="color: #00d7ff">r7p</span>)
+
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> Contacts
+   Alice                (<span style="color: #00d7ff">qu6</span>)
+
+<span style="color: #0000ff">&gt;</span><span style="color: #005fff">&gt;</span><span style="color: #0087ff">&gt;</span> There is one message waiting to be transmitted</div>
+
+<p>The red dot means that the message hasn't been transmitted yet. Pond doesn't transmit messages as needed because that would disclose when messages were being sent. Instead it transmits messages at random, whether there's anything to be sent or not. When there's a real message pending, it has to wait until the next randomly timed slot, which could be many minutes.</p>
+
+<p>Once the message has been transmitted, the dot will turn yellow. The dot will turn green when the message has been &ldquo;acknowledged&rdquo;. An acknowledgment occurs either when a reply to the message is received, or a special acknowledgment message is received (which is actually just an empty reply). Acknowledgments exist because it's often difficult to know whether a message has been read and replying to every one can be awkward. An acknowledgment is never sent automatically, but you should expect to acknowledge (or reply to) every message that you receive.</p>
+
+</div>
