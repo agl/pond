@@ -12,7 +12,7 @@ func (c *cliClient) createErasureStorage(pw string, stateFile *disk.StateFile) e
 
 	present := tpm.Present()
 	if !present {
-		c.Printf("%s\n", termErrPrefix, tpmNotPresentMsg)
+		c.Printf("%s %s\n", termErrPrefix, tpmNotPresentMsg)
 	} else {
 		c.Printf("%s %s\n", termInfoPrefix, tpmPresentMsg)
 	}

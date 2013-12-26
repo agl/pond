@@ -38,7 +38,7 @@ var cliCommands = []cliCommand{
 	{"clear", clearCommand{}, "Clear terminal", 0},
 	{"close", closeCommand{}, "Close currently opened object", contextDraft | contextInbox | contextOutbox | contextContact},
 	{"compose", composeCommand{}, "Compose a new message", contextContact},
-	{"contacts", contactsCommand{}, "Show all known contacts", 0},
+	{"contacts", showContactsCommand{}, "Show all known contacts", 0},
 	{"delete", deleteCommand{}, "Delete a message or contact", contextContact | contextDraft},
 	{"download", downloadCommand{}, "Download a numbered detachment to disk", contextInbox},
 	{"drafts", showDraftsSummaryCommand{}, "Show drafts", 0},
@@ -67,7 +67,6 @@ type ackCommand struct{}
 type clearCommand struct{}
 type closeCommand struct{}
 type composeCommand struct{}
-type contactsCommand struct{}
 type deleteCommand struct{}
 type editCommand struct{}
 type logCommand struct{}
@@ -75,6 +74,7 @@ type quitCommand struct{}
 type replyCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
+type showContactsCommand struct{}
 type showDraftsSummaryCommand struct{}
 type showIdentityCommand struct{}
 type showInboxSummaryCommand struct{}
