@@ -1,8 +1,10 @@
 package main
 
 import (
-  "github.com/agl/pond/client/tpm"
-  "github.com/agl/pond/client/disk"
+	"fmt"
+
+	"github.com/agl/pond/client/disk"
+	"github.com/agl/pond/client/tpm"
 )
 
 func (c *cliClient) createErasureStorage(pw string, stateFile *disk.StateFile) error {
