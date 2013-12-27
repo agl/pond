@@ -373,11 +373,16 @@ func (i *cliInput) processInput(commandsChan chan<- cliTerminalLine) {
 }
 
 func (input *cliInput) showHelp(context inputContext, showAll bool) {
-	examples := make([]string, len(cliCommands))
-	maxLen := 0
-	hasContextCommands := false
+	contextTable := cliTable{
+		heading:      "These commands operate on the current object:",
+		noIndicators: true,
+	}
+	globalTable := cliTable{
+		heading:      "These commands are global:",
+		noIndicators: true,
+	}
 
-	for i, cmd := range cliCommands {
+	for _, cmd := range cliCommands {
 		if !showAll && cmd.context != 0 && context&cmd.context == 0 {
 			continue
 		}
@@ -391,45 +396,21 @@ func (input *cliInput) showHelp(context inputContext, showAll bool) {
 				line += " <" + strings.ToLower(prototype.Field(j).Name) + ">"
 			}
 		}
-		if l := len(line); l > maxLen {
-			maxLen = l
+
+		table := &globalTable
+		if context&cmd.context != 0 {
+			table = &contextTable
 		}
-		examples[i] = line
-		if !showAll && context&cmd.context != 0 {
-			hasContextCommands = true
-		}
+		table.rows = append(table.rows, cliRow{
+			cols: []string{line, cmd.desc},
+		})
 	}
 
-	printCommand := func(i int, cmd *cliCommand) {
-		line := examples[i]
-		numSpaces := 1 + (maxLen - len(line))
-		for j := 0; j < numSpaces; j++ {
-			line += " "
-		}
-		line += cmd.desc
-		fmt.Fprintf(input.term, "%s %s\n", termInfoPrefix, line)
+	widths := globalTable.UpdateWidths(contextTable.UpdateWidths(nil))
+	if len(contextTable.rows) > 0 {
+		contextTable.WriteToWithWidths(input.term, widths)
 	}
-
-	if hasContextCommands {
-		fmt.Fprintf(input.term, "%s These commands operate on the current object:\n\n", termInfoPrefix)
-
-		for i, cmd := range cliCommands {
-			if context&cmd.context == 0 {
-				continue
-			}
-			printCommand(i, &cmd)
-		}
-
-		fmt.Fprintf(input.term, "\n%s These commands are global:\n\n", termInfoPrefix)
-	}
-
-	for i, cmd := range cliCommands {
-		if !showAll && cmd.context != 0 {
-			continue
-		}
-
-		printCommand(i, &cmd)
-	}
+	globalTable.WriteToWithWidths(input.term, widths)
 }
 
 func pathComplete(path string) (completedPath string, isComplete, ok bool) {
