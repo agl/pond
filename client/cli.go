@@ -475,10 +475,18 @@ func (c *cliClient) processRevocation(by *Contact) {
 // unsealPendingMessages is run once a key exchange with a contact has
 // completed and unseals any previously unreadable messages from that contact.
 func (c *cliClient) unsealPendingMessages(contact *Contact) {
+	var needToFilter bool
+
 	for _, msg := range c.inbox {
 		if msg.message == nil && msg.from == contact.id {
-			c.unsealMessage(msg, contact)
+			if !c.unsealMessage(msg, contact) {
+				needToFilter = true
+			}
 		}
+	}
+
+	if needToFilter {
+		c.dropSealedMessagesFrom(contact)
 	}
 }
 

@@ -3113,18 +3113,26 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 // unsealPendingMessages is run once a key exchange with a contact has
 // completed and unseals any previously unreadable messages from that contact.
 func (c *guiClient) unsealPendingMessages(contact *Contact) {
+	var needToFilter = true
+
 	for _, msg := range c.inbox {
 		if msg.message == nil && msg.from == contact.id {
 			if !c.unsealMessage(msg, contact) || len(msg.message.Body) == 0 {
 				c.inboxUI.Remove(msg.id)
+				needToFilter = true
 				continue
 			}
 			subline := time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 			c.inboxUI.SetSubline(msg.id, subline)
 			c.inboxUI.SetIndicator(msg.id, indicatorBlue)
-			c.updateWindowTitle()
 		}
 	}
+
+	if needToFilter {
+		c.dropSealedMessagesFrom(contact)
+	}
+
+	c.updateWindowTitle()
 }
 
 func (c *guiClient) processPANDAUpdateUI(update pandaUpdate) {

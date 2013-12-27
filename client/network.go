@@ -526,6 +526,10 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 		from.supportedVersion = *msg.SupportedVersion
 	}
 
+	if len(msg.Body) == 0 {
+		return false
+	}
+
 	from.kxsBytes = nil
 	inboxMsg.message = msg
 	inboxMsg.sealed = nil

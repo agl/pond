@@ -981,6 +981,19 @@ func (c *client) deleteInboxMsg(id uint64) {
 	c.inbox = newInbox
 }
 
+// dropSealedMessagesFrom removes all sealed messages from the given contact
+// from the inbox.
+func (c *client) dropSealedMessagesFrom(contact *Contact) {
+	newInbox := make([]*InboxMessage, 0, len(c.inbox))
+	for _, inboxMsg := range c.inbox {
+		if inboxMsg.from == contact.id && len(inboxMsg.sealed) > 0 {
+			continue
+		}
+		newInbox = append(newInbox, inboxMsg)
+	}
+	c.inbox = newInbox
+}
+
 func (c *client) deleteOutboxMsg(id uint64) {
 	newOutbox := make([]*queuedMessage, 0, len(c.outbox))
 	for _, outboxMsg := range c.outbox {
