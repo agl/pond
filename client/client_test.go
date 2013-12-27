@@ -50,11 +50,29 @@ func NewTestServer(t *testing.T) (*TestServer, error) {
 	if server.stateDir, err = ioutil.TempDir("", "pond-client-test"); err != nil {
 		return nil, err
 	}
+
+	// To ensure that the server dies when the test exits, we install a
+	// socketpair into the child process and set a command line flag to
+	// tell the server to exit if it sees EOF on that socket. Since we hold
+	// the other end in this process, the kernel will close it for us if we
+	// die.
+	pipeFds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return nil, err
+	}
+	syscall.CloseOnExec(pipeFds[0])
+	syscall.CloseOnExec(pipeFds[1])
+
+	serverLifeline := os.NewFile(uintptr(pipeFds[0]), "server lifeline fd")
+	defer serverLifeline.Close()
+
 	server.cmd = exec.Command("../server/server",
 		"--init",
 		"--base-directory", server.stateDir,
 		"--port", "0",
+		"--lifeline-fd", "3",
 	)
+	server.cmd.ExtraFiles = []*os.File{serverLifeline}
 	rawStderr, err := server.cmd.StderrPipe()
 	if err != nil {
 		return nil, err

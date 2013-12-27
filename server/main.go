@@ -21,10 +21,13 @@ import (
 	"github.com/agl/pond/transport"
 )
 
-var baseDirectory *string = flag.String("base-directory", "", "directory to store server state and config")
-var initFlag *bool = flag.Bool("init", false, "if true, setup a new base directory")
-var port *int = flag.Int("port", 16333, "TCP port to use when setting up a new base directory")
-var makeAnnounce *string = flag.String("make-announce", "", "If set, the location of a text file containing an announcement message which will be written to stdout in binary.")
+var (
+	baseDirectory *string = flag.String("base-directory", "", "directory to store server state and config")
+	initFlag      *bool   = flag.Bool("init", false, "if true, setup a new base directory")
+	port          *int    = flag.Int("port", 16333, "TCP port to use when setting up a new base directory")
+	makeAnnounce  *string = flag.String("make-announce", "", "If set, the location of a text file containing an announcement message which will be written to stdout in binary.")
+	lifelineFd    *int    = flag.Int("lifeline-fd", -1, "If set, the server will exit when this descriptor returns EOF")
+)
 
 const configFilename = "config"
 const identityFilename = "identity"
@@ -132,6 +135,15 @@ func main() {
 	log.Printf("Started. Listening on port %d with identity %s", listener.Addr().(*net.TCPAddr).Port, identityString)
 
 	server := NewServer(*baseDirectory, config.GetAllowRegistration())
+
+	if *lifelineFd > -1 {
+		lifeline := os.NewFile(uintptr(*lifelineFd), "lifeline")
+		go func() {
+			var buf [1]byte
+			lifeline.Read(buf[:])
+			os.Exit(255)
+		}()
+	}
 
 	for {
 		conn, err := listener.Accept()
