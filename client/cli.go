@@ -481,12 +481,17 @@ func (c *cliClient) unsealPendingMessages(contact *Contact) {
 		if msg.message == nil && msg.from == contact.id {
 			if !c.unsealMessage(msg, contact) {
 				needToFilter = true
+				continue
+			}
+			if len(msg.message.Body) == 0 {
+				needToFilter = true
+				continue
 			}
 		}
 	}
 
 	if needToFilter {
-		c.dropSealedMessagesFrom(contact)
+		c.dropSealedAndAckMessagesFrom(contact)
 	}
 }
 
@@ -521,6 +526,10 @@ func (c *cliClient) addRevocationMessageUI(msg *queuedMessage) {
 }
 
 func (c *cliClient) removeContactUI(contact *Contact) {
+}
+
+func (c *cliClient) logEventUI(contact *Contact, event Event) {
+	c.Printf("%s While processing message from %s: %s\n", termWarnPrefix, terminalEscape(contact.name, false), terminalEscape(event.msg, false))
 }
 
 func (c *cliClient) setCurrentObject(o interface{}) {
@@ -1766,6 +1775,20 @@ func (c *cliClient) showContact(contact *Contact) {
 		},
 	}
 	table.WriteTo(c.term)
+
+	if len(contact.events) > 0 {
+		table = cliTable{
+			noIndicators: true,
+			heading:      "Events for this contact",
+		}
+		for _, event := range contact.events {
+			table.rows = append(table.rows,
+				cliRow{cols: []string{event.t.Format(logTimeFormat), terminalEscape(event.msg, false)}},
+			)
+		}
+
+		table.WriteTo(c.term)
+	}
 }
 
 func NewCLIClient(stateFilename string, rand io.Reader, testing, autoFetch bool) *cliClient {

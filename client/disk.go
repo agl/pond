@@ -152,6 +152,15 @@ func (c *client) unmarshal(state *disk.State) error {
 		if cont.SupportedVersion != nil {
 			contact.supportedVersion = *cont.SupportedVersion
 		}
+
+		contact.events = make([]Event, 0, len(cont.Events))
+		for _, evt := range cont.Events {
+			event := Event{
+				t:   time.Unix(*evt.Time, 0),
+				msg: *evt.Message,
+			}
+			contact.events = append(contact.events, event)
+		}
 	}
 
 	now := c.Now()
@@ -280,6 +289,16 @@ func (c *client) marshal() []byte {
 			cont.PreviousTags = append(cont.PreviousTags, &disk.Contact_PreviousTag{
 				Tag:     prevTag.tag,
 				Expired: proto.Int64(prevTag.expired.Unix()),
+			})
+		}
+		cont.Events = make([]*disk.Contact_Event, 0, len(contact.events))
+		for _, event := range contact.events {
+			if time.Since(event.t) > messageLifetime {
+				continue
+			}
+			cont.Events = append(cont.Events, &disk.Contact_Event{
+				Time:    proto.Int64(event.t.Unix()),
+				Message: proto.String(event.msg),
 			})
 		}
 		contacts = append(contacts, cont)

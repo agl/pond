@@ -137,6 +137,7 @@ type Contact struct {
 	TheirCurrentPublic  []byte                 `protobuf:"bytes,14,opt,name=their_current_public" json:"their_current_public,omitempty"`
 	Ratchet             *RatchetState          `protobuf:"bytes,20,opt,name=ratchet" json:"ratchet,omitempty"`
 	PreviousTags        []*Contact_PreviousTag `protobuf:"bytes,17,rep,name=previous_tags" json:"previous_tags,omitempty"`
+	Events              []*Contact_Event       `protobuf:"bytes,22,rep,name=events" json:"events,omitempty"`
 	IsPending           *bool                  `protobuf:"varint,15,opt,name=is_pending,def=0" json:"is_pending,omitempty"`
 	XXX_unrecognized    []byte                 `json:"-"`
 }
@@ -287,6 +288,13 @@ func (this *Contact) GetPreviousTags() []*Contact_PreviousTag {
 	return nil
 }
 
+func (this *Contact) GetEvents() []*Contact_Event {
+	if this != nil {
+		return this.Events
+	}
+	return nil
+}
+
 func (this *Contact) GetIsPending() bool {
 	if this != nil && this.IsPending != nil {
 		return *this.IsPending
@@ -316,6 +324,30 @@ func (this *Contact_PreviousTag) GetExpired() int64 {
 		return *this.Expired
 	}
 	return 0
+}
+
+type Contact_Event struct {
+	Time             *int64  `protobuf:"varint,1,req,name=time" json:"time,omitempty"`
+	Message          *string `protobuf:"bytes,2,req,name=message" json:"message,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (this *Contact_Event) Reset()         { *this = Contact_Event{} }
+func (this *Contact_Event) String() string { return proto.CompactTextString(this) }
+func (*Contact_Event) ProtoMessage()       {}
+
+func (this *Contact_Event) GetTime() int64 {
+	if this != nil && this.Time != nil {
+		return *this.Time
+	}
+	return 0
+}
+
+func (this *Contact_Event) GetMessage() string {
+	if this != nil && this.Message != nil {
+		return *this.Message
+	}
+	return ""
 }
 
 type RatchetState struct {

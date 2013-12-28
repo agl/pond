@@ -259,6 +259,9 @@ type UI interface {
 	addRevocationMessageUI(msg *queuedMessage)
 	// removeContactUI removes a contact from the UI.
 	removeContactUI(contact *Contact)
+	// logEventUI is called when an exceptional event has been logged for
+	// the given contact.
+	logEventUI(contact *Contact, event Event)
 	// mainUI starts the main interface.
 	mainUI()
 }
@@ -452,6 +455,8 @@ type Contact struct {
 	// pandaResult contains an error message in the event that a PANDA key
 	// exchange failed.
 	pandaResult string
+	// events contains a log of important events relating to this contact.
+	events []Event
 
 	// Members for the old ratchet.
 	lastDHPrivate        [32]byte
@@ -463,6 +468,14 @@ type Contact struct {
 	ratchet *ratchet.Ratchet
 
 	cliId cliId
+}
+
+// Event represents a log entry. This does not apply to the global log, which
+// is quite chatty, but rather to significant events related to a given
+// contact. These events are surfaced in the UI and recorded in the statefile.
+type Event struct {
+	t   time.Time
+	msg string
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -883,6 +896,17 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOld
 	return nil
 }
 
+// logEvent records an exceptional event relating to the given contact.
+func (c *client) logEvent(contact *Contact, msg string) {
+	event := Event{
+		t:   time.Now(),
+		msg: msg,
+	}
+	contact.events = append(contact.events, event)
+	c.log.Errorf("While processing message from %s: %s", contact.name, msg)
+	c.ui.logEventUI(contact, event)
+}
+
 func (c *client) randBytes(buf []byte) {
 	if _, err := io.ReadFull(c.rand, buf); err != nil {
 		panic(err)
@@ -981,12 +1005,14 @@ func (c *client) deleteInboxMsg(id uint64) {
 	c.inbox = newInbox
 }
 
-// dropSealedMessagesFrom removes all sealed messages from the given contact
-// from the inbox.
-func (c *client) dropSealedMessagesFrom(contact *Contact) {
+// dropSealedAndAckMessagesFrom removes all sealed or pure-ack messages from
+// the given contact, from the inbox.
+func (c *client) dropSealedAndAckMessagesFrom(contact *Contact) {
 	newInbox := make([]*InboxMessage, 0, len(c.inbox))
 	for _, inboxMsg := range c.inbox {
-		if inboxMsg.from == contact.id && len(inboxMsg.sealed) > 0 {
+		if inboxMsg.from == contact.id &&
+			(len(inboxMsg.sealed) > 0 ||
+				(inboxMsg.message != nil && len(inboxMsg.message.Body) == 0)) {
 			continue
 		}
 		newInbox = append(newInbox, inboxMsg)

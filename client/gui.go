@@ -1799,6 +1799,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	if contact.isPending && len(contact.pandaKeyExchange) == 0 && len(contact.pandaResult) == 0 {
 		return c.newContactUI(contact)
 	}
+	c.contactsUI.SetIndicator(id, indicatorNone)
 
 	entries := []nvEntry{
 		{"NAME", contact.name},
@@ -1825,6 +1826,19 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		var out bytes.Buffer
 		pem.Encode(&out, &pem.Block{Bytes: contact.kxsBytes, Type: keyExchangePEM})
 		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
+	}
+
+	if len(contact.events) > 0 {
+		eventsText := ""
+		for i, event := range contact.events {
+			if i > 0 {
+				eventsText += "\n"
+			}
+			eventsText += event.t.Format(logTimeFormat)
+			eventsText += ": "
+			eventsText += event.msg
+		}
+		entries = append(entries, nvEntry{"EVENTS", eventsText})
 	}
 
 	right := Grid{
@@ -3129,7 +3143,7 @@ func (c *guiClient) unsealPendingMessages(contact *Contact) {
 	}
 
 	if needToFilter {
-		c.dropSealedMessagesFrom(contact)
+		c.dropSealedAndAckMessagesFrom(contact)
 	}
 
 	c.updateWindowTitle()
@@ -3169,6 +3183,10 @@ func (c *guiClient) addRevocationMessageUI(msg *queuedMessage) {
 
 func (c *guiClient) removeContactUI(contact *Contact) {
 	c.contactsUI.Remove(contact.id)
+}
+
+func (c *guiClient) logEventUI(contact *Contact, event Event) {
+	c.contactsUI.SetIndicator(contact.id, indicatorBlue)
 }
 
 func (c *guiClient) logUI() interface{} {

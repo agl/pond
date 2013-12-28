@@ -64,6 +64,12 @@ message Contact {
 	}
 	repeated PreviousTag previous_tags = 17;
 
+	message Event {
+		required int64 time = 1;
+		required string message = 2;
+	}
+	repeated Event events = 22;
+
 	optional bool is_pending = 15 [ default = false ];
 }
 

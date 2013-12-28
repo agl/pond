@@ -379,7 +379,7 @@ func (c *client) processFetch(m NewMessage) {
 		}
 	}
 	if !ok {
-		c.log.Errorf("Failed to open group signature")
+		c.log.Errorf("Failed to open group signature!")
 		return
 	}
 
@@ -411,7 +411,7 @@ NextCandidate:
 	}
 
 	if len(f.Message) < box.Overhead+24 {
-		c.log.Errorf("Message too small to process from %s", from.name)
+		c.logEvent(from, "Message too small to process")
 		return
 	}
 
@@ -422,8 +422,10 @@ NextCandidate:
 		sealed:       f.Message,
 	}
 
-	if !from.isPending && !c.unsealMessage(inboxMsg, from) {
-		return
+	if !from.isPending {
+		if !c.unsealMessage(inboxMsg, from) || len(inboxMsg.message.Body) == 0 {
+			return
+		}
 	}
 
 	c.inbox = append(c.inbox, inboxMsg)
@@ -454,26 +456,26 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	plaintext, ok := decryptMessage(sealed, from)
 
 	if !ok {
-		c.log.Errorf("Failed to decrypt message from %s", from.name)
+		c.logEvent(from, "Failed to decrypt message")
 		return false
 	}
 
 	if len(plaintext) < 4 {
-		c.log.Errorf("Plaintext too small to process from %s", from.name)
+		c.logEvent(from, "Plaintext too small to process")
 		return false
 	}
 
 	mLen := int(binary.LittleEndian.Uint32(plaintext[:4]))
 	plaintext = plaintext[4:]
 	if mLen < 0 || mLen > len(plaintext) {
-		c.log.Errorf("Plaintext length incorrect from %s: %d", from.name, mLen)
+		c.logEvent(from, fmt.Sprintf("Plaintext length incorrect: %d", mLen))
 		return false
 	}
 	plaintext = plaintext[:mLen]
 
 	msg := new(pond.Message)
 	if err := proto.Unmarshal(plaintext, msg); err != nil {
-		c.log.Errorf("Failed to parse mesage from %s: %s", from.name, err)
+		c.logEvent(from, "Failed to parse message: "+err.Error())
 		return false
 	}
 
@@ -490,7 +492,7 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 
 	if from.ratchet == nil {
 		if l := len(msg.MyNextDh); l != len(from.theirCurrentDHPublic) {
-			c.log.Errorf("Message from %s with bad DH length %d", from.name, l)
+			c.logEvent(from, fmt.Sprintf("Bad Diffie-Hellman value length: %d", l))
 			return false
 		}
 
@@ -524,10 +526,6 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 
 	if msg.SupportedVersion != nil {
 		from.supportedVersion = *msg.SupportedVersion
-	}
-
-	if len(msg.Body) == 0 {
-		return false
 	}
 
 	from.kxsBytes = nil
