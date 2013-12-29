@@ -1,7 +1,9 @@
 package system
 
 import (
+	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +18,19 @@ import (
 // unmounts it on exit (assuming that we don't crash). It would be nice if we
 // could open a file descriptor to the directory and then lazy unmount it.
 // However, Darwin doesn't appear to have lazy unmount, nor openat().
+
+// IsSafe checks to see whether the current OS appears to be safe. Specifically
+// it checks that any swap is encrypted.
+func IsSafe() error {
+	sysctlOutput, err := exec.Command("sysctl", "vm.swapusage").CombinedOutput()
+	if err != nil {
+		return errors.New("system: error when executing sysctl vm.swapusage: " + err.Error())
+	}
+	if !bytes.Contains(sysctlOutput, []byte("(encrypted)")) {
+		return errors.New("swap does not appear to be encrypted")
+	}
+	return nil
+}
 
 var (
 	// safeTempDir contains the name of a directory that is a RAM disk
