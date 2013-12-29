@@ -62,6 +62,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -72,6 +73,7 @@ import (
 	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
+	"code.google.com/p/go.crypto/nacl/secretbox"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/ed25519/extra25519"
@@ -231,7 +233,10 @@ type UI interface {
 	ShutdownAndSuspend() error
 	createPassphraseUI() (string, error)
 	createErasureStorage(pw string, stateFile *disk.StateFile) error
-	createAccountUI() error
+	// createAccountUI allows the user to either create a new account or to
+	// import from a entombed statefile. It returns whether an import
+	// occured and an error.
+	createAccountUI(stateFile *disk.StateFile, pw string) (bool, error)
 	keyPromptUI(stateFile *disk.StateFile) error
 	processFetch(msg *InboxMessage)
 	processServerAnnounce(announce *InboxMessage)
@@ -686,7 +691,7 @@ func (c *client) loadUI() error {
 		},
 	}
 
-	var newAccount bool
+	var newAccount, imported bool
 	var err error
 	if c.stateLock, err = stateFile.Lock(false /* don't create */); err == nil && c.stateLock == nil {
 		c.ui.errorUI("State file locked by another process. Waiting for lock.", false)
@@ -734,10 +739,10 @@ func (c *client) loadUI() error {
 			return err
 		}
 		c.ui.createErasureStorage(pw, stateFile)
-		if err := c.ui.createAccountUI(); err != nil {
+		imported, err = c.ui.createAccountUI(stateFile, pw)
+		if err != nil {
 			return err
 		}
-		newAccount = true
 	} else {
 		// First try with zero key.
 		err := c.loadState(stateFile, "")
@@ -757,7 +762,7 @@ func (c *client) loadUI() error {
 		}
 	}
 
-	if newAccount {
+	if newAccount && !imported {
 		c.stateLock, err = stateFile.Lock(true /* create */)
 		if err != nil {
 			err = errors.New("Failed to create state file: " + err.Error())
@@ -1200,4 +1205,110 @@ func openAttachment(path string) (contents []byte, size int64, err error) {
 		size = fi.Size()
 	}
 	return
+}
+
+// entomb encrypts and *destroys* the statefile. The encrypted statefile is
+// written to tombFile (with tombPath). The function log will be called during
+// the process to give status updates. It returns the random key of the
+// encrypted statefile and whether the process was successful. If unsuccessful,
+// the original statefile will not be destroyed.
+func (c *client) entomb(tombPath string, tombFile *os.File, log func(string, ...interface{})) (keyHex *[32]byte, ok bool) {
+	log("Emtombing statefile to %s\n", tombPath)
+	log("Stopping network processing...\n")
+	if c.fetchNowChan != nil {
+		close(c.fetchNowChan)
+	}
+	log("Stopping active key exchanges...\n")
+	for _, contact := range c.contacts {
+		if contact.pandaShutdownChan != nil {
+			close(contact.pandaShutdownChan)
+		}
+	}
+	log("Serialising state...\n")
+	stateBytes := c.marshal()
+
+	var key [32]byte
+	c.randBytes(key[:])
+	var nonce [24]byte
+	log("Encrypting...\n")
+	encrypted := secretbox.Seal(nil, stateBytes, &nonce, &key)
+
+	log("Writing...\n")
+	if _, err := tombFile.Write(encrypted); err != nil {
+		log("Error writing: %s\n", err)
+		return nil, false
+	}
+	log("Syncing...\n")
+	if err := tombFile.Sync(); err != nil {
+		log("Error syncing: %s\n", err)
+		return nil, false
+	}
+	if err := tombFile.Close(); err != nil {
+		log("Error closing: %s\n", err)
+		return nil, false
+	}
+
+	readBack, err := ioutil.ReadFile(tombPath)
+	if err != nil {
+		log("Error rereading: %s\n", err)
+		return nil, false
+	}
+	if !bytes.Equal(readBack, encrypted) {
+		log("Contents of tomb file incorrect\n")
+		return nil, false
+	}
+
+	log("The ephemeral key is: %x\n", key)
+	log("You must write the ephemeral key down now! Store it somewhat erasable!\n")
+
+	log("Erasing statefile... ")
+	c.writerChan <- disk.NewState{stateBytes, false, true /* destruct */}
+	<-c.writerDone
+	log("done\n")
+
+	return &key, true
+}
+
+// importTombFile decrypts a file with the given path, using a hex-encoded key
+// and loads the client state from the result.
+func (c *client) importTombFile(stateFile *disk.StateFile, keyHex, path string) error {
+	keyBytes, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return err
+	}
+
+	var key [32]byte
+	var nonce [24]byte
+	if len(keyBytes) != len(key) {
+		return fmt.Errorf("Incorrect key length: %d (want %d)", len(keyBytes), len(key))
+	}
+	copy(key[:], keyBytes)
+
+	tombBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	plaintext, ok := secretbox.Open(nil, tombBytes, &nonce, &key)
+	if !ok {
+		return errors.New("Incorrect key")
+	}
+
+	c.stateLock, err = stateFile.Lock(true /* create */)
+	if c.stateLock == nil && err == nil {
+		return errors.New("Output statefile is locked.")
+	}
+	if err != nil {
+		return err
+	}
+
+	writerChan := make(chan disk.NewState)
+	writerDone := make(chan struct{})
+	go stateFile.StartWriter(writerChan, writerDone)
+
+	writerChan <- disk.NewState{State: plaintext}
+	close(writerChan)
+	<-writerDone
+
+	return nil
 }

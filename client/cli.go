@@ -391,7 +391,7 @@ func (c *cliClient) createPassphraseUI() (string, error) {
 	return "", nil
 }
 
-func (c *cliClient) createAccountUI() error {
+func (c *cliClient) createAccountUI(stateFile *disk.StateFile, pw string) (bool, error) {
 	defaultServer := msgDefaultServer
 	if c.dev {
 		defaultServer = msgDefaultDevServer
@@ -403,7 +403,7 @@ func (c *cliClient) createAccountUI() error {
 	for {
 		line, err := c.term.ReadLine()
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(line) == 0 {
 			line = defaultServer
@@ -422,7 +422,7 @@ func (c *cliClient) createAccountUI() error {
 		break
 	}
 
-	return nil
+	return false, nil
 }
 
 func (c *cliClient) keyPromptUI(stateFile *disk.StateFile) error {

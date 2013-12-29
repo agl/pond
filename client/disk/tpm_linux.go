@@ -194,9 +194,30 @@ func (t *TPM) Write(key *[kdfKeyLen]byte, value *[erasureKeyLen]byte) error {
 	}
 
 	nvram.Index = t.index
-	if err := nvram.Write(value[:]); err != nil {
+	return nvram.Write(value[:])
+}
+
+func (t *TPM) Destroy(key *[kdfKeyLen]byte) error {
+	ctx, err := t.getContext()
+	if err != nil {
+		return err
+	}
+	defer ctx.Close()
+
+	tpmPolicy, err := ctx.GetPolicy()
+	if err != nil {
+		return fmt.Errorf("failed to get TPM policy: %s", err)
+	}
+
+	if err := tpmPolicy.SetPassword(""); err != nil {
+		return fmt.Errorf("failed to set password on TPM policy: %s", err)
+	}
+
+	nvram, err := t.getNVRAM(ctx, key)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	nvram.Index = t.index
+	return nvram.Destroy();
 }

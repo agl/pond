@@ -368,6 +368,11 @@ type UIError struct {
 	err error
 }
 
+// UIInfo is used for passing information to the unittests.
+type UIInfo struct {
+	info string
+}
+
 // Events
 //
 // Events are received on the channel returned by Events().

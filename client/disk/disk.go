@@ -34,6 +34,8 @@ type ErasureStorage interface {
 	// Write requests that the given value be stored and the old value
 	// forgotten.
 	Write(key *[kdfKeyLen]byte, value *[erasureKeyLen]byte) error
+	// Destroy erases the NVRAM entry.
+	Destroy(key *[kdfKeyLen]byte) error
 }
 
 // erasureRegistry is a slice of functions, each of which can inspect a header
@@ -258,12 +260,50 @@ func (sf *StateFile) readOldStyle(b []byte) (*State, error) {
 type NewState struct {
 	State                []byte
 	RotateErasureStorage bool
+	Destruct             bool
 }
 
 func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 	for {
 		newState, ok := <-states
 		if !ok {
+			close(done)
+			return
+		}
+
+		if newState.Destruct {
+			sf.Log("disk: Destruct command received.")
+			var newMask [erasureKeyLen]byte
+			if _, err := io.ReadFull(sf.Rand, newMask[:]); err != nil {
+				panic(err)
+			}
+			if sf.Erasure != nil {
+				if err := sf.Erasure.Write(&sf.key, &newMask); err != nil {
+					sf.Log("disk: Error while clearing NVRAM: %s", err)
+				}
+				if err := sf.Erasure.Destroy(&sf.key); err != nil {
+					sf.Log("disk: Error while deleting NVRAM: %s", err)
+				}
+			}
+			out, _ := os.OpenFile(sf.Path, os.O_WRONLY, 0600)
+			if out != nil {
+				pos, _ := out.Seek(0, 2)
+				out.Seek(0, 0)
+				sf.Log("disk: writing %d zeros to statefile", pos)
+				zeros := make([]byte, pos)
+				if _, err := out.Write(zeros); err != nil {
+					sf.Log("disk: error from Write: %s", err)
+				}
+				if err := out.Sync(); err != nil {
+					sf.Log("disk: error from Sync: %s", err)
+				}
+				if err := out.Close(); err != nil {
+					sf.Log("disk: error from Close: %s", err)
+				}
+			}
+			if err := os.Remove(sf.Path); err != nil {
+				sf.Log("disk: error from Remove: %s", err)
+			}
 			close(done)
 			return
 		}
@@ -373,9 +413,7 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 			panic(err)
 		}
 		// Remove the old file.
-		if err := os.Remove(sf.Path + "~"); err != nil {
-			panic(err)
-		}
+		os.Remove(sf.Path + "~")
 
 		sf.lockFdMutex.Lock()
 		if sf.lockFd != nil {

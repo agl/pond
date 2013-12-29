@@ -664,6 +664,7 @@ func (ui *GTKUI) handle(action interface{}) {
 
 	case UIError:
 	case UIState:
+	case UIInfo:
 		// for testing.
 	default:
 		panic("unknown action")

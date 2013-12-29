@@ -32,7 +32,7 @@ func (c *client) save() {
 		c.lastErasureStorageTime = now
 	}
 	serialized := c.marshal()
-	c.writerChan <- disk.NewState{serialized, rotateErasureStorage}
+	c.writerChan <- disk.NewState{serialized, rotateErasureStorage, false /* don't destruct */}
 }
 
 func (c *client) unmarshal(state *disk.State) error {

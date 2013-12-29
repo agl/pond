@@ -135,6 +135,7 @@ type TestGUI struct {
 	events         chan interface{}
 	signal         chan chan bool
 	currentStateID int
+	info           string
 	t              *testing.T
 	text           map[string]string
 	combos         map[string][]string
@@ -226,6 +227,8 @@ ReadActions:
 				ui.currentStateID = action.stateID
 			case UIError:
 				uierr = action.err
+			case UIInfo:
+				ui.info = action.info
 			case SetText:
 				ui.text[action.name] = action.text
 			case SetTextView:
@@ -2308,5 +2311,73 @@ func TestMergedACKs(t *testing.T) {
 		if msg.acked.IsZero() {
 			t.Errorf("Unacked message in client1's outbox.")
 		}
+	}
+}
+
+func TestEntombing(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	// Send a message so that we can be sure that the state file was
+	// correctly recovered.
+	sendMessage(client1, "client2", "foo1")
+	fetchMessage(client2)
+
+	// Emtomb client1.
+	client1.gui.events <- Click{
+		name: client1.clientUI.entries[0].boxName,
+	}
+	client1.AdvanceTo(uiStateShowIdentity)
+
+	client1.gui.events <- OpenResult{ok: true, path: filepath.Join(client1.stateDir, "statefile.tomb")}
+	client1.gui.events <- Click{name: "entomb"}
+	client1.AdvanceTo(uiStateEntomb)
+	client1.AdvanceTo(uiStateEntombComplete)
+
+	keyHex := client1.gui.info
+	client1.Reload()
+	client1.AdvanceTo(uiStateLoading)
+	client1.AdvanceTo(uiStateCreatePassphrase)
+	client1.gui.events <- Click{
+		name:    "next",
+		entries: map[string]string{"pw": ""},
+	}
+	client1.AdvanceTo(uiStateErasureStorage)
+	client1.gui.events <- Click{
+		name: "continue",
+	}
+
+	client1.AdvanceTo(uiStateCreateAccount)
+	client1.gui.events <- OpenResult{ok: true, path: filepath.Join(client1.stateDir, "statefile.tomb")}
+	client1.gui.events <- Click{
+		name:    "import",
+		entries: map[string]string{"tombkey": keyHex},
+	}
+	client1.AdvanceTo(uiStateMain)
+
+	if len(client1.outbox) != 1 {
+		t.Fatalf("No messages in outbox")
 	}
 }

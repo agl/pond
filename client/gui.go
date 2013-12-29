@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -75,6 +76,8 @@ const (
 	uiStatePANDAComplete
 	uiStateErasureStorage
 	uiStateTimerComplete
+	uiStateEntomb
+	uiStateEntombComplete
 )
 
 type guiClient struct {
@@ -817,43 +820,43 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 }
 
 func (c *guiClient) createPassphraseUI() (string, error) {
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Set Passphrase",
+	ui := Grid{
+		widgetBase: widgetBase{margin: 20},
+		rowSpacing: 5,
+		colSpacing: 5,
+		rows: [][]GridE{
+			{
+				{2, 1, Label{
+					widgetBase: widgetBase{font: "DejaVu Sans 30"},
+					text:       "Set Passphrase",
+				}},
 			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: msgCreatePassphrase,
-				wrap: 600,
+			{
+				{2, 1, Label{
+					widgetBase: widgetBase{
+						padding: 20,
+						font:    "DejaVu Sans 14",
+					},
+					text: msgCreatePassphrase,
+					wrap: 600,
+				}},
 			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Passphrase:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "pw"},
-						width:      60,
-						password:   true,
-					},
-				},
+			{
+				{1, 1, Label{
+					text:   "Passphrase:",
+					yAlign: 0.5,
+				}},
+				{1, 1, Entry{
+					widgetBase: widgetBase{name: "pw", hAlign: AlignStart, hExpand: true},
+					width:      60,
+					password:   true,
+				}},
 			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "next"},
-						text:       "Next",
-					},
-				},
+			{
+				{2, 1, Button{
+					widgetBase: widgetBase{name: "next", hAlign: AlignStart},
+					text:       "Next",
+				}},
 			},
 		},
 	}
@@ -888,49 +891,101 @@ func (c *guiClient) createPassphraseUI() (string, error) {
 	panic("unreachable")
 }
 
-func (c *guiClient) createAccountUI() error {
+func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didImport bool, err error) {
 	defaultServer := msgDefaultServer
 	if c.dev {
 		defaultServer = msgDefaultDevServer
 	}
 
-	ui := VBox{
-		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
-		children: []Widget{
-			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
-				text:       "Create Account",
+	ui := Grid{
+		widgetBase: widgetBase{margin: 20},
+		rowSpacing: 5,
+		colSpacing: 5,
+		rows: [][]GridE{
+			{
+				{2, 1, Label{
+					widgetBase: widgetBase{font: "DejaVu Sans 30"},
+					text:       "Create Account",
+				}},
 			},
-			Label{
-				widgetBase: widgetBase{
-					padding: 20,
-					font:    "DejaVu Sans 14",
-				},
-				text: msgCreateAccount + " If you want to use the default server, just click 'Create'.",
-				wrap: 600,
+			{
+				{2, 1, Label{
+					widgetBase: widgetBase{
+						padding: 20,
+						font:    "DejaVu Sans 14",
+					},
+					text: msgCreateAccount + " If you want to use the default server, just click 'Create'.",
+					wrap: 600,
+				}},
 			},
-			HBox{
-				spacing: 5,
-				children: []Widget{
-					Label{
-						text:   "Server:",
-						yAlign: 0.5,
-					},
-					Entry{
-						widgetBase: widgetBase{name: "server"},
-						width:      60,
-						text:       defaultServer,
-					},
-				},
+			{
+				{1, 1, Label{
+					text:   "Server:",
+					yAlign: 0.5,
+				}},
+				{1, 1, Entry{
+					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10},
+					width:      75,
+					text:       defaultServer,
+				}},
 			},
-			HBox{
-				widgetBase: widgetBase{padding: 40},
-				children: []Widget{
-					Button{
-						widgetBase: widgetBase{name: "create"},
-						text:       "Create",
+			{
+				{2, 1, Button{
+					widgetBase: widgetBase{name: "create", hAlign: AlignStart},
+					text:       "Create",
+				}},
+			},
+			{
+				{2, 1, VBox{
+					widgetBase: widgetBase{name: "vbox"},
+				}},
+			},
+			{
+				{2, 1, Grid{
+					widgetBase: widgetBase{vAlign: AlignEnd, vExpand: true},
+					rowSpacing: 5,
+					colSpacing: 5,
+					rows: [][]GridE{
+						{
+							{2, 1, Label{
+								widgetBase: widgetBase{font: "bold"},
+								text:       "Import entombed state file",
+							}},
+						},
+						{
+							{2, 1, Label{
+								text: "Rather than creating a new account, it's also possible to import an 'entombed' state file. This is used when moving Pond from one computer to another.",
+								wrap: 600,
+							}},
+						},
+						{
+							{1, 1, Label{
+								text:   "Key:",
+								yAlign: 0.5,
+							}},
+							{1, 1, Entry{
+								widgetBase: widgetBase{name: "tombkey", hAlign: AlignStart, hExpand: true},
+								width:      66,
+							}},
+						},
+						{
+							{1, 1, Button{
+								widgetBase: widgetBase{name: "tombfile", hAlign: AlignStart},
+								text:       "Select File",
+							}},
+							{1, 1, Button{
+								widgetBase: widgetBase{name: "import", hAlign: AlignStart, insensitive: true},
+								text:       "Import",
+							}},
+						},
+						{
+							{2, 1, Label{
+								widgetBase: widgetBase{name: "tomberror", foreground: colorRed},
+								wrap:       600,
+							}},
+						},
 					},
-				},
+				}},
 			},
 		},
 	}
@@ -941,12 +996,54 @@ func (c *guiClient) createAccountUI() error {
 	c.gui.Signal()
 
 	var spinnerCreated bool
+	var tombPath string
 	for {
-		click, ok := <-c.gui.Events()
+		event, ok := <-c.gui.Events()
 		if !ok {
 			c.ShutdownAndSuspend()
 		}
-		c.server = click.(Click).entries["server"]
+
+		if open, ok := event.(OpenResult); ok && open.ok {
+			tombPath = open.path
+			c.gui.Actions() <- Sensitive{name: "import", sensitive: true}
+			c.gui.Signal()
+			continue
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+
+		switch click.name {
+		case "tombfile":
+			c.gui.Actions() <- FileOpen{
+				save:     true,
+				title:    "Select path of entombed file",
+				filename: "statefile.tomb",
+				arg:      nil,
+			}
+			c.gui.Signal()
+		case "import":
+			if err := c.importTombFile(stateFile, click.entries["tombkey"], tombPath); err == nil {
+				err = c.loadState(stateFile, pw)
+			}
+			if err != nil {
+				c.gui.Actions() <- SetText{name: "tomberror", text: err.Error()}
+				c.gui.Actions() <- UIError{err}
+				c.gui.Signal()
+				continue
+			}
+
+			c.lastErasureStorageTime = time.Now()
+			return true, nil
+		case "create":
+			break
+		default:
+			continue
+		}
+
+		c.server = click.entries["server"]
 
 		c.gui.Actions() <- Sensitive{name: "server", sensitive: false}
 		c.gui.Actions() <- Sensitive{name: "create", sensitive: false}
@@ -954,20 +1051,18 @@ func (c *guiClient) createAccountUI() error {
 		const initialMessage = "Checking..."
 
 		if !spinnerCreated {
-			c.gui.Actions() <- Append{
+			c.gui.Actions() <- SetBoxContents{
 				name: "vbox",
-				children: []Widget{
-					HBox{
-						widgetBase: widgetBase{name: "statusbox"},
-						spacing:    10,
-						children: []Widget{
-							Spinner{
-								widgetBase: widgetBase{name: "spinner"},
-							},
-							Label{
-								widgetBase: widgetBase{name: "status"},
-								text:       initialMessage,
-							},
+				child: HBox{
+					widgetBase: widgetBase{name: "statusbox"},
+					spacing:    10,
+					children: []Widget{
+						Spinner{
+							widgetBase: widgetBase{name: "spinner"},
+						},
+						Label{
+							widgetBase: widgetBase{name: "status"},
+							text:       initialMessage,
 						},
 					},
 				},
@@ -997,7 +1092,7 @@ func (c *guiClient) createAccountUI() error {
 		break
 	}
 
-	return nil
+	return false, nil
 }
 
 func (c *guiClient) ShutdownAndSuspend() error {
@@ -1779,7 +1874,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 }
 
 func (c *guiClient) identityUI() interface{} {
-	left := nameValuesLHS([]nvEntry{
+	entries := nameValuesLHS([]nvEntry{
 		{"SERVER", c.server},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", c.pub[:])},
@@ -1787,11 +1882,147 @@ func (c *guiClient) identityUI() interface{} {
 		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
 	})
 
+	left := Grid{
+		widgetBase: widgetBase{margin: 6},
+		rowSpacing: 10,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, entries},
+			},
+			{
+				{1, 1, Grid{
+					widgetBase: widgetBase{margin: 6},
+					rowSpacing: 3,
+					colSpacing: 3,
+					rows: [][]GridE{
+						{
+							{3, 1, Label{
+								widgetBase: widgetBase{
+									font: "bold",
+								},
+								text: "Entombing",
+							}},
+						},
+						{
+							{3, 1, Label{
+								text: "Entombing your statefile causes it to be converted into an encrypted file that can be moved to a different computer. The file is encrypted with an ephemeral key that is printed at the end of the entombing process and must be written down. The original statefile is erased. Once the entombed file has been imported elsewhere, the paper with the ephemeral key must be destroyed.",
+								wrap: 600,
+							}},
+						},
+						{
+							{1, 1, Button{
+								widgetBase: widgetBase{name: "tombfile"},
+								text:       "Select file",
+							}},
+							{1, 1, Button{
+								widgetBase: widgetBase{
+									name:        "entomb",
+									insensitive: true,
+								},
+								text: "Emtomb",
+							}},
+							{1, 1, Label{
+								widgetBase: widgetBase{hExpand: true},
+							}},
+						},
+						{
+							{3, 1, Label{
+								widgetBase: widgetBase{
+									name:       "tomberror",
+									foreground: colorRed,
+								},
+							}},
+						},
+					},
+				}},
+			},
+		},
+	}
+
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("IDENTITY", left, nil, nil)}
 	c.gui.Actions() <- UIState{uiStateShowIdentity}
 	c.gui.Signal()
 
-	return nil
+	var tombPath string
+
+	for {
+		event, wanted := c.nextEvent(0)
+		if wanted {
+			return event
+		}
+
+		if open, ok := event.(OpenResult); ok && open.ok {
+			tombPath = open.path
+			c.gui.Actions() <- Sensitive{name: "entomb", sensitive: true}
+			c.gui.Signal()
+			continue
+		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+
+		switch click.name {
+		case "tombfile":
+			c.gui.Actions() <- FileOpen{
+				save:     true,
+				title:    "Select path for entombed file",
+				filename: "statefile.tomb",
+				arg:      nil,
+			}
+			c.gui.Signal()
+		case "entomb":
+			f, err := os.OpenFile(tombPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0400)
+			if err != nil {
+				c.gui.Actions() <- SetText{
+					name: "tomberror",
+					text: err.Error(),
+				}
+				c.gui.Actions() <- UIError{err}
+				c.gui.Signal()
+				continue
+			}
+
+			c.gui.Actions() <- Reset{TextView{
+				widgetBase: widgetBase{name: "log"},
+				editable:   false,
+				wrap:       true,
+			}}
+			c.gui.Actions() <- UIState{uiStateEntomb}
+			c.gui.Signal()
+
+			var logText string
+			log := func(msg string, args ...interface{}) {
+				logText += fmt.Sprintf(msg, args...)
+				c.gui.Actions() <- SetTextView{
+					name: "log",
+					text: logText,
+				}
+				c.gui.Signal()
+			}
+
+			key, ok := c.entomb(tombPath, f, log)
+			if ok {
+				log("\nThe process has completed successfully. You must write down the ephemeral key now. You can close this window when done.\n")
+				c.gui.Actions() <- UIInfo{fmt.Sprintf("%x", key[:])}
+			} else {
+				log("\nThe process failed! Your statefile is still intact. Please close this window and restart when ready.")
+			}
+
+			c.gui.Actions() <- UIState{uiStateEntombComplete}
+			c.gui.Signal()
+
+			for {
+				if _, ok := <-c.gui.Events(); !ok {
+					break
+				}
+			}
+			close(c.gui.Actions())
+			select {}
+		}
+	}
 }
 
 func (c *guiClient) showContact(id uint64) interface{} {
