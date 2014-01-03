@@ -1018,12 +1018,13 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 		switch click.name {
 		case "tombfile":
 			c.gui.Actions() <- FileOpen{
-				save:     true,
+				save:     false,
 				title:    "Select path of entombed file",
 				filename: "statefile.tomb",
 				arg:      nil,
 			}
 			c.gui.Signal()
+			continue
 		case "import":
 			if err := c.importTombFile(stateFile, click.entries["tombkey"], tombPath); err == nil {
 				err = c.loadState(stateFile, pw)
