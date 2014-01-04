@@ -157,7 +157,7 @@ func (a *Account) numericConfig(name string, defValue int64) (int64, error) {
 
 func (a *Account) QuotaBytes() (int64, error) {
 	mb, err := a.numericConfig("quota-megabytes", maxFilesMB)
-	return 1024*1024*mb, err
+	return 1024 * 1024 * mb, err
 }
 
 func (a *Account) QuotaFiles() (int64, error) {
