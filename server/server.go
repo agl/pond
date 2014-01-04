@@ -33,10 +33,14 @@ const (
 	// maxRevocations is the maximum number of revocations that we'll store
 	// on disk for any one account.
 	maxRevocations = 100
-	// maxFilesCount is the maximum number of uploads for a single account.
+	// maxFilesCount is the default, maximum number of uploads for a single
+	// account. This can be overridden by a "quota-files" file in the
+	// account directory.
 	maxFilesCount = 100
-	// maxFilesSize is the maximum number of bytes for all uploads for a single account.
-	maxFilesSize = 100 * 1024 * 1024
+	// maxFilesMB is the default, maximum number of megabytes for all
+	// uploads for a single account. This can be overridden by a
+	// "quota-megabytes" file in the account directory.
+	maxFilesMB = 100
 )
 
 type Account struct {
@@ -46,7 +50,7 @@ type Account struct {
 	id         [32]byte
 	group      *bbssig.Group
 	filesValid bool
-	filesCount int
+	filesCount int64
 	filesSize  int64
 }
 
@@ -139,6 +143,27 @@ func (a *Account) loadFileInfo() bool {
 	return true
 }
 
+func (a *Account) numericConfig(name string, defValue int64) (int64, error) {
+	path := filepath.Join(a.Path(), name)
+	contents, err := ioutil.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return defValue, err
+		}
+		return defValue, nil
+	}
+	return strconv.ParseInt(strings.TrimSpace(string(contents)), 10, 64)
+}
+
+func (a *Account) QuotaBytes() (int64, error) {
+	mb, err := a.numericConfig("quota-megabytes", maxFilesMB)
+	return 1024*1024*mb, err
+}
+
+func (a *Account) QuotaFiles() (int64, error) {
+	return a.numericConfig("quota-files", maxFilesCount)
+}
+
 func (a *Account) ReserveFile(newFile bool, size int64) bool {
 	a.Lock()
 	defer a.Unlock()
@@ -160,7 +185,17 @@ func (a *Account) ReserveFile(newFile bool, size int64) bool {
 		return false
 	}
 
-	if newCount > maxFilesCount || newSize > maxFilesSize {
+	maxFiles, err := a.QuotaFiles()
+	if err != nil {
+		log.Printf("Error from QuotaFiles for %x: %s", a.id[:], err)
+	}
+
+	maxBytes, err := a.QuotaBytes()
+	if err != nil {
+		log.Printf("Error from QuotaBytes for %x: %s", a.id[:], err)
+	}
+
+	if newCount > maxFiles || newSize > maxBytes {
 		return false
 	}
 

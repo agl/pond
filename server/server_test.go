@@ -485,12 +485,51 @@ func TestOversizeUpload(t *testing.T) {
 				request: &pond.Request{
 					Upload: &pond.Upload{
 						Id:   proto.Uint64(1),
-						Size: proto.Int64(1 << 32),
+						Size: proto.Int64(1 << 27),
 					},
 				},
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status == nil || *reply.Status != pond.Reply_OVER_QUOTA {
 						t.Fatalf("Bad reply to upload: %s", reply)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestQuotaOverride(t *testing.T) {
+	t.Parallel()
+
+	runScript(t, script{
+		numPlayers:             1,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				buildRequest: func(s *scriptState) *pond.Request {
+					path := filepath.Join(s.testServer.dir, "accounts", fmt.Sprintf("%x", s.publicIdentities[0][:]), "quota-megabytes")
+					ioutil.WriteFile(path, []byte("200\n"), 0644)
+
+					return &pond.Request{
+						Upload: &pond.Upload{
+							Id:   proto.Uint64(1),
+							Size: proto.Int64(1 << 27),
+						},
+					}
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Errorf("Bad reply to upload: %s", reply)
+						return
+					}
+					if reply.Upload == nil {
+						t.Errorf("Upload reply missing: %s", reply)
+						return
+					}
+					if reply.Upload.Resume != nil {
+						t.Errorf("Upload reply contained unexpected Resume: %s", reply)
+						return
 					}
 				},
 			},
