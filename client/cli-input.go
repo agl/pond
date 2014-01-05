@@ -39,7 +39,7 @@ var cliCommands = []cliCommand{
 	{"close", closeCommand{}, "Close currently opened object", contextDraft | contextInbox | contextOutbox | contextContact},
 	{"compose", composeCommand{}, "Compose a new message", contextContact},
 	{"contacts", showContactsCommand{}, "Show all known contacts", 0},
-	{"delete", deleteCommand{}, "Delete a message or contact", contextContact | contextDraft},
+	{"delete", deleteCommand{}, "Delete a message or contact", contextContact | contextDraft | contextInbox | contextOutbox},
 	{"download", downloadCommand{}, "Download a numbered detachment to disk", contextInbox},
 	{"drafts", showDraftsSummaryCommand{}, "Show drafts", 0},
 	{"edit", editCommand{}, "Edit the draft message", contextDraft},
