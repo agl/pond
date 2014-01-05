@@ -54,6 +54,8 @@ var cliCommands = []cliCommand{
 	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message", contextDraft},
 	{"rename", renameCommand{}, "Rename an existing contact", contextContact},
 	{"reply", replyCommand{}, "Reply to the current message", contextInbox},
+	{"retain", retainCommand{}, "Retain the current message", contextInbox},
+	{"dont-retain", dontRetainCommand{}, "Do not retain the current message", contextInbox},
 	{"save", saveCommand{}, "Save a numbered attachment to disk", contextInbox},
 	{"send", sendCommand{}, "Send the current draft", contextDraft},
 	{"show", showCommand{}, "Show the current object", contextDraft | contextInbox | contextOutbox | contextContact},
@@ -72,6 +74,8 @@ type editCommand struct{}
 type logCommand struct{}
 type quitCommand struct{}
 type replyCommand struct{}
+type retainCommand struct{}
+type dontRetainCommand struct{}
 type sendCommand struct{}
 type showCommand struct{}
 type showContactsCommand struct{}
