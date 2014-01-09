@@ -251,7 +251,7 @@ func (c *guiClient) torPromptUI() error {
 					foreground: c.colors.labelForeground,
 					background: c.colors.labelBackground,
 				},
-				text: "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150...",
+				text: msgPleaseStartTor,
 				wrap: 600,
 			},
 		},

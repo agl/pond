@@ -8,4 +8,5 @@ const (
 	msgDefaultDevServer  = "pondserver://ZGL2WALCGXCKYBIHTWL5Q3TPCOEHSQB2XON5JHA2KHM5PJ3C7AFA@127.0.0.1:16333"
 	msgKeyPrompt         = "Please enter the passphrase used to encrypt Pond's state file. If you set a passphrase and forgot it, it cannot be recovered. You will have to start afresh."
 	msgIncorrectPassword = "Incorrect passphrase or corrupt state file"
+	msgPleaseStartTor    = "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150..."
 )
