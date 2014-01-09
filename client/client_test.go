@@ -1962,7 +1962,7 @@ func TestExpireMessage(t *testing.T) {
 		t.Fatalf("Bad number of messages in listUI after first timer: %d", n)
 	}
 
-	if client2.inboxUI.entries[0].background != colorGray {
+	if client2.inboxUI.entries[0].background != 0xfafafa {
 		t.Fatalf("Bad message background after first timer")
 	}
 

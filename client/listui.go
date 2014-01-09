@@ -45,6 +45,7 @@ func sublineLabel(name, text string) Label {
 		widgetBase: widgetBase{
 			padding:    5,
 			foreground: colorSubline,
+			background: colorLabelBackground,
 			font:       fontListSubline,
 			name:       name,
 		},
@@ -62,7 +63,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		lineName:        cs.newIdent(),
 		sublineTextName: cs.newIdent(),
 		sublineBoxName:  cs.newIdent(),
-		background:      colorGray,
+		background:      colorMenuBackground,
 		hasSubline:      len(subline) > 0,
 	}
 	cs.entries = append(cs.entries, c)
@@ -86,6 +87,8 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 						name:    c.lineName,
 						padding: 5,
 						font:    fontListEntry,
+						foreground: colorLabelForeground,
+						background: colorLabelBackground,
 					},
 					text: name,
 				},
