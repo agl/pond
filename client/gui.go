@@ -35,18 +35,17 @@ const (
 	colorHeaderBackground      = 0xececed
 	colorHeaderForeground      = 0x777777
 	colorHeaderForegroundSmall = 0x7b7f83
-	colorLabelForeground       = 0
-	colorLabelBackground       = 0
-	colorButtonForeground      = 0
-	colorButtonBackground      = 0
-	colorEntryForeground       = 0
-	colorEntryBackground       = 0
+	colorLabelForeground       = 0x2e3436
+	colorLabelBackground       = 0xededed
+	colorButtonForeground      = 0x2e3436
+	colorButtonBackground      = 0xededed
+	colorEntryForeground       = 0x2e3436
+	colorEntryBackground       = 0xffffff
 	colorSep                   = 0xc9c9c9
 	colorTitleForeground       = 0xdddddd
 	colorError                 = 0xff0000
 	colorImminently            = 0xffdddd
 	colorDeleteSoon            = 0xdddddd
-
 )
 
 const (
