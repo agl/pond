@@ -15,6 +15,7 @@ type listUI struct {
 	selected   uint64
 	nextId     int
 	hasSubline bool
+	colors     colorScheme
 }
 
 type listItem struct {
@@ -40,12 +41,12 @@ func (cs *listUI) Event(event interface{}) (uint64, bool) {
 	return 0, false
 }
 
-func sublineLabel(name, text string) Label {
+func (cs *listUI) sublineLabel(name, text string) Label {
 	return Label{
 		widgetBase: widgetBase{
 			padding:    5,
-			foreground: colorSubline,
-			background: colorLabelBackground,
+			foreground: cs.colors.subline,
+			background: cs.colors.labelBackground,
 			font:       fontListSubline,
 			name:       name,
 		},
@@ -63,7 +64,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 		lineName:        cs.newIdent(),
 		sublineTextName: cs.newIdent(),
 		sublineBoxName:  cs.newIdent(),
-		background:      colorMenuBackground,
+		background:      cs.colors.menuBackground,
 		hasSubline:      len(subline) > 0,
 	}
 	cs.entries = append(cs.entries, c)
@@ -87,8 +88,8 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 						name:    c.lineName,
 						padding: 5,
 						font:    fontListEntry,
-						foreground: colorLabelForeground,
-						background: colorLabelBackground,
+						foreground: cs.colors.labelForeground,
+						background: cs.colors.labelBackground,
 					},
 					text: name,
 				},
@@ -99,7 +100,7 @@ func (cs *listUI) Add(id uint64, name, subline string, indicator Indicator) {
 	var sublineChildren []Widget
 
 	if len(subline) > 0 {
-		sublineChildren = append(sublineChildren, sublineLabel(c.sublineTextName, subline))
+		sublineChildren = append(sublineChildren, cs.sublineLabel(c.sublineTextName, subline))
 	}
 
 	sublineChildren = append(sublineChildren, Image{
@@ -206,7 +207,7 @@ func (cs *listUI) Select(id uint64) {
 	if currentlySelected != nil {
 		cs.gui.Actions() <- SetBackground{name: currentlySelected.boxName, color: currentlySelected.background}
 	}
-	cs.gui.Actions() <- SetBackground{name: newSelected.boxName, color: colorHighlight}
+	cs.gui.Actions() <- SetBackground{name: newSelected.boxName, color: cs.colors.highlight}
 	cs.selected = id
 	cs.gui.Signal()
 }
@@ -246,7 +247,7 @@ func (cs *listUI) SetSubline(id uint64, subline string) {
 				cs.gui.Actions() <- AddToBox{
 					box:   entry.sublineBoxName,
 					pos:   0,
-					child: sublineLabel(entry.sublineTextName, subline),
+					child: cs.sublineLabel(entry.sublineTextName, subline),
 				}
 				entry.hasSubline = true
 			}

@@ -17,6 +17,7 @@ func main() {
 	pandaScrypt := flag.Bool("panda-scrypt", false, "Run in subprocess mode to process passphrase")
 	cliFlag := flag.Bool("cli", false, "If true, the CLI will be used, even if the GUI is available")
 	devFlag := flag.Bool("dev", false, "Is this a development environment?")
+	colorScheme := flag.String("color-scheme", "pond", "Color scheme to use, available values are 'pond' and 'wm'.")
 	flag.Parse()
 
 	if *pandaScrypt {
@@ -64,7 +65,7 @@ func main() {
 		client.Start()
 	} else {
 		ui := NewGTKUI()
-		client := NewGUIClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+		client := NewGUIClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */, *colorScheme)
 		client.disableV2Ratchet = true
 		client.dev = dev
 		client.Start()
