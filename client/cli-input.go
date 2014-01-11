@@ -386,6 +386,10 @@ func (input *cliInput) showHelp(context inputContext, showAll bool) {
 		noIndicators: true,
 	}
 
+	if showAll {
+		globalTable.heading = "All commands:"
+	}
+
 	for _, cmd := range cliCommands {
 		if !showAll && cmd.context != 0 && context&cmd.context == 0 {
 			continue
