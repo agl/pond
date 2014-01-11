@@ -1085,24 +1085,6 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 		}
 		c.compose(c.contacts[msg.from], nil, msg)
 
-	case retainCommand:
-		msg, ok := c.currentObj.(*InboxMessage)
-		if !ok {
-			c.Printf("%s Select inbox message first\n", termWarnPrefix)
-			return
-		}
-		msg.retained = true
-		c.save()
-
-	case dontRetainCommand:
-		msg, ok := c.currentObj.(*InboxMessage)
-		if !ok {
-			c.Printf("%s Select inbox message first\n", termWarnPrefix)
-			return
-		}
-		msg.retained = false
-		c.save()
-
 	default:
 		goto Handle
 	}
@@ -1525,6 +1507,27 @@ Handle:
 		} else {
 			c.Printf("%s Select contact first\n", termWarnPrefix)
 		}
+
+	case retainCommand:
+		msg, ok := c.currentObj.(*InboxMessage)
+		if !ok {
+			c.Printf("%s Select inbox message first\n", termWarnPrefix)
+			return
+		}
+		msg.retained = true
+		c.save()
+
+	case dontRetainCommand:
+		msg, ok := c.currentObj.(*InboxMessage)
+		if !ok {
+			c.Printf("%s Select inbox message first\n", termWarnPrefix)
+			return
+		}
+		msg.retained = false
+		msg.exposureTime = c.Now()
+		// TODO: the CLI needs to expire messages when open as the GUI
+		// does. See guiClient.processTimer.
+		c.save()
 
 	default:
 		panic(fmt.Sprintf("Unhandled command: %#v", cmd))
