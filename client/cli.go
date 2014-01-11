@@ -1196,18 +1196,51 @@ Handle:
 			c.Printf("%s Select object first\n", termWarnPrefix)
 			return
 		}
-		switch o := c.currentObj.(type) {
-		case *Draft:
-			delete(c.drafts, o.id)
-			c.save()
-			c.setCurrentObject(nil)
+		if !c.deleteArmed {
+			switch obj := c.currentObj.(type) {
+			case *Contact:
+				c.Printf("%s You attempted to delete a contact (%s). Doing so removes all messages to and from that contact and revokes their ability to send you messages. To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(obj.name, false))
+			case *Draft:
+				toName := "<unknown>"
+				if obj.to != 0 {
+					toName = c.contacts[obj.to].name
+				}
+				c.Printf("%s You attempted to delete a draft message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(toName, false))
+			case *queuedMessage:
+				c.queueMutex.Lock()
+				if c.indexOfQueuedMessage(obj) != -1 {
+					c.queueMutex.Unlock()
+					c.Printf("%s Please abort the unsent message before deleting it.\n", termErrPrefix)
+					return
+				}
+				c.queueMutex.Unlock()
+				c.Printf("%s You attempted to delete a message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.to].name, false))
+			case *InboxMessage:
+				c.Printf("%s You attempted to delete a message (from %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.from].name, false))
+			default:
+				c.Printf("%s Cannot delete current object\n", termWarnPrefix)
+				return
+			}
+			c.deleteArmed = true
+			return
+		}
+		c.deleteArmed = false
+
+		switch obj := c.currentObj.(type) {
 		case *Contact:
-			c.maybeDeleteContact(o)
-			// maybeDeleteContact may need confirmation so
-			// setCurrentObject is handled in there.
+			c.deleteContact(obj)
+		case *Draft:
+			delete(c.drafts, obj.id)
+		case *queuedMessage:
+			c.deleteOutboxMsg(obj.id)
+		case *InboxMessage:
+			c.deleteInboxMsg(obj.id)
 		default:
 			c.Printf("%s Cannot delete current object\n", termWarnPrefix)
+			return
 		}
+		c.setCurrentObject(nil)
+		c.save()
 
 	case sendCommand:
 		draft, ok := c.currentObj.(*Draft)
@@ -1754,19 +1787,6 @@ func (c *cliClient) renameContact(contact *Contact, newName string) {
 	}
 
 	contact.name = newName
-	c.save()
-}
-
-func (c *cliClient) maybeDeleteContact(contact *Contact) {
-	if !c.deleteArmed {
-		c.Printf("%s You attempted to delete a contact (%s). Doing so removes all messages to and from that contact and revokes their ability to send you messages. To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(contact.name, false))
-		c.deleteArmed = true
-		return
-	}
-
-	c.deleteArmed = false
-	c.deleteContact(contact)
-	c.setCurrentObject(nil)
 	c.save()
 }
 
