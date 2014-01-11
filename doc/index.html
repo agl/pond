@@ -106,15 +106,34 @@ $GOPATH/bin/client
 <p>It's possible to get Pond building on OS X after spending <i>lots</i> of time with homebrew. Something that's known to have worked,</p>
 
 <pre>
-// you'll need an X server running in order to launch Pond unless you
-brew edit gtk+3
-// then add --enable-quartz-backend to the configure arguments
-brew install go gtk+3 gtkspell3
+// You will require Tor to run Pond. If you do not already have it, you can get
+// it from https://www.torproject.org/download/download.html.en . Running the Tor
+// Browser Bundle is enough.
 
+// These instructions assume the use of the Homebrew package manager for OSX.
+// If you are already using macports or fink (competing package managers), you may
+// not be able to follow these instructions. If you are not using any of these and
+// need to install homebrew, you can find the instructions on doing so at
+// http://brew.sh/
+
+// Install prerequisites for running Pond
+brew install go gtk+3 gtkspell3 mercurial
+
+// You can either edit the GTK+ package build to use Quartz (the OS X graphics
+// library) directly, or install XQuartz, an X server with a Quartz backend.
+// XQuartz can be installed from http://xquartz.macosforge.org/. Otherwise:
+
+brew edit gtk+3
+
+// ... and then add --enable-quartz-backend to the configure arguments
+
+// Add your go environment variable settings
 export GOPATH=$HOME/gopkg
 export PATH=$PATH:$GOPATH/bin
 export PKG_CONFIG_PATH=/opt/X11/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+// You need to also add these to your ~/.profile file if you want to run pond again after reboot, unless you want to manually apply the settings each time you run pond.
 
+// Finally, install pond:
 go get github.com/agl/pond/client
 // now `client` should be in your path
 </pre>
