@@ -755,8 +755,8 @@ func (tab cliTable) WriteToWithWidths(w io.Writer, widths []int) {
 func (c *cliClient) showState() {
 	tables := make([]cliTable, 0, 4)
 
-	tables = append(tables, c.inboxSummary())
 	tables = append(tables, c.outboxSummary())
+	tables = append(tables, c.inboxSummary())
 	tables = append(tables, c.draftsSummary())
 	tables = append(tables, c.contactsSummary())
 
