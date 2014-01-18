@@ -85,7 +85,7 @@ func findSafeTempDir() {
 		path := fields[1]
 		filesystem := fields[2]
 		if filesystem == "tmpfs" &&
-			syscall.Access(path, 2 /* write ok */) == nil {
+			syscall.Access(path, 7 /* rwx ok */) == nil {
 			candidates = append(candidates, path)
 		}
 
