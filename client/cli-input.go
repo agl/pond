@@ -57,6 +57,7 @@ var cliCommands = []cliCommand{
 	{"retain", retainCommand{}, "Retain the current message", contextInbox},
 	{"dont-retain", dontRetainCommand{}, "Do not retain the current message", contextInbox},
 	{"save", saveCommand{}, "Save a numbered attachment to disk", contextInbox},
+	{"save-key", saveKeyCommand{}, "Save the key to a detachment to disk", contextInbox},
 	{"send", sendCommand{}, "Send the current draft", contextDraft},
 	{"show", showCommand{}, "Show the current object", contextDraft | contextInbox | contextOutbox | contextContact},
 	{"status", statusCommand{}, "Show overall Pond status", 0},
@@ -104,6 +105,11 @@ type uploadCommand struct {
 }
 
 type saveCommand struct {
+	Number   string
+	Filename string `cli:"filename"`
+}
+
+type saveKeyCommand struct {
 	Number   string
 	Filename string `cli:"filename"`
 }

@@ -1441,10 +1441,41 @@ Handle:
 		}
 		id := c.randId()
 
+		if msg.message.DetachedFiles[i].Url == nil {
+			c.Printf("%s That detachment is just a key; you need to obtain the encrypted payload out-of-band. Use the save-key command and the decrypt utility the decrypt the payload.\n", termErrPrefix)
+			return
+		}
+
 		c.Printf("%s Downloading and decrypting detachment (Ctrl-C to abort):\n", termPrefix)
 		cancelThunk := c.startDownload(id, cmd.Filename, msg.message.DetachedFiles[i])
 
 		c.runBackgroundProcess(id, cancelThunk)
+
+	case saveKeyCommand:
+		msg, ok := c.currentObj.(*InboxMessage)
+		if !ok {
+			c.Printf("%s Select inbox message\n", termWarnPrefix)
+			return
+		}
+		i, ok := c.prepareSubobjectCommand(cmd.Number, len(msg.message.DetachedFiles), "detachment")
+		if !ok {
+			return
+		}
+
+		if msg.message.DetachedFiles[i].Url != nil {
+			c.Printf("%s (Note that this detachment can be downloaded with the 'download' command)\n", termInfoPrefix)
+		}
+
+		bytes, err := proto.Marshal(msg.message.DetachedFiles[i])
+		if err != nil {
+			panic(err)
+		}
+
+		if err := ioutil.WriteFile(cmd.Filename, bytes, 0600); err != nil {
+			c.Printf("%s Failed to write file: %s\n", termErrPrefix, terminalEscape(err.Error(), false))
+		} else {
+			c.Printf("%s Wrote file\n", termPrefix)
+		}
 
 	case saveCommand:
 		msg, ok := c.currentObj.(*InboxMessage)
