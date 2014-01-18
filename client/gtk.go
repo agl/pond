@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 
 	"github.com/agl/go-gtk/gdk"
@@ -380,7 +381,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		}
 		if v.spellCheck {
 			if _, err := gtkspell.New(view, ""); err != nil {
-				panic(err)
+				fmt.Fprintf(os.Stderr, "Failed to setup spellchecker: %s\n", err.Error())
 			}
 		}
 		if name := v.name; len(name) > 0 {
