@@ -528,7 +528,11 @@ func do() bool {
 	states := make(chan disk.NewState)
 	done := make(chan struct{})
 	go stateFile.StartWriter(states, done)
-	states <- disk.NewState{newStateSerialized, false}
+	states <- disk.NewState{
+		State:                newStateSerialized,
+		RotateErasureStorage: false,
+		Destruct:             false,
+	}
 	close(states)
 	<-done
 
