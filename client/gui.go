@@ -2024,6 +2024,8 @@ func (c *guiClient) identityUI() interface{} {
 			select {}
 		}
 	}
+
+	panic("unreachable")
 }
 
 func (c *guiClient) showContact(id uint64) interface{} {
