@@ -381,7 +381,7 @@ func (ui *GTKUI) createWidget(v interface{}) gtk.WidgetLike {
 		}
 		if v.spellCheck {
 			if _, err := gtkspell.New(view, ""); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to setup spellchecker: %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, "Failed to setup spellchecker: %s\n", err)
 			}
 		}
 		if name := v.name; len(name) > 0 {
