@@ -161,8 +161,8 @@ RestartInboxIteration:
 				// c.inbox will have been updated by this
 				// deletion so we start from the beginning
 				// again.
-				continue RestartInboxIteration
 				haveDeleted = true
+				continue RestartInboxIteration
 			}
 			c.updateInboxBackgroundColor(msg)
 		}
