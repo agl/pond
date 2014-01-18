@@ -415,10 +415,10 @@ func (input *cliInput) showHelp(context inputContext, showAll bool) {
 	}
 
 	widths := globalTable.UpdateWidths(contextTable.UpdateWidths(nil))
+	globalTable.WriteToWithWidths(input.term, widths)
 	if len(contextTable.rows) > 0 {
 		contextTable.WriteToWithWidths(input.term, widths)
 	}
-	globalTable.WriteToWithWidths(input.term, widths)
 }
 
 func pathComplete(path string) (completedPath string, isComplete, ok bool) {
