@@ -628,9 +628,18 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	return draft
 }
 
-// detectTor attempts to connect to port 9050 and 9150 on the local host and
-// assumes that Tor is running on the first port that it finds to be open.
+// detectTor sets c.torAddress, either from the POND_TOR_ADDRESS environment
+// variable if it is set or by attempting to connect to port 9050 and 9150 on
+// the local host and assuming that Tor is running on the first port that it
+// finds to be open.
 func (c *client) detectTor() bool {
+	customTorAddress := os.Getenv("POND_TOR_ADDRESS")
+	if len(customTorAddress) != 0 {
+		c.torAddress = customTorAddress
+		c.log.Printf("Using POND_TOR_ADDRESS=%s", customTorAddress)
+		return true
+	}
+
 	ports := []int{9050, 9150}
 	for _, port := range ports {
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
