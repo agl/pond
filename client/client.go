@@ -633,11 +633,14 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 // the local host and assuming that Tor is running on the first port that it
 // finds to be open.
 func (c *client) detectTor() bool {
-	customTorAddress := os.Getenv("POND_TOR_ADDRESS")
-	if len(customTorAddress) != 0 {
-		c.torAddress = customTorAddress
-		c.log.Printf("Using POND_TOR_ADDRESS=%s", customTorAddress)
-		return true
+	if addr := os.Getenv("POND_TOR_ADDRESS"); len(addr) != 0 {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			c.log.Printf("Ignoring POND_TOR_ADDRESS because of parse error: %s", err)
+		} else {
+			c.torAddress = addr
+			c.log.Printf("Using POND_TOR_ADDRESS=%s", addr)
+			return true
+		}
 	}
 
 	ports := []int{9050, 9150}
