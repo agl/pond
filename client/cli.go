@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/go.crypto/ssh/terminal"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
@@ -1252,34 +1251,7 @@ Handle:
 			c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
 			return
 		}
-		to := c.contacts[draft.to]
-		var myNextDH []byte
-		if to.ratchet == nil {
-			var nextDHPub [32]byte
-			curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
-			myNextDH = nextDHPub[:]
-		}
-
-		if len(draft.body) == 0 {
-			// Zero length bodies are ACKs.
-			draft.body = " "
-		}
-		id := c.randId()
-		var inReplyTo *uint64
-		if r := draft.inReplyTo; r != 0 {
-			inReplyTo = proto.Uint64(r)
-		}
-		err := c.send(to, &pond.Message{
-			Id:               proto.Uint64(id),
-			Time:             proto.Int64(c.Now().Unix()),
-			Body:             []byte(draft.body),
-			BodyEncoding:     pond.Message_RAW.Enum(),
-			InReplyTo:        inReplyTo,
-			MyNextDh:         myNextDH,
-			Files:            draft.attachments,
-			DetachedFiles:    draft.detachments,
-			SupportedVersion: proto.Int32(protoVersion),
-		})
+		id, _, err := c.sendDraft(draft)
 		if err != nil {
 			c.log.Errorf("%s Error sending: %s\n", termErrPrefix, err)
 			return
