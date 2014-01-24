@@ -63,7 +63,6 @@ func (c *client) sendAck(msg *InboxMessage) {
 	c.queueMutex.Unlock()
 
 	to := c.contacts[msg.from]
-
 	var myNextDH []byte
 	if to.ratchet == nil {
 		var nextDHPub [32]byte
@@ -108,6 +107,42 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	c.outbox = append(c.outbox, out)
 
 	return nil
+}
+
+func (c *client) sendDraft(draft *Draft) (uint64, time.Time, error) {
+	to := c.contacts[draft.to]
+
+	// Zero length bodies are ACKs.
+	if len(draft.body) == 0 {
+		draft.body = " "
+	}
+
+	id := c.randId()
+	created := c.Now()
+	message := &pond.Message{
+		Id:               proto.Uint64(id),
+		Time:             proto.Int64(created.Unix()),
+		Body:             []byte(draft.body),
+		BodyEncoding:     pond.Message_RAW.Enum(),
+		InReplyTo:        nil,
+		MyNextDh:         nil,
+		Files:            draft.attachments,
+		DetachedFiles:    draft.detachments,
+		SupportedVersion: proto.Int32(protoVersion),
+	}
+
+	if r := draft.inReplyTo; r != 0 {
+		message.InReplyTo = proto.Uint64(r)
+	}
+
+	if to.ratchet == nil {
+		var nextDHPub [32]byte
+		curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
+		message.MyNextDh = nextDHPub[:]
+	}
+
+	err := c.send(to, message)
+	return id, created, err
 }
 
 // tooLarge returns true if the given message is too large to serialise.

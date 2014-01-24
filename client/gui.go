@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/panda"
@@ -3294,52 +3293,24 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		if len(toName) == 0 {
 			continue
 		}
-
-		var to *Contact
+		// Done above really
 		for _, contact := range c.contacts {
 			if contact.name == toName {
-				to = contact
+				draft.to = contact.id  
 				break
 			}
-		}
+		}		
 
-		var myNextDH []byte
-		if to.ratchet == nil {
-			var nextDHPub [32]byte
-			curve25519.ScalarBaseMult(&nextDHPub, &to.currentDHPrivate)
-			myNextDH = nextDHPub[:]
-		}
+		draft.body = click.textViews["body"]
 
-		var replyToId *uint64
-		if inReplyTo != nil {
-			replyToId = inReplyTo.message.Id
-		}
-
-		body := click.textViews["body"]
-		// Zero length bodies are ACKs.
-		if len(body) == 0 {
-			body = " "
-		}
-
-		id := c.randId()
-		created := c.Now()
-		err := c.send(to, &pond.Message{
-			Id:               proto.Uint64(id),
-			Time:             proto.Int64(created.Unix()),
-			Body:             []byte(body),
-			BodyEncoding:     pond.Message_RAW.Enum(),
-			InReplyTo:        replyToId,
-			MyNextDh:         myNextDH,
-			Files:            draft.attachments,
-			DetachedFiles:    draft.detachments,
-			SupportedVersion: proto.Int32(protoVersion),
-		})
+		id, created, err := c.sendDraft(draft)
 		if err != nil {
 			// TODO: handle this case better.
 			println(err.Error())
 			c.log.Errorf("Error sending message: %s", err)
 			continue
 		}
+		to := c.contacts[draft.to]
 		c.outboxUI.Add(id, to.name, created.Format(shortTimeFormat), indicatorRed)
 		if inReplyTo != nil {
 			inReplyTo.acked = true
