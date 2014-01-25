@@ -3300,6 +3300,9 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			}
 		}
 
+		if inReplyTo != nil {
+			draft.inReplyTo = inReplyTo.message.GetId()
+		}
 		draft.body = click.textViews["body"]
 
 		id, created, err := c.sendDraft(draft)

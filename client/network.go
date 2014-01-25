@@ -124,8 +124,6 @@ func (c *client) sendDraft(draft *Draft) (uint64, time.Time, error) {
 		Time:             proto.Int64(created.Unix()),
 		Body:             []byte(draft.body),
 		BodyEncoding:     pond.Message_RAW.Enum(),
-		InReplyTo:        nil,
-		MyNextDh:         nil,
 		Files:            draft.attachments,
 		DetachedFiles:    draft.detachments,
 		SupportedVersion: proto.Int32(protoVersion),
