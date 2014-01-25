@@ -3293,13 +3293,12 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		if len(toName) == 0 {
 			continue
 		}
-		// Done above really
 		for _, contact := range c.contacts {
 			if contact.name == toName {
-				draft.to = contact.id  
+				draft.to = contact.id
 				break
 			}
-		}		
+		}
 
 		draft.body = click.textViews["body"]
 
