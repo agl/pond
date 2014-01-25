@@ -2904,22 +2904,21 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	}
 
 	if draft == nil {
-		var replyToId, contactId uint64
 		from := preSelected
-
-		if inReplyTo != nil {
-			replyToId = inReplyTo.id
-			contactId = inReplyTo.from
-		}
 		if len(preSelected) == 0 {
 			from = "Unknown"
 		}
 
 		draft = &Draft{
 			id:        c.randId(),
-			inReplyTo: replyToId,
-			to:        contactId,
+			inReplyTo: 0,
+			to:        0,
 			created:   c.Now(),
+		}
+		if inReplyTo != nil {
+			draft.inReplyTo = inReplyTo.id
+			draft.to = inReplyTo.from
+			draft.body = indentForReply(inReplyTo.message.GetBody())
 		}
 
 		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
