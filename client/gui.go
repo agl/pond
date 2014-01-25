@@ -1860,7 +1860,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func nameValuesLHS(entries []nvEntry) Grid {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -2109,6 +2109,12 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	}
 
 	left := nameValuesLHS(entries)
+	left.rows[0][1].widget = Entry{
+		// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+		widgetBase:     widgetBase{name: "name"}, 
+		text:           contact.name,
+		updateOnChange: false,
+	}
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
@@ -2117,11 +2123,25 @@ func (c *guiClient) showContact(id uint64) interface{} {
 
 	for {
 		event, wanted := c.nextEvent(0)
+		click, ok := event.(Click)
 		if wanted {
+			n := click.entries["name"]
+			if contact.name == n {
+				return event
+			}
+			for _, t := range c.contacts {
+				if t.name == n {
+					c.log.Printf("Another contact already has the name %s.\n", n)
+					return event
+				}
+			}
+			c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
+			contact.name = n
+			c.save()
+			// c.gui.Actions() <- UIState{uiStateMain}
+			// c.gui.Signal()
 			return event
 		}
-
-		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
@@ -2141,7 +2161,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
-		}
+		}		
 	}
 
 	panic("unreachable")
