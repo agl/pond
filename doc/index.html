@@ -73,6 +73,8 @@ export PATH=$PATH:$GOPATH/bin
 go get -tags nogui github.com/agl/pond/client
 alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
 
+<p>(<i>Note:</i> the build process reportedly fails with less than 1GB of memory. You can still run Pond with less than 1GB, but you'll need to build it elsewhere.)</p>
+
 <h5>Fedora 19</h5>
 
 <p>Fedora's <tt>golang</tt> package appears to be completely broken, so this installs Go from source.</p>
