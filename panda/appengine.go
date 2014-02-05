@@ -87,6 +87,10 @@ func (hmp *HTTPMeetingPlace) attemptExchange(log func(string, ...interface{}), i
 
 	response, err := http.ReadResponse(bufio.NewReader(conn), request)
 
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var responseBody []byte
 	if response.Body != nil {
 		r := &io.LimitedReader{R: response.Body, N: payloadBytes + 1}
