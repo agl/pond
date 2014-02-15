@@ -32,7 +32,7 @@ const (
 	nonceInHeaderOffset = 4 + 4 + 32
 	// maxMissingMessages is the maximum number of missing messages that
 	// we'll keep track of.
-	maxMissingMessages = 2048
+	maxMissingMessages = 8
 )
 
 // Ratchet contains the per-contact, crypto state.
@@ -330,9 +330,9 @@ func (r *Ratchet) trySavedKeys(ciphertext []byte) ([]byte, error) {
 // saveKeys takes a header key, the current chain key, a received message
 // number and the expected message number and advances the chain key as needed.
 // It returns the message key for given given message number and the new chain
-// key. If any messages have been skipped over, it also returns savedKey, a map
-// suitable for merging with r.saved, that contains the message keys for the
-// missing messages.
+// key. If any messages have been skipped over, it also returns savedKeys, a
+// map suitable for merging with r.saved, that contains the message keys for
+// the missing messages.
 func (r *Ratchet) saveKeys(headerKey, recvChainKey *[32]byte, messageNum, receivedCount uint32) (provisionalChainKey, messageKey [32]byte, savedKeys map[[32]byte]map[uint32]savedKey, err error) {
 	if messageNum < receivedCount {
 		// This is a message from the past, but we didn't have a saved
