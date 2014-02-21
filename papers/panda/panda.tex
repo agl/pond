@@ -101,7 +101,7 @@ ways. The first may come in the form of a message provided by the operator
 that discloses the new number and disconnects the caller after an automated
 message. The second is socially or through a publication of some kind;
 generally when two people meet a new number may be disclosed or when a known
-distribution point such as a news paper begins to print new numbers. The third
+distribution point such as a newspaper begins to print new numbers. The third
 is through a party reading the caller information from their received call or
 SMS list or by reviewing their bill. The fourth is through
 misclosure\cite{kellycaine}, perhaps by a third party who may or may not be
@@ -146,10 +146,10 @@ system: secure, decentralized and human-meaningful. In the original Domain Name
 System, a domain name is decentralized and human-meaningful. In
 Pond\cite{pond}, the addressing system properties are secure and decentralized.
 
-We propose that for a brief window of time that users should have a way to
+We propose that, for a brief window of time, users should have a way to
 change the chosen properties of the naming system.  We assert that trading the
 secure property for the human-meaningful property in the form of phrases may be
-useful trade-off in a time limited, forward secure fashion.
+a useful trade-off in a time limited, forward secure fashion.
 
 Furthermore, we note that Zooko's Triangle is missing an important qualifier,
 which is the passing of time and its relationship with each of the properties.
@@ -163,7 +163,7 @@ a slow memory intensive key derivation process.
 
 EKE2 is very similar to SPAKE2 but uses an ideal cipher to encrypt the
 Diffie-Hellman values rather than masking them with secret group elements. EKE2
-is used to go from a shared-secret to an ephemeral, shared-key and then the
+is used to go from a shared-secret to an ephemeral shared-key and then the
 KeyExchange messages are encrypted with that key and exchanged via the second
 meeting ID.
 
@@ -197,7 +197,7 @@ parties. Due to our symmetry requirement the two parties would have to use the
 same value mask. We have proven that the chosen computational Diffie Hellman
 (CCDH) problem from the SPAKE paper is equally strong when the two mask values
 are equal, however the mask values appear again in the security proof and it's
-not obvious to patch that second hole.
+not obvious how to patch that second hole.
 % XXX: This last sentence could use some rewording to make it clearer
 
 We have chosen to use Encrypted Key Exchange two
@@ -207,18 +207,16 @@ then masking them with secret group elements.
 
 Using a typical block cipher mode would
 result in an attacker having a discomforting amount of control of the resulting
-plaintext. Using an AEAD mode would give an attacker an authenticator which
-% accronym should be defined
+plaintext. Using an Authenticated Encryption with Associated Data (AEAD) mode would give an attacker an authenticator which
 they could use to mount an offline, brute-force attack on the shared
 secret\footnote{The attacker may already be able to mount an offline,
 brute-force attack on the shared secret by using an identifier revealed to the
 meeting point. But we still don't want to give them another avenue for this
 attack in case a particular meeting point doesn't require that}. A wide-block
-construction like LIONNESS\cite{anderson1996two} doesn't appear to be
-% acronym again
+construction like LIONESS\cite{anderson1996two} doesn't appear to be
 applicable because the 256-bit block is too small to split into usefully sized
 left and right parts for the Luby-Rackoff construction. Many other wide-block
-constructions have proposed subsequently including
+constructions have subsequently been proposed including
 EME\cite{halevi2004parallelizable}, CMC\cite{halevi2004parallelizable},
 XCB\cite{mcgrew2004extended}, HCTR\cite{wang2005hctr} and others. However, the
 area is a patent minefield.
@@ -255,12 +253,10 @@ even well chosen dictionary attacks.
 \section{Key exchange details in practice with Pond}
 
 Pond supports two methods of key exchange. The first is manual: the
-KeyExchange messages are serialised with PEM and the user is expected to
-% acronym again, also, should be cited
+KeyExchange messages are serialised with Privacy-enhanced Electronic Mail (PEM)\cite{pem} and the user is expected to
 exchange them with the intended contact, authentically and confidentially. For
-example, a pre-existing relationship with Pretty Good Privacy (PGP) or
-Off-The-Record (OTR) keys could be used to bootstrap Pond.
-% Shall we cite PGP or OTR? probably
+example, a pre-existing relationship with Pretty Good Privacy (PGP)\cite{pgp} or
+Off-The-Record (OTR)\cite{otr} keys could be used to bootstrap Pond.
 
 We implemented\cite{panda} the PANDA discovery technique for the
 Pond\cite{pond} messaging system as the second method of key exchange. PANDA
@@ -287,14 +283,14 @@ they need to be confidential), as well as the information needed to direct a
 message to a user: their home server address and the user's public identity at
 that server.  They also contain an Ed25519 key and the intent is that, in the
 future, users will be able to update their home servers by sending messages to
-each of their contacts. Group member revocations are also be signed by this
+each of their contacts. Group member revocations will also be signed by this
 key.
 
-\subsection{Adding entropy to an easy to a human-meaningfully memoriable phrase}
+\subsection{Adding entropy to a human-meaningfully memorable phrase}
 
-The shared secret itself can consist of a passphrase, a time and a deck or two
+The shared secret itself can consist of a passphrase, a time, and a deck or two
 of cards. Since humans are poor at generating and remembering secrets, a deck
-of cards, shuffled and split in half serves quite well. Decks of cards are also
+of cards, shuffled and split in half, serves quite well. Decks of cards are also
 commonly available and don't have the downsides that bringing a mobile device
 to a meeting might have.
 
