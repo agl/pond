@@ -485,7 +485,7 @@ func (c *cliClient) processFetch(inboxMsg *InboxMessage) {
 		inboxMsg.cliId = c.newCliId()
 	}
 
-	c.Printf("\x07%s New message (%s%s%s) received from %s\n", termPrefix, termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.contacts[inboxMsg.from].name, false))
+	c.Printf("\x07%s (%s) New message (%s%s%s) received from %s\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.contacts[inboxMsg.from].name, false))
 }
 
 func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
@@ -493,7 +493,7 @@ func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
 }
 
 func (c *cliClient) processAcknowledgement(ackedMsg *queuedMessage) {
-	c.Printf("%s Message acknowledged by %s\n", termPrefix, terminalEscape(c.contacts[ackedMsg.to].name, false))
+	c.Printf("%s (%s) Message acknowledged by %s\n", termPrefix, time.Now().Format(shortTimeFormat), terminalEscape(c.contacts[ackedMsg.to].name, false))
 }
 
 func (c *cliClient) processRevocationOfUs(by *Contact) {
@@ -541,7 +541,7 @@ func (c *cliClient) processPANDAUpdateUI(update pandaUpdate) {
 
 func (c *cliClient) processMessageDelivered(msg *queuedMessage) {
 	if !msg.revocation && len(msg.message.Body) > 0 {
-		c.Printf("%s Message %s%s%s to %s transmitted successfully\n", termPrefix, termCliIdStart, msg.cliId.String(), termReset, terminalEscape(c.contacts[msg.to].name, false))
+		c.Printf("%s (%s) Message %s%s%s to %s transmitted successfully\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, msg.cliId.String(), termReset, terminalEscape(c.contacts[msg.to].name, false))
 	}
 	c.showQueueState()
 }
