@@ -11,7 +11,9 @@ title: Technical
 
 <h4>Transport</h4>
 
-<p>Users communicate with servers (and only with servers, never with other users directly) using the transport protocol. Although Tor hidden services already provide authentication of the server to the client, we don't rely on that. The transport layer provides integrity, forward secure confidentiality and mutual authentication. It's assumed that the public key of the server is already known to the user and the public key of the user isn't revealed to anyone other than the expected server. (Tor does provide another layer of forward secrecy which means that a compromise of the server's keys does not compromise the public keys of users that connected to it.)</p>
+<p>Users communicate with servers (and only with servers, never with other users directly) using the transport protocol. Users communicate with their own server to receive messages, but unlike email, they communicate with the <em>recipient's</em> server in order to send a message.</p>
+
+<p>Although Tor hidden services already provide authentication of the server to the client, we don't rely on that. The transport layer provides integrity, forward secure confidentiality and mutual authentication. It's assumed that the public key of the server is already known to the user and the public key of the user isn't revealed to anyone other than the expected server. (Tor does provide another layer of forward secrecy which means that a compromise of the server's keys does not compromise the public keys of users that connected to it.)</p>
 
 <p>After authentication, the user sends a fixed amount (currently 16KB) of data to the server and the server replies with an identically sized flow. Finally the user sends a secure close message and the connection is complete. Connections are never reused. (The actual messages between the user and the server might be very small, but those messages will be padded to 16KB before being encrypted in order to make the traffic profile constant.)</p>
 
