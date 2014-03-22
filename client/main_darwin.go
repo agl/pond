@@ -43,11 +43,9 @@ func main() {
 		client.dev = dev
 		client.Start()
 	} else {
-		ui := NewGTKUI()
-		client := NewGUIClient(*stateFile, ui, rand.Reader, false /* testing */, true /* autoFetch */)
+		client := NewCocoaClient(*stateFile, rand.Reader, false /* testing */, true /* autoFetch */)
 		client.disableV2Ratchet = true
 		client.dev = dev
 		client.Start()
-		ui.Run()
 	}
 }

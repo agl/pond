@@ -1,4 +1,4 @@
-// +build !nogui
+// +build !nogui,!darwin
 
 package main
 
