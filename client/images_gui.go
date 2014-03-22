@@ -2,24 +2,8 @@
 
 package main
 
-import (
-	"github.com/agl/go-gtk/gdkpixbuf"
-)
-
-var indicatorImages [indicatorCount]*gdkpixbuf.GdkPixbuf
-
-func (i Indicator) Image() *gdkpixbuf.GdkPixbuf {
-	if indicatorImages[i] == nil {
-		loader, err := gdkpixbuf.PixbufLoaderWithType("png")
-		if err != nil {
-			panic(err)
-		}
-		if ok, err := loader.Write(indicatorPNGBytes[i]); !ok {
-			panic(err)
-		}
-		indicatorImages[i] = loader.GetPixbuf()
-	}
-	return indicatorImages[i]
+func (i Indicator) pngBytes() []byte {
+	return indicatorPNGBytes[i]
 }
 
 var indicatorPNGBytes = [][]byte{
