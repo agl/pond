@@ -69,6 +69,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -528,7 +529,29 @@ type Draft struct {
 	// saved to disk.
 	cliId cliId
 
+	// pendingDetachments is only used by the GTK UI.
 	pendingDetachments map[uint64]*pendingDetachment
+}
+
+// prettyNumber formats n in base 10 and puts commas between groups of
+// thousands.
+func prettyNumber(n uint64) string {
+	s := strconv.FormatUint(n, 10)
+	ret := make([]rune, 0, len(s)*2)
+
+	phase := len(s) % 3
+	for i, r := range s {
+		if phase == 0 && i > 0 {
+			ret = append(ret, ',')
+		}
+		ret = append(ret, r)
+		phase--
+		if phase < 0 {
+			phase += 3
+		}
+	}
+
+	return string(ret)
 }
 
 // usageString returns a description of the amount of space taken up by a body
@@ -557,7 +580,7 @@ func (draft *Draft) usageString() (string, bool) {
 		panic("error while serialising candidate Message: " + err.Error())
 	}
 
-	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
+	s := fmt.Sprintf("%s of %s bytes", prettyNumber(uint64(len(serialized))), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 

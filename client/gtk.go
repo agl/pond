@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/agl/go-gtk/gdk"
+	"github.com/agl/go-gtk/gdkpixbuf"
 	"github.com/agl/go-gtk/glib"
 	"github.com/agl/go-gtk/gtk"
 	"github.com/agl/go-gtk/gtkspell"
@@ -678,4 +679,20 @@ func colComponent(component uint32) float64 {
 
 func toColor(color uint32) *gdk.GdkRGBA {
 	return gdk.RGBA(colComponent(color>>16), colComponent(color>>8), colComponent(color), 1)
+}
+
+var indicatorImages [indicatorCount]*gdkpixbuf.GdkPixbuf
+
+func (i Indicator) Image() *gdkpixbuf.GdkPixbuf {
+	if indicatorImages[i] == nil {
+		loader, err := gdkpixbuf.PixbufLoaderWithType("png")
+		if err != nil {
+			panic(err)
+		}
+		if ok, err := loader.Write(indicatorPNGBytes[i]); !ok {
+			panic(err)
+		}
+		indicatorImages[i] = loader.GetPixbuf()
+	}
+	return indicatorImages[i]
 }
