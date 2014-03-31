@@ -1492,7 +1492,8 @@ Handle:
 		}
 
 		c.Printf("Enter shared secret with contact, or hit enter to generate, print and use a random one\n")
-		sharedSecret, err := c.term.ReadPassword("secret: ")
+		c.term.SetPrompt("secret: ")
+		sharedSecret, err := c.term.ReadLine()
 		if err != nil {
 			panic(err)
 		}
@@ -1536,6 +1537,7 @@ Handle:
 		contact.pandaShutdownChan = make(chan struct{})
 		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 		c.Printf("%s Key exchange running in background.\n", termPrefix)
+		c.setCurrentObject(contact)
 
 	case renameCommand:
 		if contact, ok := c.currentObj.(*Contact); ok {
