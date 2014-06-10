@@ -1920,7 +1920,7 @@ func (c *guiClient) identityUI() interface{} {
 									name:        "entomb",
 									insensitive: true,
 								},
-								text: "Emtomb",
+								text: "Entomb",
 							}},
 							{1, 1, Label{
 								widgetBase: widgetBase{hExpand: true},
