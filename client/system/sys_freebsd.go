@@ -40,22 +40,6 @@ func IsSafe() error {
 	return nil
 }
 
-// workaround for http://code.google.com/p/go/issues/detail?id=6588
-func getfsstat(buf []syscall.Statfs_t, flags int) (n int, err error) {
-	var _p0 unsafe.Pointer
-	var bufsize uintptr
-	if len(buf) > 0 {
-		_p0 = unsafe.Pointer(&buf[0])
-		bufsize = unsafe.Sizeof(syscall.Statfs_t{}) * uintptr(len(buf))
-	}
-	r0, _, e1 := syscall.Syscall(syscall.SYS_GETFSSTAT, uintptr(_p0), bufsize, uintptr(flags))
-	n = int(r0)
-	if e1 != 0 {
-		err = e1
-	}
-	return
-}
-
 func int8str(s []int8) string {
 	b := make([]byte, len(s))
 	i := 0
@@ -71,15 +55,15 @@ func int8str(s []int8) string {
 }
 
 func processFilesystems(f func(fstype, path string) error) error {
-	n, err := getfsstat(nil, 1 /* MNT_WAIT */)
+	n, err := syscall.Getfsstat(nil, 1 /* MNT_WAIT */)
 	if err != nil {
 		return errors.New("system: getfsstat error: " + err.Error())
 	}
 
 	filesystems := make([]syscall.Statfs_t, n)
-	n, err = getfsstat(filesystems, 1 /* MNT_WAIT */)
+	n, err = syscall.Getfsstat(filesystems, 1 /* MNT_WAIT */)
 	if err != nil {
-		return errors.New("system: getfsstat error: " + err.Error())
+		return errors.New("system: Getfsstat error: " + err.Error())
 	}
 
 	for _, fs := range filesystems[:n] {
