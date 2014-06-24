@@ -25,28 +25,16 @@ const haveGUI = true
 
 const (
 	colorDefault               = 0
-	colorWhite                 = 0xffffff
-	colorGray                  = 0xfafafa
-	colorHighlight             = 0xffebcd
-	colorSubline               = 0x999999
-	colorHeaderBackground      = 0xececed
-	colorHeaderForeground      = 0x777777
-	colorHeaderForegroundSmall = 0x7b7f83
-	colorSep                   = 0xc9c9c9
-	colorTitleForeground       = 0xdddddd
-	colorBlack                 = 1
-	colorRed                   = 0xff0000
-	colorError                 = 0xff0000
-	colorImminently            = 0xffdddd
-	colorDeleteSoon            = 0xdddddd
 )
 
 const (
 	fontLoadTitle   = "DejaVu Serif 30"
+	fontLoadLabel   = "DejaVu Serif 14"
 	fontLoadLarge   = "Arial Bold 30"
 	fontListHeading = "Ariel Bold 11"
 	fontListEntry   = "Liberation Sans 12"
 	fontListSubline = "Liberation Sans 10"
+	fontListSmall   = "Liberation Sans 8"
 	fontMainTitle   = "Arial 16"
 	fontMainLabel   = "Arial Bold 9"
 	fontMainBody    = "Arial 12"
@@ -79,11 +67,65 @@ const (
 	uiStateEntombComplete
 )
 
+type colorScheme struct {
+	uiBackground          uint32
+	headlineForeground    uint32
+	headlineBackground    uint32
+	menuBackground        uint32
+	highlight             uint32
+	subline               uint32
+	headerBackground      uint32
+	headerForeground      uint32
+	headerForegroundSmall uint32
+	labelBackground       uint32
+	labelForeground       uint32
+	buttonBackground      uint32
+	buttonForeground      uint32
+	entryBackground       uint32
+	entryForeground       uint32
+	sep                   uint32
+	titleForeground       uint32
+	error                 uint32
+	imminently            uint32
+	deleteSoon            uint32
+}
+
 type guiClient struct {
 	client
 
 	gui                                               GUI
 	inboxUI, outboxUI, contactsUI, clientUI, draftsUI *listUI
+	colors                                            colorScheme
+}
+
+func pondColorScheme() colorScheme {
+	return colorScheme{
+		uiBackground:          0xffffff,
+		headlineForeground:    0xffffff,
+		headlineBackground:    0x333355,
+		menuBackground:        0xfafafa,
+		highlight:             0xffebcd,
+		subline:               0x999999,
+		headerBackground:      0xececed,
+		headerForeground:      0x777777,
+		headerForegroundSmall: 0x7b7f83,
+		labelForeground:       0x2e3436,
+		labelBackground:       0xededed,
+		buttonForeground:      0x2e3436,
+		buttonBackground:      0xededed,
+		entryForeground:       0x2e3436,
+		entryBackground:       0xffffff,
+		sep:                   0xc9c9c9,
+		titleForeground:       0xdddddd,
+		error:                 0xff0000,
+		imminently:            0xffdddd,
+		deleteSoon:            0xdddddd,
+	}
+}
+
+func wmColorScheme() colorScheme {
+	return colorScheme{
+	}
 }
 
 // nextEvent polls a number of event sources and returns a GUI event and a bool
@@ -198,15 +240,17 @@ func (c *guiClient) torPromptUI() error {
 		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
 		children: []Widget{
 			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				widgetBase: widgetBase{font: fontLoadTitle, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 				text:       "Cannot find Tor",
 			},
 			Label{
 				widgetBase: widgetBase{
 					padding: 20,
-					font:    "DejaVu Sans 14",
+					font:    fontLoadLabel,
+					foreground: c.colors.labelForeground,
+					background: c.colors.labelBackground,
 				},
-				text: "Please start Tor or the Tor Browser Bundle. Looking for a SOCKS proxy on port 9050 or 9150...",
+				text: msgPleaseStartTor,
 				wrap: 600,
 			},
 		},
@@ -251,16 +295,16 @@ func (c *guiClient) sleepUI(d time.Duration) error {
 func (c *guiClient) initUI() {
 	ui := VBox{
 		widgetBase: widgetBase{
-			background: colorWhite,
+			background: c.colors.uiBackground,
 		},
 		children: []Widget{
 			EventBox{
-				widgetBase: widgetBase{background: 0x333355},
+				widgetBase: widgetBase{background: c.colors.headlineBackground},
 				child: HBox{
 					children: []Widget{
 						Label{
 							widgetBase: widgetBase{
-								foreground: colorWhite,
+								foreground: c.colors.headlineForeground,
 								padding:    10,
 								font:       fontLoadTitle,
 							},
@@ -287,7 +331,7 @@ func (c *guiClient) loadingUI() {
 		widgetBase: widgetBase{expand: true, fill: true},
 		child: Label{
 			widgetBase: widgetBase{
-				foreground: colorTitleForeground,
+				foreground: c.colors.titleForeground,
 				font:       fontLoadLarge,
 			},
 			text:   "Loading...",
@@ -309,17 +353,19 @@ func (c *guiClient) DeselectAll() {
 	c.draftsUI.Deselect()
 }
 
-var rightPlaceholderUI = EventBox{
-	widgetBase: widgetBase{background: colorGray, name: "right"},
-	child: Label{
-		widgetBase: widgetBase{
-			foreground: colorTitleForeground,
-			font:       fontLoadLarge,
+func (c *guiClient) rightPlaceholderUI() EventBox {
+	return EventBox{
+		widgetBase: widgetBase{background: c.colors.menuBackground, name: "right"},
+		child: Label{
+			widgetBase: widgetBase{
+				foreground: c.colors.titleForeground,
+				font:       fontLoadLarge,
+			},
+			text:   "Pond",
+			xAlign: 0.5,
+			yAlign: 0.5,
 		},
-		text:   "Pond",
-		xAlign: 0.5,
-		yAlign: 0.5,
-	},
+	}
 }
 
 func (c *guiClient) updateWindowTitle() {
@@ -391,14 +437,14 @@ func (c *guiClient) mainUI() {
 		left: Scrolled{
 			viewport: true,
 			child: EventBox{
-				widgetBase: widgetBase{background: colorGray},
+				widgetBase: widgetBase{background: c.colors.menuBackground},
 				child: VBox{
 					children: []Widget{
 						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
+							widgetBase: widgetBase{background: c.colors.headerBackground},
 							child: Label{
 								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
+									foreground: c.colors.headerForegroundSmall,
 									padding:    10,
 									font:       fontListHeading,
 								},
@@ -406,14 +452,14 @@ func (c *guiClient) mainUI() {
 								text:   "Inbox",
 							},
 						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 						VBox{widgetBase: widgetBase{name: "inboxVbox"}},
 
 						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
+							widgetBase: widgetBase{background: c.colors.headerBackground},
 							child: Label{
 								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
+									foreground: c.colors.headerForegroundSmall,
 									padding:    10,
 									font:       fontListHeading,
 								},
@@ -421,7 +467,7 @@ func (c *guiClient) mainUI() {
 								text:   "Outbox",
 							},
 						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 						HBox{
 							widgetBase: widgetBase{padding: 6},
 							children: []Widget{
@@ -433,7 +479,7 @@ func (c *guiClient) mainUI() {
 											widgetBase: widgetBase{padding: 8},
 											children: []Widget{
 												Button{
-													widgetBase: widgetBase{width: 100, name: "compose"},
+													widgetBase: widgetBase{width: 100, name: "compose", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 													text:       "Compose",
 												},
 											},
@@ -446,10 +492,10 @@ func (c *guiClient) mainUI() {
 						VBox{widgetBase: widgetBase{name: "outboxVbox"}},
 
 						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
+							widgetBase: widgetBase{background: c.colors.headerBackground},
 							child: Label{
 								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
+									foreground: c.colors.headerForegroundSmall,
 									padding:    10,
 									font:       fontListHeading,
 								},
@@ -457,14 +503,14 @@ func (c *guiClient) mainUI() {
 								text:   "Drafts",
 							},
 						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 						VBox{widgetBase: widgetBase{name: "draftsVbox"}},
 
 						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
+							widgetBase: widgetBase{background: c.colors.headerBackground},
 							child: Label{
 								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
+									foreground: c.colors.headerForegroundSmall,
 									padding:    10,
 									font:       fontListHeading,
 								},
@@ -472,7 +518,7 @@ func (c *guiClient) mainUI() {
 								text:   "Contacts",
 							},
 						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 						HBox{
 							widgetBase: widgetBase{padding: 6},
 							children: []Widget{
@@ -484,7 +530,7 @@ func (c *guiClient) mainUI() {
 											widgetBase: widgetBase{padding: 8},
 											children: []Widget{
 												Button{
-													widgetBase: widgetBase{width: 100, name: "newcontact"},
+													widgetBase: widgetBase{width: 100, name: "newcontact", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 													text:       "Add",
 												},
 											},
@@ -497,10 +543,10 @@ func (c *guiClient) mainUI() {
 						VBox{widgetBase: widgetBase{name: "contactsVbox"}},
 
 						EventBox{
-							widgetBase: widgetBase{background: colorHeaderBackground},
+							widgetBase: widgetBase{background: c.colors.headerBackground},
 							child: Label{
 								widgetBase: widgetBase{
-									foreground: colorHeaderForegroundSmall,
+									foreground: c.colors.headerForegroundSmall,
 									padding:    10,
 									font:       fontListHeading,
 								},
@@ -508,7 +554,7 @@ func (c *guiClient) mainUI() {
 								text:   "Client",
 							},
 						},
-						EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+						EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 						VBox{
 							widgetBase: widgetBase{name: "clientVbox"},
 						},
@@ -519,7 +565,7 @@ func (c *guiClient) mainUI() {
 		right: Scrolled{
 			horizontal: true,
 			viewport:   true,
-			child:      rightPlaceholderUI,
+			child:      c.rightPlaceholderUI(),
 		},
 	}
 
@@ -528,6 +574,7 @@ func (c *guiClient) mainUI() {
 
 	c.contactsUI = &listUI{
 		gui:      c.gui,
+		colors: c.colors,
 		vboxName: "contactsVbox",
 	}
 
@@ -537,6 +584,7 @@ func (c *guiClient) mainUI() {
 
 	c.inboxUI = &listUI{
 		gui:      c.gui,
+		colors: c.colors,
 		vboxName: "inboxVbox",
 	}
 
@@ -569,6 +617,7 @@ func (c *guiClient) mainUI() {
 
 	c.outboxUI = &listUI{
 		gui:      c.gui,
+		colors: c.colors,
 		vboxName: "outboxVbox",
 	}
 
@@ -586,6 +635,7 @@ func (c *guiClient) mainUI() {
 
 	c.draftsUI = &listUI{
 		gui:      c.gui,
+		colors: c.colors,
 		vboxName: "draftsVbox",
 	}
 
@@ -600,6 +650,7 @@ func (c *guiClient) mainUI() {
 
 	c.clientUI = &listUI{
 		gui:      c.gui,
+		colors: c.colors,
 		vboxName: "clientVbox",
 	}
 	const (
@@ -678,30 +729,30 @@ func (c *guiClient) updateInboxBackgroundColor(msg *InboxMessage) {
 	if !msg.retained {
 		if now.Sub(msg.receivedTime) > messageLifetime {
 			// The message will be deleted imminently.
-			c.inboxUI.SetBackground(msg.id, colorImminently)
+			c.inboxUI.SetBackground(msg.id, c.colors.imminently)
 			return
 		}
 		if now.Sub(msg.receivedTime) > messagePreIndicationLifetime {
 			// The message will be deleted soon.
-			c.inboxUI.SetBackground(msg.id, colorDeleteSoon)
+			c.inboxUI.SetBackground(msg.id, c.colors.deleteSoon)
 			return
 		}
 	}
 
-	c.inboxUI.SetBackground(msg.id, colorGray)
+	c.inboxUI.SetBackground(msg.id, c.colors.menuBackground)
 }
 
 func (c *guiClient) errorUI(errorText string, fatal bool) {
 	bgColor := uint32(colorDefault)
 	if fatal {
-		bgColor = colorError
+		bgColor = c.colors.error
 	}
 
 	ui := EventBox{
 		widgetBase: widgetBase{background: bgColor, expand: true, fill: true},
 		child: Label{
 			widgetBase: widgetBase{
-				foreground: colorBlack,
+				foreground: c.colors.labelForeground,
 				font:       "Ariel Bold 12",
 			},
 			text:   errorText,
@@ -730,13 +781,15 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 		widgetBase: widgetBase{padding: 40, expand: true, fill: true, name: "vbox"},
 		children: []Widget{
 			Label{
-				widgetBase: widgetBase{font: "DejaVu Sans 30"},
+				widgetBase: widgetBase{font: fontLoadTitle, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 				text:       "Passphrase",
 			},
 			Label{
 				widgetBase: widgetBase{
 					padding: 20,
-					font:    "DejaVu Sans 14",
+					font:    fontLoadLabel,
+					foreground: c.colors.labelForeground,
+					background: c.colors.labelBackground,
 				},
 				text: msgKeyPrompt,
 				wrap: 600,
@@ -745,11 +798,12 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 				spacing: 5,
 				children: []Widget{
 					Label{
+						widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 						text:   "Passphrase:",
 						yAlign: 0.5,
 					},
 					Entry{
-						widgetBase: widgetBase{name: "pw"},
+						widgetBase: widgetBase{name: "pw", foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 						width:      60,
 						password:   true,
 					},
@@ -759,7 +813,7 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 				widgetBase: widgetBase{padding: 40},
 				children: []Widget{
 					Button{
-						widgetBase: widgetBase{name: "next"},
+						widgetBase: widgetBase{name: "next", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 						text:       "Next",
 					},
 				},
@@ -768,7 +822,7 @@ func (c *guiClient) keyPromptUI(stateFile *disk.StateFile) error {
 				widgetBase: widgetBase{padding: 5},
 				children: []Widget{
 					Label{
-						widgetBase: widgetBase{name: "status"},
+						widgetBase: widgetBase{name: "status", foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					},
 				},
 			},
@@ -826,7 +880,7 @@ func (c *guiClient) createPassphraseUI() (string, error) {
 		rows: [][]GridE{
 			{
 				{2, 1, Label{
-					widgetBase: widgetBase{font: "DejaVu Sans 30"},
+					widgetBase: widgetBase{font: fontLoadTitle, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:       "Set Passphrase",
 				}},
 			},
@@ -834,7 +888,9 @@ func (c *guiClient) createPassphraseUI() (string, error) {
 				{2, 1, Label{
 					widgetBase: widgetBase{
 						padding: 20,
-						font:    "DejaVu Sans 14",
+						font:    fontLoadLabel,
+						foreground: c.colors.labelForeground,
+						background: c.colors.labelBackground,
 					},
 					text: msgCreatePassphrase,
 					wrap: 600,
@@ -842,18 +898,19 @@ func (c *guiClient) createPassphraseUI() (string, error) {
 			},
 			{
 				{1, 1, Label{
+					widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:   "Passphrase:",
 					yAlign: 0.5,
 				}},
 				{1, 1, Entry{
-					widgetBase: widgetBase{name: "pw", hAlign: AlignStart, hExpand: true},
+					widgetBase: widgetBase{name: "pw", hAlign: AlignStart, hExpand: true, foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 					width:      60,
 					password:   true,
 				}},
 			},
 			{
 				{2, 1, Button{
-					widgetBase: widgetBase{name: "next", hAlign: AlignStart},
+					widgetBase: widgetBase{name: "next", hAlign: AlignStart, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 					text:       "Next",
 				}},
 			},
@@ -903,7 +960,11 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 		rows: [][]GridE{
 			{
 				{2, 1, Label{
-					widgetBase: widgetBase{font: "DejaVu Sans 30"},
+					widgetBase: widgetBase{
+						font: fontLoadTitle,
+						foreground: c.colors.labelForeground,
+						background: c.colors.labelBackground,
+					},
 					text:       "Create Account",
 				}},
 			},
@@ -911,7 +972,9 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 				{2, 1, Label{
 					widgetBase: widgetBase{
 						padding: 20,
-						font:    "DejaVu Sans 14",
+						font:    fontLoadLabel,
+						foreground: c.colors.labelForeground,
+						background: c.colors.labelBackground,
 					},
 					text: msgCreateAccount + " If you want to use the default server, just click 'Create'.",
 					wrap: 600,
@@ -919,18 +982,22 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 			},
 			{
 				{1, 1, Label{
+					widgetBase: widgetBase{
+						foreground: c.colors.labelForeground,
+						background: c.colors.labelBackground,
+					},
 					text:   "Server:",
 					yAlign: 0.5,
 				}},
 				{1, 1, Entry{
-					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10},
+					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10, foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 					width:      75,
 					text:       defaultServer,
 				}},
 			},
 			{
 				{2, 1, Button{
-					widgetBase: widgetBase{name: "create", hAlign: AlignStart},
+					widgetBase: widgetBase{name: "create", hAlign: AlignStart, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 					text:       "Create",
 				}},
 			},
@@ -947,39 +1014,51 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 					rows: [][]GridE{
 						{
 							{2, 1, Label{
-								widgetBase: widgetBase{font: "bold"},
+								widgetBase: widgetBase{
+									font: "bold",
+									foreground: c.colors.labelForeground,
+									background: c.colors.labelBackground,
+								},
 								text:       "Import entombed state file",
 							}},
 						},
 						{
 							{2, 1, Label{
+								widgetBase: widgetBase{
+									foreground: c.colors.labelForeground,
+									background: c.colors.labelBackground,
+								},
 								text: "Rather than creating a new account, it's also possible to import an 'entombed' state file. This is used when moving Pond from one computer to another.",
 								wrap: 600,
 							}},
 						},
 						{
 							{1, 1, Label{
+								widgetBase: widgetBase{
+									foreground: c.colors.labelForeground,
+									background: c.colors.labelBackground,
+								},
 								text:   "Key:",
 								yAlign: 0.5,
 							}},
 							{1, 1, Entry{
-								widgetBase: widgetBase{name: "tombkey", hAlign: AlignStart, hExpand: true},
+								widgetBase: widgetBase{name: "tombkey", hAlign: AlignStart, hExpand: true, foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 								width:      66,
 							}},
 						},
 						{
 							{1, 1, Button{
-								widgetBase: widgetBase{name: "tombfile", hAlign: AlignStart},
+								widgetBase: widgetBase{name: "tombfile", hAlign: AlignStart, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 								text:       "Select File",
 							}},
 							{1, 1, Button{
-								widgetBase: widgetBase{name: "import", hAlign: AlignStart, insensitive: true},
+								widgetBase: widgetBase{name: "import", hAlign: AlignStart, insensitive: true, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 								text:       "Import",
 							}},
 						},
 						{
 							{2, 1, Label{
-								widgetBase: widgetBase{name: "tomberror", foreground: colorRed},
+								widgetBase: widgetBase{name: "tomberror", foreground: c.colors.error, background: c.colors.labelBackground},
 								wrap:       600,
 							}},
 						},
@@ -1061,7 +1140,11 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 							widgetBase: widgetBase{name: "spinner"},
 						},
 						Label{
-							widgetBase: widgetBase{name: "status"},
+							widgetBase: widgetBase{
+								name: "status",
+								foreground: c.colors.labelForeground,
+								background: c.colors.labelBackground,
+							},
 							text:       initialMessage,
 						},
 					},
@@ -1209,27 +1292,33 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		rows: [][]GridE{
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{
+						font: fontMainLabel,
+						foreground: c.colors.headerForeground,
+						background: c.colors.headerBackground,
+						hAlign: AlignEnd,
+						vAlign: AlignCenter,
+					},
 					text:       "FROM",
 				}},
 				// We set hExpand true here so that the
 				// attachments/detachments UI doesn't cause the
 				// first column to expand.
-				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: fromString}},
+				{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: fromString}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "SENT",
 				}},
-				{1, 1, Label{text: sentTimeText}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: sentTimeText}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "ERASE",
 				}},
-				{1, 1, Label{text: eraseTimeText}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: eraseTimeText}},
 			},
 		},
 	}
@@ -1245,6 +1334,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 					widgetBase: widgetBase{
 						name:        "reply",
 						insensitive: isServerAnnounce || isPending,
+						foreground: c.colors.buttonForeground,
+						background: c.colors.buttonBackground,
 					},
 					text: "Reply",
 				}},
@@ -1254,6 +1345,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 					widgetBase: widgetBase{
 						name:        "ack",
 						insensitive: isServerAnnounce || isPending || msg.acked,
+						foreground: c.colors.buttonForeground,
+						background: c.colors.buttonBackground,
 					},
 					text: "Ack",
 				}},
@@ -1262,6 +1355,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 				{1, 1, Button{
 					widgetBase: widgetBase{
 						name: "delete",
+						foreground: c.colors.buttonForeground,
+						background: c.colors.buttonBackground,
 					},
 					text: "Delete Now",
 				}},
@@ -1270,6 +1365,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 				{1, 1, CheckButton{
 					widgetBase: widgetBase{
 						name: "retain",
+						foreground: c.colors.buttonForeground,
+						background: c.colors.buttonBackground,
 					},
 					checked: msg.retained,
 					text:    "Retain",
@@ -1285,7 +1382,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		wrap:       true,
 	}
 
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("RECEIVED MESSAGE", left, right, main)}
+	c.gui.Actions() <- SetChild{name: "right", child: c.rightPane("RECEIVED MESSAGE", left, right, main)}
 
 	// The UI names widgets with strings so these prefixes are used to
 	// generate names for the dynamic parts of the UI.
@@ -1318,11 +1415,11 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 			filename := maybeTruncate(*attachment.Filename)
 			grid.rows = append(grid.rows, []GridE{
 				{1, 1, Label{
-					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart},
+					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:       filename,
 				}},
 				{1, 1, Button{
-					widgetBase: widgetBase{name: fmt.Sprintf("%s%d", attachmentPrefix, i)},
+					widgetBase: widgetBase{name: fmt.Sprintf("%s%d", attachmentPrefix, i), foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 					text:       "Save",
 				}},
 			})
@@ -1330,7 +1427,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 
 		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
 			{1, 1, Label{
-				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+				widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 				text:       "ATTACHMENTS",
 			}},
 		}}
@@ -1353,7 +1450,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 			}
 			row := []GridE{
 				{1, 1, Label{
-					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart},
+					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:       filename,
 				}},
 				{1, 1, Button{
@@ -1361,6 +1458,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 						name:        fmt.Sprintf("%s%d", detachmentDecryptPrefix, i),
 						padding:     3,
 						insensitive: pending != nil,
+						foreground: c.colors.buttonForeground,
+ 						background: c.colors.buttonBackground,
 					},
 					text: "Decrypt local file with key",
 				}},
@@ -1368,6 +1467,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 					widgetBase: widgetBase{
 						name:    fmt.Sprintf("%s%d", detachmentSavePrefix, i),
 						padding: 3,
+						foreground: c.colors.buttonForeground,
+ 						background: c.colors.buttonBackground,
 					},
 					text: "Save key to disk",
 				}},
@@ -1379,6 +1480,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 							name:        fmt.Sprintf("%s%d", detachmentDownloadPrefix, i),
 							padding:     3,
 							insensitive: pending != nil,
+							foreground: c.colors.buttonForeground,
+							background: c.colors.buttonBackground,
 						},
 						text: "Download",
 					},
@@ -1394,7 +1497,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 
 		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
 			{1, 1, Label{
-				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+				widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 				text:       "KEYS",
 			}},
 		}}
@@ -1579,7 +1682,7 @@ NextEvent:
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
 			c.deleteInboxMsg(msg.id)
-			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- SetChild{name: "right", child: c.rightPlaceholderUI()}
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
 			c.save()
@@ -1636,46 +1739,48 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 		rows: [][]GridE{
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "TO",
 				}},
-				{1, 1, Label{text: contact.name}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: contact.name}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "CREATED",
 				}},
 				{1, 1, Label{
+					widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text: time.Unix(*msg.message.Time, 0).Format(time.RFC1123),
 				}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "SENT",
 				}},
 				{1, 1, Label{
-					widgetBase: widgetBase{name: "sent"},
+					widgetBase: widgetBase{name: "sent", foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:       sentTime,
 				}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "ACKNOWLEDGED",
 				}},
 				{1, 1, Label{
-					widgetBase: widgetBase{name: "acked"},
+					widgetBase: widgetBase{name: "acked", foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text:       formatTime(msg.acked),
 				}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "ERASE",
 				}},
 				{1, 1, Label{
+					widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					text: eraseTime,
 				}},
 			},
@@ -1692,6 +1797,8 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 					widgetBase: widgetBase{
 						name:        "abort",
 						insensitive: !canAbort,
+						foreground: c.colors.buttonForeground,
+ 						background: c.colors.buttonBackground,
 					},
 					text: "Abort Send",
 				}},
@@ -1701,6 +1808,8 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 					widgetBase: widgetBase{
 						name:        "delete",
 						insensitive: canAbort,
+						foreground: c.colors.buttonForeground,
+ 						background: c.colors.buttonBackground,
 					},
 					text: "Delete",
 				}},
@@ -1715,7 +1824,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 		wrap:       true,
 	}
 
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("SENT MESSAGE", left, right, main)}
+	c.gui.Actions() <- SetChild{name: "right", child: c.rightPane("SENT MESSAGE", left, right, main)}
 	c.gui.Actions() <- UIState{uiStateOutbox}
 	c.gui.Signal()
 
@@ -1769,7 +1878,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			if msg.revocation || len(msg.message.Body) > 0 {
 				c.outboxUI.Remove(msg.id)
 			}
-			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- SetChild{name: "right", child: c.rightPlaceholderUI()}
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
 			return nil
@@ -1802,12 +1911,12 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 	return nil
 }
 
-func rightPane(title string, left, right, main Widget) Grid {
+func (c *guiClient) rightPane(title string, left, right, main Widget) Grid {
 	var mid []GridE
 	if left != nil {
 		mid = append(mid, GridE{1, 1, left})
 	}
-	mid = append(mid, GridE{1, 1, Label{widgetBase: widgetBase{hExpand: true}}})
+	mid = append(mid, GridE{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}}})
 	if right != nil {
 		mid = append(mid, GridE{1, 1, right})
 	}
@@ -1816,15 +1925,15 @@ func rightPane(title string, left, right, main Widget) Grid {
 		rows: [][]GridE{
 			{
 				{3, 1, EventBox{
-					widgetBase: widgetBase{background: colorHeaderBackground, hExpand: true},
+					widgetBase: widgetBase{background: c.colors.headerBackground, hExpand: true},
 					child: Label{
-						widgetBase: widgetBase{font: fontMainTitle, margin: 10, foreground: colorHeaderForeground, hExpand: true},
+						widgetBase: widgetBase{font: fontMainTitle, margin: 10, foreground: c.colors.headerForeground, hExpand: true},
 						text:       title,
 					},
 				}},
 			},
 			{
-				{3, 1, EventBox{widgetBase: widgetBase{height: 1, background: colorSep}}},
+				{3, 1, EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}}},
 			},
 			mid,
 			{},
@@ -1842,7 +1951,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func (c *guiClient) nameValuesLHS(entries []nvEntry) Widget {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -1859,11 +1968,11 @@ func nameValuesLHS(entries []nvEntry) Widget {
 
 		grid.rows = append(grid.rows, []GridE{
 			GridE{1, 1, Label{
-				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: vAlign},
+				widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: vAlign},
 				text:       ent.name,
 			}},
 			GridE{1, 1, Label{
-				widgetBase: widgetBase{font: font},
+				widgetBase: widgetBase{font: font, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 				text:       ent.value,
 				selectable: true,
 			}},
@@ -1874,7 +1983,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 }
 
 func (c *guiClient) identityUI() interface{} {
-	entries := nameValuesLHS([]nvEntry{
+	entries := c.nameValuesLHS([]nvEntry{
 		{"SERVER", c.server},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", c.pub[:])},
@@ -1900,37 +2009,46 @@ func (c *guiClient) identityUI() interface{} {
 							{3, 1, Label{
 								widgetBase: widgetBase{
 									font: "bold",
+									foreground: c.colors.labelForeground,
+									background: c.colors.labelBackground,
 								},
 								text: "Entombing",
 							}},
 						},
 						{
 							{3, 1, Label{
+								widgetBase: widgetBase{
+									foreground: c.colors.labelForeground,
+									background: c.colors.labelBackground,
+								},
 								text: "Entombing your statefile causes it to be converted into an encrypted file that can be moved to a different computer. The file is encrypted with an ephemeral key that is printed at the end of the entombing process and must be written down. The original statefile is erased. Once the entombed file has been imported elsewhere, the paper with the ephemeral key must be destroyed.",
 								wrap: 600,
 							}},
 						},
 						{
 							{1, 1, Button{
-								widgetBase: widgetBase{name: "tombfile"},
+								widgetBase: widgetBase{name: "tombfile", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 								text:       "Select file",
 							}},
 							{1, 1, Button{
 								widgetBase: widgetBase{
 									name:        "entomb",
 									insensitive: true,
+									foreground: c.colors.buttonForeground,
+									background: c.colors.buttonBackground,
 								},
 								text: "Entomb",
 							}},
 							{1, 1, Label{
-								widgetBase: widgetBase{hExpand: true},
+								widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 							}},
 						},
 						{
 							{3, 1, Label{
 								widgetBase: widgetBase{
 									name:       "tomberror",
-									foreground: colorRed,
+									foreground: c.colors.error,
+									background: c.colors.labelBackground,
 								},
 							}},
 						},
@@ -1940,7 +2058,7 @@ func (c *guiClient) identityUI() interface{} {
 		},
 	}
 
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("IDENTITY", left, nil, nil)}
+	c.gui.Actions() <- SetChild{name: "right", child: c.rightPane("IDENTITY", left, nil, nil)}
 	c.gui.Actions() <- UIState{uiStateShowIdentity}
 	c.gui.Signal()
 
@@ -2083,6 +2201,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				{1, 1, Button{
 					widgetBase: widgetBase{
 						name: "delete",
+						foreground: c.colors.buttonForeground,
+ 						background: c.colors.buttonBackground,
 					},
 					text: "Delete",
 				}},
@@ -2090,8 +2210,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		},
 	}
 
-	left := nameValuesLHS(entries)
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+	left := c.nameValuesLHS(entries)
+	c.gui.Actions() <- SetChild{name: "right", child: c.rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
 
@@ -2113,7 +2233,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
 				c.deleteContact(contact)
-				c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+				c.gui.Actions() <- SetChild{name: "right", child: c.rightPlaceholderUI()}
 				c.gui.Actions() <- UIState{uiStateRevocationComplete}
 				c.gui.Signal()
 				c.save()
@@ -2142,17 +2262,21 @@ func (c *guiClient) newContactUI(contact *Contact) interface{} {
 		colSpacing: 3,
 		rows: [][]GridE{
 			{
-				{1, 1, Label{text: "1."}},
-				{1, 1, Label{text: "Choose a name for this contact."}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "1."}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Choose a name for this contact."}},
 			},
 			{
 				{1, 1, nil},
-				{1, 1, Label{text: "You can choose any name for this contact. It will be used to identify the contact to you and must be unique amongst all your contacts. However, it will not be revealed to anyone else nor used automatically in messages.", wrap: 400}},
+				{1, 1, Label{
+					widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground},
+					text: "You can choose any name for this contact. It will be used to identify the contact to you and must be unique amongst all your contacts. However, it will not be revealed to anyone else nor used automatically in messages.",
+					wrap: 400,
+				}},
 			},
 			{
 				{1, 1, nil},
 				{1, 1, Entry{
-					widgetBase: widgetBase{name: "name", insensitive: existing},
+					widgetBase: widgetBase{name: "name", insensitive: existing, foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 					width:      20,
 					text:       name,
 				}},
@@ -2160,16 +2284,16 @@ func (c *guiClient) newContactUI(contact *Contact) interface{} {
 			{
 				{1, 1, nil},
 				{1, 1, Label{
-					widgetBase: widgetBase{name: "error1", foreground: colorRed},
+					widgetBase: widgetBase{name: "error1", foreground: c.colors.error, background: c.colors.labelBackground},
 				}},
 			},
 			{
-				{1, 1, Label{text: "2."}},
-				{1, 1, Label{text: "Choose a key agreement method."}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "2."}},
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Choose a key agreement method."}},
 			},
 			{
 				{1, 1, nil},
-				{1, 1, Label{text: `Shared secret keying involves anonymously contacting a global, shared service and performing key agreement with another party who holds the same shared secret.
+				{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: `Shared secret keying involves anonymously contacting a global, shared service and performing key agreement with another party who holds the same shared secret.
 
 If the other party is someone who you are in email or IM contact with, then a button is provided to generate a secret, which can then be sent to the other party. Neither Email nor IM ensures that someone didn't change the secret during transmission but you can verify the other party's fingerprint later and, as always, have to weigh convenience against security.
 
@@ -2183,21 +2307,25 @@ Manual keying (not generally recommended) involves exchanging key material with 
 					widgetBase: widgetBase{marginTop: 20},
 					rows: [][]GridE{
 						{
-							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}}},
 							{1, 1, Button{
 								widgetBase: widgetBase{
 									name: "shared",
+									foreground: c.colors.buttonForeground,
+									background: c.colors.buttonBackground,
 								},
 								text: "Shared secret",
 							}},
-							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}}},
 							{1, 1, Button{
 								widgetBase: widgetBase{
 									name: "manual",
+									foreground: c.colors.buttonForeground,
+									background: c.colors.buttonBackground,
 								},
 								text: "Manual Keying",
 							}},
-							{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+							{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}}},
 						},
 					},
 				}},
@@ -2207,7 +2335,7 @@ Manual keying (not generally recommended) involves exchanging key material with 
 
 	nextRow := len(grid.rows)
 
-	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CREATE CONTACT", nil, nil, grid)}
+	c.gui.Actions() <- SetChild{name: "right", child: c.rightPane("CREATE CONTACT", nil, nil, grid)}
 	c.gui.Actions() <- UIState{uiStateNewContact}
 	c.gui.Signal()
 
@@ -2329,12 +2457,12 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 
 	rows := [][]GridE{
 		{
-			{1, 1, Label{text: "3."}},
-			{1, 1, Label{text: "Give them a handshake message."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "3."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Give them a handshake message."}},
 		},
 		{
 			{1, 1, nil},
-			{1, 1, Label{text: "A handshake is for a single person. Don't give it to anyone else and ensure that it came from the person you intended! For example, you could send it in a PGP signed and encrypted email, or exchange it over an OTR chat.", wrap: 400}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "A handshake is for a single person. Don't give it to anyone else and ensure that it came from the person you intended! For example, you could send it in a PGP signed and encrypted email, or exchange it over an OTR chat.", wrap: 400}},
 		},
 		{
 			{1, 1, nil},
@@ -2350,12 +2478,12 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			},
 		},
 		{
-			{1, 1, Label{text: "4."}},
-			{1, 1, Label{text: "Enter the handshake message from them."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "4."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Enter the handshake message from them."}},
 		},
 		{
 			{1, 1, nil},
-			{1, 1, Label{text: "You won't be able to exchange messages with them until they complete the handshake.", wrap: 400}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "You won't be able to exchange messages with them until they complete the handshake.", wrap: 400}},
 		},
 		{
 			{1, 1, nil},
@@ -2377,14 +2505,14 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 				rows: [][]GridE{
 					{
 						{1, 1, Button{
-							widgetBase: widgetBase{name: "process"},
+							widgetBase: widgetBase{name: "process", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 							text:       "Process",
 						}},
 						{1, 1, Button{
-							widgetBase: widgetBase{name: "abort"},
+							widgetBase: widgetBase{name: "abort", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 							text:       "Abort",
 						}},
-						{1, 1, Label{widgetBase: widgetBase{hExpand: true}}},
+						{1, 1, Label{widgetBase: widgetBase{hExpand: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground}}},
 					},
 				},
 			}},
@@ -2392,7 +2520,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 		{
 			{1, 1, nil},
 			{1, 1, Label{
-				widgetBase: widgetBase{name: "error2", foreground: colorRed},
+				widgetBase: widgetBase{name: "error2", foreground: c.colors.error, background: c.colors.labelBackground},
 			}},
 		},
 	}
@@ -2419,7 +2547,7 @@ func (c *guiClient) newContactManual(contact *Contact, existing bool, nextRow in
 			c.gui.Actions() <- Sensitive{name: "abort", sensitive: false}
 			c.gui.Signal()
 			c.deleteContact(contact)
-			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- SetChild{name: "right", child: c.rightPlaceholderUI()}
 			c.gui.Actions() <- UIState{uiStateRevocationComplete}
 			c.gui.Signal()
 			c.save()
@@ -2466,25 +2594,25 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 		rows: [][]GridE{
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "Shared secret",
 				}},
 				{2, 1, Grid{
 					colSpacing: 5,
 					rows: [][]GridE{
 						{
-							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400}}},
-							{1, 1, Button{widgetBase: widgetBase{name: "generate"}, text: "Generate"}},
+							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400, foreground: c.colors.entryForeground, background: c.colors.entryBackground}}},
+							{1, 1, Button{widgetBase: widgetBase{name: "generate", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground}, text: "Generate"}},
 						},
 					},
 				}},
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "Cards",
 				}},
-				{1, 1, Entry{widgetBase: widgetBase{name: "cardentry"}, updateOnChange: true}},
+				{1, 1, Entry{widgetBase: widgetBase{name: "cardentry", foreground: c.colors.entryForeground, background: c.colors.entryBackground}, updateOnChange: true}},
 				{1, 1, RadioGroup{widgetBase: widgetBase{name: "numdecks"}, labels: []string{"1 deck", "2 decks"}}},
 			},
 			{
@@ -2497,7 +2625,7 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 			},
 			{
 				{1, 1, Label{
-					widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+					widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, hAlign: AlignEnd, vAlign: AlignCenter},
 					text:       "When",
 				}},
 				{2, 1, Grid{
@@ -2505,7 +2633,7 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 					colSpacing: 3,
 					rows: [][]GridE{
 						{
-							{1, 1, CheckButton{widgetBase: widgetBase{name: "hastime"}, text: "Include time"}},
+							{1, 1, CheckButton{widgetBase: widgetBase{name: "hastime", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground}, text: "Include time"}},
 						},
 						{
 							{1, 1, Calendar{widgetBase: widgetBase{name: "cal", insensitive: true}}},
@@ -2515,12 +2643,12 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 								colSpacing: 3,
 								rows: [][]GridE{
 									{
-										{1, 1, Label{widgetBase: widgetBase{vAlign: AlignCenter}, text: "Hour"}},
-										{1, 1, SpinButton{widgetBase: widgetBase{name: "hour", insensitive: true}, min: 0, max: 23, step: 1}},
+										{1, 1, Label{widgetBase: widgetBase{vAlign: AlignCenter, foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Hour"}},
+										{1, 1, SpinButton{widgetBase: widgetBase{name: "hour", insensitive: true, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground}, min: 0, max: 23, step: 1}},
 									},
 									{
-										{1, 1, Label{widgetBase: widgetBase{vAlign: AlignCenter}, text: "Minute"}},
-										{1, 1, SpinButton{widgetBase: widgetBase{name: "minute", insensitive: true}, min: 0, max: 59, step: 1}},
+										{1, 1, Label{widgetBase: widgetBase{vAlign: AlignCenter, foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Minute"}},
+										{1, 1, SpinButton{widgetBase: widgetBase{name: "minute", insensitive: true, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground}, min: 0, max: 59, step: 1}},
 									},
 								},
 							}},
@@ -2529,19 +2657,19 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 				}},
 			},
 			{
-				{1, 1, Button{widgetBase: widgetBase{name: "begin"}, text: "Begin"}},
+				{1, 1, Button{widgetBase: widgetBase{name: "begin", foreground: c.colors.buttonForeground, background: c.colors.buttonBackground}, text: "Begin"}},
 			},
 		},
 	}
 
 	rows := [][]GridE{
 		{
-			{1, 1, Label{text: "3."}},
-			{1, 1, Label{text: "Enter the shared secret."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "3."}},
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: "Enter the shared secret."}},
 		},
 		{
 			{1, 1, nil},
-			{1, 1, Label{text: `If you received a secret from someone, enter it as the "Shared secret" and ignore the rest.
+			{1, 1, Label{widgetBase: widgetBase{foreground: c.colors.labelForeground, background: c.colors.labelBackground}, text: `If you received a secret from someone, enter it as the "Shared secret" and ignore the rest.
 
 If you wish to email/IM a shared secret, click "Generate" to create one and send it to them over email or IM.
 
@@ -2616,7 +2744,7 @@ SharedSecretEvent:
 				}
 				name := fmt.Sprintf("card-%d,%d", point.col, point.row)
 				c.gui.Actions() <- GridSet{"cards", point.col, point.row, Button{
-					widgetBase: widgetBase{name: name},
+					widgetBase: widgetBase{name: name, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 					markup:     markup,
 				}}
 				cardAtLocation[point] = card
@@ -2703,14 +2831,15 @@ SharedSecretEvent:
 	return c.showContact(contact.id)
 }
 
-func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
+func (c *guiClient) widgetForAttachment(id uint64, label string, isError bool, extraWidgets []Widget) Widget {
 	var labelName string
 	var labelColor uint32
 	if isError {
 		labelName = fmt.Sprintf("attachment-error-%x", id)
-		labelColor = colorRed
+		labelColor = c.colors.error
 	} else {
 		labelName = fmt.Sprintf("attachment-label-%x", id)
+		labelColor = c.colors.labelForeground
 	}
 	return Frame{
 		widgetBase: widgetBase{
@@ -2728,6 +2857,7 @@ func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []W
 							widgetBase: widgetBase{
 								padding:    2,
 								foreground: labelColor,
+								background: c.colors.labelBackground,
 								name:       labelName,
 							},
 							yAlign: 0.5,
@@ -2737,7 +2867,7 @@ func widgetForAttachment(id uint64, label string, isError bool, extraWidgets []W
 							widgetBase: widgetBase{expand: true, fill: true},
 						},
 						Button{
-							widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id)},
+							widgetBase: widgetBase{name: fmt.Sprintf("remove-%x", id), foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 							image:      indicatorRemove,
 						},
 					},
@@ -2799,7 +2929,8 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 			children: []Widget{
 				Label{
 					widgetBase: widgetBase{
-						foreground: colorRed,
+						foreground: c.colors.error,
+						background: c.colors.labelBackground,
 					},
 					text: derr.err.Error(),
 				},
@@ -2849,9 +2980,9 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
 	usageMessage, over := draft.usageString()
 	c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
-	color := uint32(colorBlack)
+	color := uint32(c.colors.labelForeground)
 	if over {
-		color = colorRed
+		color = c.colors.error
 		c.gui.Actions() <- Sensitive{name: "send", sensitive: false}
 	} else if validContactSelected {
 		c.gui.Actions() <- Sensitive{name: "send", sensitive: true}
@@ -2936,7 +3067,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 				widgetBase: widgetBase{padding: 2},
 				children: []Widget{
 					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, padding: 10},
 						text:       "TO",
 						yAlign:     0.5,
 					},
@@ -2954,12 +3085,12 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 				widgetBase: widgetBase{padding: 2},
 				children: []Widget{
 					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, padding: 10},
 						text:       "SIZE",
 						yAlign:     0.5,
 					},
 					Label{
-						widgetBase: widgetBase{name: "usage"},
+						widgetBase: widgetBase{name: "usage", foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 						text:       initialUsageMessage,
 					},
 				},
@@ -2968,12 +3099,12 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 				widgetBase: widgetBase{padding: 0},
 				children: []Widget{
 					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+						widgetBase: widgetBase{font: fontMainLabel, foreground: c.colors.headerForeground, background: c.colors.headerBackground, padding: 10},
 						text:       "ATTACHMENTS",
 						yAlign:     0.5,
 					},
 					Button{
-						widgetBase: widgetBase{name: "attach", font: "Liberation Sans 8"},
+						widgetBase: widgetBase{name: "attach", font: fontListSmall, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 						image:      indicatorAdd,
 					},
 				},
@@ -2992,11 +3123,11 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		widgetBase: widgetBase{padding: 5},
 		children: []Widget{
 			Button{
-				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2},
+				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 				text:       "Send",
 			},
 			Button{
-				widgetBase: widgetBase{name: "discard", padding: 2},
+				widgetBase: widgetBase{name: "discard", padding: 2, foreground: c.colors.buttonForeground, background: c.colors.buttonBackground},
 				text:       "Discard",
 			},
 		},
@@ -3004,14 +3135,14 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	ui := VBox{
 		children: []Widget{
 			EventBox{
-				widgetBase: widgetBase{background: colorHeaderBackground},
+				widgetBase: widgetBase{background: c.colors.headerBackground},
 				child: VBox{
 					children: []Widget{
 						HBox{
 							widgetBase: widgetBase{padding: 10},
 							children: []Widget{
 								Label{
-									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: colorHeaderForeground},
+									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: c.colors.headerForeground},
 									text:       "COMPOSE",
 								},
 							},
@@ -3019,12 +3150,12 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 					},
 				},
 			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 			HBox{
 				children: []Widget{
 					lhs,
 					Label{
-						widgetBase: widgetBase{expand: true, fill: true},
+						widgetBase: widgetBase{expand: true, fill: true, foreground: c.colors.labelForeground, background: c.colors.labelBackground},
 					},
 					rhs,
 				},
@@ -3033,7 +3164,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 				widgetBase: widgetBase{expand: true, fill: true},
 				horizontal: true,
 				child: TextView{
-					widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+					widgetBase:     widgetBase{expand: true, fill: true, name: "body", foreground: c.colors.entryForeground, background: c.colors.entryBackground},
 					editable:       true,
 					wrap:           true,
 					updateOnChange: true,
@@ -3053,14 +3184,14 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	var initialAttachmentChildren []Widget
 	for id, index := range attachments {
 		attachment := draft.attachments[index]
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)), false, nil))
+		initialAttachmentChildren = append(initialAttachmentChildren, c.widgetForAttachment(id, fmt.Sprintf("%s (%d bytes)", *attachment.Filename, len(attachment.Contents)), false, nil))
 	}
 	for id, index := range detachments {
 		detachment := draft.detachments[index]
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
+		initialAttachmentChildren = append(initialAttachmentChildren, c.widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", *detachment.Filename, *detachment.Size), false, nil))
 	}
 	for id, pending := range draft.pendingDetachments {
-		initialAttachmentChildren = append(initialAttachmentChildren, widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", filepath.Base(pending.path), pending.size), false, []Widget{
+		initialAttachmentChildren = append(initialAttachmentChildren, c.widgetForAttachment(id, fmt.Sprintf("%s (%d bytes, external)", filepath.Base(pending.path), pending.size), false, []Widget{
 			Progress{
 				widgetBase: widgetBase{
 					name: fmt.Sprintf("attachment-progress-%x", id),
@@ -3117,6 +3248,8 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 						Label{
 							widgetBase: widgetBase{
 								padding: 4,
+								foreground: c.colors.labelForeground,
+								background: c.colors.labelBackground,
 							},
 							text: "This file is too large to send via Pond directly. Instead, this Pond message can contain the encryption key for the file and the encrypted file can be transported via a non-Pond mechanism.",
 							wrap: 300,
@@ -3126,12 +3259,16 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 								Button{
 									widgetBase: widgetBase{
 										name: fmt.Sprintf("attachment-convert-%x", id),
+										foreground: c.colors.buttonForeground,
+										background: c.colors.buttonBackground,
 									},
 									text: "Save Encrypted",
 								},
 								Button{
 									widgetBase: widgetBase{
 										name: fmt.Sprintf("attachment-upload-%x", id),
+										foreground: c.colors.buttonForeground,
+										background: c.colors.buttonBackground,
 									},
 									text: "Upload",
 								},
@@ -3157,7 +3294,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			c.gui.Actions() <- Append{
 				name: "filesvbox",
 				children: []Widget{
-					widgetForAttachment(id, label, err != nil, extraWidgets),
+					c.widgetForAttachment(id, label, err != nil, extraWidgets),
 				},
 			}
 			overSize = c.updateUsage(validContactSelected, draft)
@@ -3217,7 +3354,7 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 			c.draftsUI.Remove(draft.id)
 			delete(c.drafts, draft.id)
 			c.save()
-			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- SetChild{name: "right", child: c.rightPlaceholderUI()}
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
 			return nil
@@ -3400,14 +3537,14 @@ func (c *guiClient) logUI() interface{} {
 	ui := VBox{
 		children: []Widget{
 			EventBox{
-				widgetBase: widgetBase{background: colorHeaderBackground},
+				widgetBase: widgetBase{background: c.colors.headerBackground},
 				child: VBox{
 					children: []Widget{
 						HBox{
 							widgetBase: widgetBase{padding: 10},
 							children: []Widget{
 								Label{
-									widgetBase: widgetBase{font: "Arial 16", padding: 10, foreground: colorHeaderForeground},
+									widgetBase: widgetBase{font: fontMainTitle, padding: 10, foreground: c.colors.headerForeground},
 									text:       "ACTIVITY LOG",
 								},
 							},
@@ -3415,7 +3552,7 @@ func (c *guiClient) logUI() interface{} {
 					},
 				},
 			},
-			EventBox{widgetBase: widgetBase{height: 1, background: colorSep}},
+			EventBox{widgetBase: widgetBase{height: 1, background: c.colors.sep}},
 			HBox{
 				widgetBase: widgetBase{
 					padding: 5,
@@ -3436,6 +3573,8 @@ func (c *guiClient) logUI() interface{} {
 								widgetBase: widgetBase{
 									name:    "clear-log",
 									padding: 2,
+									foreground: c.colors.buttonForeground,
+									background: c.colors.buttonBackground,
 								},
 								text: "Clear",
 							},
@@ -3443,6 +3582,8 @@ func (c *guiClient) logUI() interface{} {
 								widgetBase: widgetBase{
 									name:    "transact",
 									padding: 2,
+									foreground: c.colors.buttonForeground,
+									background: c.colors.buttonBackground,
 								},
 								text: "Transact Now",
 							},
@@ -3522,7 +3663,15 @@ func (c *guiClient) logUI() interface{} {
 	return nil
 }
 
-func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool) *guiClient {
+func createColorSchemeFrom(name string) colorScheme {
+	if name == "wm" {
+		return wmColorScheme();
+	} else {
+		return pondColorScheme();
+	}
+}
+
+func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFetch bool, colorSchemeName string) *guiClient {
 	c := &guiClient{
 		client: client{
 			testing:            testing,
@@ -3541,6 +3690,7 @@ func NewGUIClient(stateFilename string, gui GUI, rand io.Reader, testing, autoFe
 			usedIds:            make(map[uint64]bool),
 		},
 		gui: gui,
+		colors: createColorSchemeFrom(colorSchemeName),
 	}
 	c.ui = c
 

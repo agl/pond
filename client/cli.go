@@ -315,7 +315,7 @@ func (c *cliClient) drawChevrons(phase int) int {
 }
 
 func (c *cliClient) torPromptUI() error {
-	banner := "Please start a Tor SOCKS listener on port 9050 or 9150..."
+	banner := msgPleaseStartTor
 	bannerLength := 4 + len(banner)
 	c.Printf("%s %s", termPrefix, banner)
 
