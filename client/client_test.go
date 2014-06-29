@@ -1441,7 +1441,12 @@ func TestRevoke(t *testing.T) {
 
 	transmitMessage(client1, true)
 
-	sendMessage(client2, "client1", "test1")
+	composeMessage(client2, "client1", "test1")
+	// Select the contact before sending because we have previously crashed
+	// in this case. See https://github.com/agl/pond/issues/96.
+	client2.gui.events <- Click{name: client2.contactsUI.entries[0].boxName}
+	client2.AdvanceTo(uiStateShowContact)
+	transmitMessage(client2, false)
 	client2.AdvanceTo(uiStateRevocationProcessed)
 
 	if gen := client1FromClient2.generation; gen != client1.generation {
