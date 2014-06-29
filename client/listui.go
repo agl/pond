@@ -230,14 +230,14 @@ func (cs *listUI) SetLine(id uint64, line string) {
 
 // SetSubline sets the second row of text in an entry.
 func (cs *listUI) SetSubline(id uint64, subline string) {
-	for _, entry := range cs.entries {
+	for i, entry := range cs.entries {
 		if entry.id == id {
 			if entry.hasSubline {
 				if len(subline) > 0 {
 					cs.gui.Actions() <- SetText{name: entry.sublineTextName, text: subline}
 				} else {
 					cs.gui.Actions() <- Destroy{name: entry.sublineTextName}
-					entry.hasSubline = false
+					cs.entries[i].hasSubline = false
 				}
 			} else if len(subline) > 0 {
 				cs.gui.Actions() <- AddToBox{
@@ -245,7 +245,7 @@ func (cs *listUI) SetSubline(id uint64, subline string) {
 					pos:   0,
 					child: sublineLabel(entry.sublineTextName, subline),
 				}
-				entry.hasSubline = true
+				cs.entries[i].hasSubline = true
 			}
 			cs.gui.Signal()
 			break
