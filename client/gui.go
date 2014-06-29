@@ -2910,10 +2910,8 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		}
 
 		draft = &Draft{
-			id:        c.randId(),
-			inReplyTo: 0,
-			to:        0,
-			created:   c.Now(),
+			id:      c.randId(),
+			created: c.Now(),
 		}
 		if inReplyTo != nil {
 			draft.inReplyTo = inReplyTo.id

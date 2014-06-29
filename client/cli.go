@@ -1572,36 +1572,6 @@ Handle:
 	return
 }
 
-// indentForReply returns a copy of in where the beginning of each line is
-// prefixed with "> ", as is typical for replies.
-func indentForReply(i []byte) string {
-	in := bufio.NewReader(bytes.NewBuffer(i))
-	var out bytes.Buffer
-
-	newLine := true
-	for {
-		line, isPrefix, err := in.ReadLine()
-		if err != nil {
-			break
-		}
-
-		if newLine {
-			if len(line) > 0 {
-				out.WriteString("> ")
-			} else {
-				out.WriteString(">")
-			}
-		}
-		out.Write(line)
-		newLine = !isPrefix
-		if !isPrefix {
-			out.WriteString("\n")
-		}
-	}
-
-	return string(out.Bytes())
-}
-
 func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
 	if draft == nil {
 		draft = &Draft{
