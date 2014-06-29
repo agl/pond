@@ -1375,7 +1375,7 @@ Handle:
 			return
 		}
 		if size > 0 {
-			c.Printf("%s File is too large (%d bytes) to attach. Use the 'upload' or 'save-encrypted' commands to encrypt the file, include just the keys in the message and either upload or save the ciphertext\n", termErrPrefix, size)
+			c.Printf("%s File is too large (%d bytes) to attach. Use the 'upload' command to encrypt the file and upload it to your home server. Pond will include the key in the current draft.\n", termErrPrefix, size)
 			return
 		}
 
@@ -1730,6 +1730,23 @@ func (c *cliClient) showOutbox(msg *queuedMessage) {
 		},
 	}
 	table.WriteTo(c.term)
+
+	if len(msg.message.Files) > 0 {
+		c.Printf("%s Attachments:\n", termHeaderPrefix)
+	}
+	for _, attachment := range msg.message.Files {
+		c.Printf("%s     %s (%d bytes):\n", termHeaderPrefix, terminalEscape(attachment.GetFilename(), false), len(attachment.Contents))
+	}
+	if len(msg.message.DetachedFiles) > 0 {
+		c.Printf("%s Detachments:\n", termHeaderPrefix)
+	}
+	for _, detachment := range msg.message.DetachedFiles {
+		c.Printf("%s     %s (%d bytes):\n", termHeaderPrefix, terminalEscape(detachment.GetFilename(), false), detachment.GetSize())
+	}
+	if len(msg.message.Files) > 0 || len(msg.message.DetachedFiles) > 0 {
+		c.Printf("\n")
+	}
+
 	c.term.Write([]byte(terminalEscape(string(msg.message.Body), true /* line breaks ok */)))
 	c.Printf("\n")
 }
