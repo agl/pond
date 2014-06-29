@@ -40,18 +40,17 @@ func IsSafe() error {
 	return nil
 }
 
-func int8str(s []int8) string {
-	b := make([]byte, len(s))
-	i := 0
+func stringFromInt8(s []int8) string {
+	b := make([]byte, 0, len(s))
 
-	for ; i < len(s); i++ {
-		if s[i] == 0 {
+	for _, v := range s {
+		if v == 0 {
 			break
 		}
-		b[i] = byte(s[i])
+		b = append(b, byte(v))
 	}
 
-	return string(b[:i])
+	return string(b)
 }
 
 func processFilesystems(f func(fstype, path string) error) error {
@@ -67,8 +66,8 @@ func processFilesystems(f func(fstype, path string) error) error {
 	}
 
 	for _, fs := range filesystems[:n] {
-		fstype := int8str(fs.Fstypename[:])
-		path := int8str(fs.Mntonname[:])
+		fstype := stringFromInt8(fs.Fstypename[:])
+		path := stringFromInt8(fs.Mntonname[:])
 		if err := f(fstype, path); err != nil {
 			return err
 		}
