@@ -125,3 +125,25 @@ func TestStartStop(t *testing.T) {
 		t.Errorf("Bad result from kx: got %x, want %x", result, msg1)
 	}
 }
+
+func TestSecretStringGeneration(t *testing.T) {
+	s := NewSecretString(rand.Reader)
+	if !isValidSecretString(s) {
+		t.Fatalf("Generated secret string isn't valid: %s", s)
+	}
+	if !IsAcceptableSecretString(s) {
+		t.Fatalf("Generated secret string isn't acceptable: %s", s)
+	}
+	s = s[:8] + "," + s[9:]
+	if isValidSecretString(s) {
+		t.Fatalf("Corrupt secret string is valid: %s", s)
+	}
+
+	s = "498572384"
+	if !IsAcceptableSecretString(s) {
+		t.Fatalf("Random secret string isn't acceptable: %s", s)
+	}
+	if isValidSecretString(s) {
+		t.Fatalf("Random secret string is valid: %s", s)
+	}
+}
