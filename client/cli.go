@@ -1253,7 +1253,7 @@ Handle:
 		}
 		id, _, err := c.sendDraft(draft)
 		if err != nil {
-			c.log.Errorf("%s Error sending: %s\n", termErrPrefix, err)
+			c.Printf("%s Error sending: %s\n", termErrPrefix, err)
 			return
 		}
 		if draft.inReplyTo != 0 {
