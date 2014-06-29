@@ -255,6 +255,9 @@ func (wrapper *terminalWrapper) run(r io.Reader, interruptChan chan bool) {
 			wrapper.cond.Signal()
 			wrapper.Unlock()
 		}
+		if err != nil {
+			break
+		}
 	}
 }
 
