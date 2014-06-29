@@ -1494,15 +1494,23 @@ Handle:
 			}
 		}
 
-		c.Printf("Enter shared secret with contact, or hit enter to generate, print and use a random one\n")
-		sharedSecret, err := c.term.ReadPassword("secret: ")
-		if err != nil {
-			panic(err)
+		var sharedSecret string
+
+		for {
+			c.Printf("Enter shared secret with contact, or hit enter to generate, print and use a random one\n")
+			var err error
+			sharedSecret, err = c.term.ReadPassword("secret: ")
+			if err != nil {
+				panic(err)
+			}
+			if len(sharedSecret) == 0 || panda.IsAcceptableSecretString(sharedSecret) {
+				break
+			}
+			c.Printf("%s Checksum incorrect. Please try again.\n", termErrPrefix)
 		}
+
 		if len(sharedSecret) == 0 {
-			var secret [16]byte
-			c.randBytes(secret[:])
-			sharedSecret = fmt.Sprintf("%x", secret[:])
+			sharedSecret = panda.NewSecretString(c.rand)
 			c.Printf("%s Shared secret: %s\n", termPrefix, sharedSecret)
 		}
 

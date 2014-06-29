@@ -2473,7 +2473,7 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 					colSpacing: 5,
 					rows: [][]GridE{
 						{
-							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400}}},
+							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400}, updateOnChange: true}},
 							{1, 1, Button{widgetBase: widgetBase{name: "generate"}, text: "Generate"}},
 						},
 					},
@@ -2585,6 +2585,12 @@ SharedSecretEvent:
 			return event
 		}
 
+		if update, ok := event.(Update); ok && update.name == "shared" {
+			ok := panda.IsAcceptableSecretString(update.text)
+			c.gui.Actions() <- Sensitive{name: "begin", sensitive: ok}
+			c.gui.Signal()
+		}
+
 		if update, ok := event.(Update); ok && update.name == "cardentry" && len(update.text) >= 2 {
 			cardText := update.text[:2]
 			if cardText == "10" {
@@ -2688,9 +2694,7 @@ SharedSecretEvent:
 				contact.kxsBytes = nil
 				break SharedSecretEvent
 			case click.name == "generate":
-				var secret [16]byte
-				c.randBytes(secret[:])
-				c.gui.Actions() <- SetEntry{name: "shared", text: fmt.Sprintf("%x", secret[:])}
+				c.gui.Actions() <- SetEntry{name: "shared", text: panda.NewSecretString(c.rand)}
 				c.gui.Signal()
 			}
 		}
