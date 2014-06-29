@@ -456,7 +456,7 @@ func (c *cliClient) processFetch(inboxMsg *InboxMessage) {
 		inboxMsg.cliId = c.newCliId()
 	}
 
-	c.Printf("%s New message (%s%s%s) received from %s\n", termPrefix, termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.contacts[inboxMsg.from].name, false))
+	c.Printf("\x07%s New message (%s%s%s) received from %s\n", termPrefix, termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.contacts[inboxMsg.from].name, false))
 }
 
 func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
