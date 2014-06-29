@@ -59,6 +59,7 @@ package main
 // the tests can fully synchonise and avoid non-determinism.
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
@@ -1142,6 +1143,36 @@ func (c *client) deleteContact(contact *Contact) {
 
 	c.ui.removeContactUI(contact)
 	delete(c.contacts, contact.id)
+}
+
+// indentForReply returns a copy of in where the beginning of each line is
+// prefixed with "> ", as is typical for replies.
+func indentForReply(i []byte) string {
+	in := bufio.NewReader(bytes.NewBuffer(i))
+	var out bytes.Buffer
+
+	newLine := true
+	for {
+		line, isPrefix, err := in.ReadLine()
+		if err != nil {
+			break
+		}
+
+		if newLine {
+			if len(line) > 0 {
+				out.WriteString("> ")
+			} else {
+				out.WriteString(">")
+			}
+		}
+		out.Write(line)
+		newLine = !isPrefix
+		if !isPrefix {
+			out.WriteString("\n")
+		}
+	}
+
+	return string(out.Bytes())
 }
 
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.
