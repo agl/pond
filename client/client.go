@@ -1231,7 +1231,6 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 	case update.result != nil:
 		contact.pandaKeyExchange = nil
 		contact.pandaShutdownChan = nil
-		contact.isPending = false
 
 		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient, c.disableV2Ratchet); err != nil {
 			contact.pandaResult = err.Error()
@@ -1239,6 +1238,7 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
 		} else {
 			c.log.Printf("Key exchange with %s complete", contact.name)
+			contact.isPending = false
 		}
 	}
 
