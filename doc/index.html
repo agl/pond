@@ -66,6 +66,7 @@ Build, install and usage instructions for Tails users:</p>
 <pre>sudo apt-get update --fix-missing
 sudo apt-get install -t unstable golang
 sudo apt-get install mercurial trousers gcc
+sudo apt-get install -t squeeze-lts -y libssl-dev
 sudo apt-get install -t backports libtspi-dev
 mkdir ~/Persistent/go/
 export GOPATH=$HOME/Persistent/go/
@@ -74,6 +75,10 @@ go get -tags nogui github.com/agl/pond/client
 alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
 
 <p>(<i>Note:</i> the build process reportedly fails with less than 1GB of memory. You can still run Pond with less than 1GB, but you'll need to build it elsewhere.)</p>
+
+<p>In order to update Pond, from time to time, run:</p>
+
+<pre>go get -u -tags nogui github.com/agl/pond/client</pre>
 
 <h5>Fedora 19</h5>
 
