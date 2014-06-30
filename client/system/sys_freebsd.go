@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"unsafe"
 )
 
 // IsSafe checks to see whether the current OS appears to be safe. Specifically
