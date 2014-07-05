@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -42,6 +43,13 @@ const (
 	// uploads for a single account. This can be overridden by a
 	// "quota-megabytes" file in the account directory.
 	maxFilesMB = 100
+	// hmacValueMask is the bottom 63 bits. This is used for HMAC values
+	// where the HMAC is only 63 bits wide and the MSB is used to signal
+	// whether a revocation was used or not.
+	hmacValueMask = 0x7fffffffffffffff
+	// hmacMaxLength is the maximum size, in bytes, of an HMAC strike
+	// file. This is 256K entries.
+	hmacMaxLength = 2 * 1024 * 1024
 )
 
 type Account struct {
@@ -89,6 +97,183 @@ func (a *Account) HMACKey() (*[32]byte, bool) {
 	return &a.hmacKey, true
 }
 
+// findHMAC finds v in hmacBytes. If found it returns zero and true. Otherwise
+// it returns the index where the value should be inserted and false.
+func findHMAC(hmacBytes []byte, v uint64) (insertIndex int, msb bool, found bool) {
+	v &= hmacValueMask
+
+	searchMin, searchMax := 0, len(hmacBytes)/8-1
+	for searchMin <= searchMax {
+		midPoint := searchMin + ((searchMax - searchMin) / 2)
+		midValue := binary.LittleEndian.Uint64(hmacBytes[midPoint*8:])
+		maskedMidValue := midValue & hmacValueMask
+
+		switch {
+		case maskedMidValue > v:
+			searchMax = midPoint - 1
+		case maskedMidValue < v:
+			searchMin = midPoint + 1
+		default:
+			return 0, maskedMidValue != midValue, true
+		}
+	}
+
+	return searchMin, false, false
+}
+
+func readHMACs(path string, overhead int) (f *os.File, hmacBytes []byte, ok bool) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		log.Printf("Failed to open HMAC strike file %s", err)
+		return
+	}
+
+	fi, err := f.Stat()
+	var size int64
+	if err != nil {
+		log.Printf("Failed to stat HMAC strike file %s", err)
+		goto err
+	}
+
+	size = fi.Size()
+
+	if size%8 != 0 {
+		log.Printf("HMAC strike file is not a multiple of 8: %s", path)
+		goto err
+	}
+
+	if size > hmacMaxLength {
+		log.Printf("HMAC strike file is too large: %s", path)
+		goto err
+	}
+
+	hmacBytes = make([]byte, size, size+int64(overhead))
+
+	if _, err := io.ReadFull(f, hmacBytes); err != nil {
+		log.Printf("Failed to read HMAC strike file %s", err)
+		goto err
+	}
+
+	ok = true
+	return
+
+err:
+	f.Close()
+	return
+}
+
+type hmacInsertResult int
+
+const (
+	hmacFresh hmacInsertResult = iota
+	hmacUsed
+	hmacRevoked
+)
+
+func insertHMAC(path string, v uint64) (result hmacInsertResult, ok bool) {
+	f, hmacBytes, ok := readHMACs(path, 0)
+	if !ok {
+		return hmacUsed, false
+	}
+	defer f.Close()
+
+	insertIndex, msb, found := findHMAC(hmacBytes, v)
+	if found {
+		if msb {
+			return hmacRevoked, true
+		}
+		return hmacUsed, true
+	}
+
+	var serialised [8]byte
+	binary.LittleEndian.PutUint64(serialised[:], v)
+
+	f.Seek(int64(insertIndex)*8, 0)
+	if _, err := f.Write(serialised[:]); err != nil {
+		log.Printf("Failed to write to HMAC file: %s", err)
+		return hmacUsed, false
+	}
+	if _, err := f.Write(hmacBytes[insertIndex*8:]); err != nil {
+		log.Printf("Failed to write to HMAC file: %s", err)
+		return hmacUsed, false
+	}
+
+	return hmacFresh, true
+}
+
+func (a *Account) InsertHMAC(v uint64) (result hmacInsertResult, ok bool) {
+	if v&hmacValueMask != v {
+		panic("unmasked value given to InsertHMAC")
+	}
+
+	a.Lock()
+	defer a.Unlock()
+
+	return insertHMAC(a.HMACValuesPath(), v)
+}
+
+type hmacVector []byte
+
+func (hmacs hmacVector) Len() int {
+	return len(hmacs) / 8
+}
+
+func (hmacs hmacVector) Less(i, j int) bool {
+	iVal := binary.LittleEndian.Uint64(hmacs[8*i:]) & hmacValueMask
+	jVal := binary.LittleEndian.Uint64(hmacs[8*j:]) & hmacValueMask
+
+	return iVal < jVal
+}
+
+func (hmacs hmacVector) Swap(i, j int) {
+	var tmp [8]byte
+	copy(tmp[:], hmacs[8*i:])
+	copy(hmacs[i*8:(i+1)*8], hmacs[8*j:])
+	copy(hmacs[j*8:], tmp[:])
+}
+
+func insertHMACs(path string, vs []uint64) bool {
+	switch len(vs) {
+	case 0:
+		return true
+	case 1:
+		_, ok := insertHMAC(path, vs[0])
+		return ok
+	}
+
+	f, hmacBytes, ok := readHMACs(path, 8*len(vs))
+	if !ok {
+		return false
+	}
+	defer f.Close()
+
+	var serialised [8]byte
+	for _, v := range vs {
+		if _, _, found := findHMAC(hmacBytes, v); found {
+			continue
+		}
+		binary.LittleEndian.PutUint64(serialised[:], v)
+		hmacBytes = append(hmacBytes, serialised[:]...)
+	}
+
+	sort.Sort(hmacVector(hmacBytes))
+
+	f.Seek(0, 0)
+	if _, err := f.Write(hmacBytes); err != nil {
+		log.Printf("Failed to write to HMAC file: %s", err)
+		return false
+	}
+
+	return true
+}
+
+func (a *Account) InsertHMACs(vs []uint64) bool {
+	a.Lock()
+	defer a.Unlock()
+
+	return insertHMACs(a.HMACValuesPath(), vs)
+}
+
 func (a *Account) Group() *bbssig.Group {
 	a.Lock()
 	defer a.Unlock()
@@ -127,6 +312,10 @@ func (a *Account) RevocationPath() string {
 
 func (a *Account) HMACKeyPath() string {
 	return filepath.Join(a.Path(), "hmackey")
+}
+
+func (a *Account) HMACValuesPath() string {
+	return filepath.Join(a.Path(), "hmacstrike")
 }
 
 func (a *Account) LoadFileInfo() bool {
@@ -306,6 +495,8 @@ func (s *Server) Process(conn *transport.Conn) {
 		reply = s.revocation(from, req.Revocation)
 	case req.HmacSetup != nil:
 		reply = s.hmacSetup(from, req.HmacSetup)
+	case req.HmacStrike != nil:
+		reply = s.hmacStrike(from, req.HmacStrike)
 	default:
 		reply = &pond.Reply{Status: pond.Reply_NO_REQUEST.Enum()}
 	}
@@ -935,6 +1126,19 @@ func (s *Server) hmacSetup(from *[32]byte, setup *pond.HMACSetup) *pond.Reply {
 	}
 	copy(account.hmacKey[:], setup.HmacKey)
 	account.hmacKeyValid = true
+
+	return nil
+}
+
+func (s *Server) hmacStrike(from *[32]byte, strike *pond.HMACStrike) *pond.Reply {
+	account, ok := s.getAccount(from)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}
+	}
+
+	if !account.InsertHMACs(strike.Hmacs) {
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
 
 	return nil
 }
