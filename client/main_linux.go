@@ -52,9 +52,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "$HOME not set. Please either export $HOME or use --state-file to set the location of the state file explicitly.\n")
 			os.Exit(1)
 		}
-		configDir := filepath.Join(home, ".config")
-		os.Mkdir(configDir, 0700)
-		*stateFile = filepath.Join(configDir, "pond")
+		persistentDir := filepath.Join(home, "Persistent")
+		if stat, err := os.Lstat(persistentDir); err == nil && stat.IsDir() {
+			// Looks like Tails.
+			*stateFile = filepath.Join(persistentDir, ".pond")
+		} else {
+			configDir := filepath.Join(home, ".config")
+			os.Mkdir(configDir, 0700)
+			*stateFile = filepath.Join(configDir, "pond")
+		}
 	}
 
 	if !haveGUI || *cliFlag || len(os.Getenv("PONDCLI")) > 0 {
