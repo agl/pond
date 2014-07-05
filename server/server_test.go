@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	math_rand "math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -853,4 +854,66 @@ func TestRevocation(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestHMACInsertion(t *testing.T) {
+	dir, err := ioutil.TempDir("", "hmactest")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "hmacstrike")
+	values := math_rand.Perm(1024)
+
+	for i, v := range values {
+		v64 := uint64(v)
+		if i%2 == 0 {
+			v64 |= 1 << 63
+		}
+		result, ok := insertHMAC(path, v64)
+		if !ok {
+			t.Fatal("insert failed")
+		}
+		if result != hmacFresh {
+			t.Fatal("fresh value not recognised as such")
+		}
+	}
+
+	for i, v := range values {
+		result, ok := insertHMAC(path, uint64(v))
+		if !ok {
+			t.Fatal("insert failed")
+		}
+		expected := hmacUsed
+		if i%2 == 0 {
+			expected = hmacRevoked
+		}
+		if result != expected {
+			t.Fatal("value double inserted")
+		}
+	}
+
+	values = math_rand.Perm(2048)
+	var valueBatch [16]uint64
+	for i := 0; i < len(values); i += 16 {
+		for i, v := range values[i : i+16] {
+			valueBatch[i] = uint64(v)
+			if i%2 == 1 {
+				valueBatch[i] |= 1 << 63
+			}
+		}
+		if !insertHMACs(path, valueBatch[:]) {
+			t.Fatal("inserts failed")
+		}
+	}
+
+	for _, v := range values {
+		result, ok := insertHMAC(path, uint64(v))
+		if !ok {
+			t.Fatal("insert failed")
+		}
+		if result == hmacFresh {
+			t.Fatalf("value double inserted")
+		}
+	}
 }

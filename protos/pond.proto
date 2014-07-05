@@ -19,6 +19,7 @@ message Request {
 	optional Download download = 5;
 	optional SignedRevocation revocation = 6;
 	optional HMACSetup hmac_setup = 7;
+	optional HMACStrike hmac_strike = 8;
 }
 
 // Reply is the server's reply to the client.
@@ -173,6 +174,13 @@ message SignedRevocation {
 // so at account creation time.
 message HMACSetup {
 	required bytes hmac_key = 1;
+}
+
+// HMACStrike is used by a client to record a number of HMAC values as used.
+message HMACStrike {
+	// hmacs contains a number of 63-bit HMACs. The MSB is used to signal
+	// whether the HMAC should be considered used (0) or revoked (1).
+	repeated fixed64 hmacs = 1 [packed = true];
 }
 
 // KeyExchange is a message sent between clients to establish a relation. It's

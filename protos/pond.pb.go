@@ -147,6 +147,7 @@ type Request struct {
 	Download         *Download         `protobuf:"bytes,5,opt,name=download" json:"download,omitempty"`
 	Revocation       *SignedRevocation `protobuf:"bytes,6,opt,name=revocation" json:"revocation,omitempty"`
 	HmacSetup        *HMACSetup        `protobuf:"bytes,7,opt,name=hmac_setup" json:"hmac_setup,omitempty"`
+	HmacStrike       *HMACStrike       `protobuf:"bytes,8,opt,name=hmac_strike" json:"hmac_strike,omitempty"`
 	XXX_unrecognized []byte            `json:"-"`
 }
 
@@ -199,6 +200,13 @@ func (this *Request) GetRevocation() *SignedRevocation {
 func (this *Request) GetHmacSetup() *HMACSetup {
 	if this != nil {
 		return this.HmacSetup
+	}
+	return nil
+}
+
+func (this *Request) GetHmacStrike() *HMACStrike {
+	if this != nil {
+		return this.HmacStrike
 	}
 	return nil
 }
@@ -601,6 +609,22 @@ func (*HMACSetup) ProtoMessage()       {}
 func (this *HMACSetup) GetHmacKey() []byte {
 	if this != nil {
 		return this.HmacKey
+	}
+	return nil
+}
+
+type HMACStrike struct {
+	Hmacs            []uint64 `protobuf:"fixed64,1,rep,packed,name=hmacs" json:"hmacs,omitempty"`
+	XXX_unrecognized []byte   `json:"-"`
+}
+
+func (this *HMACStrike) Reset()         { *this = HMACStrike{} }
+func (this *HMACStrike) String() string { return proto.CompactTextString(this) }
+func (*HMACStrike) ProtoMessage()       {}
+
+func (this *HMACStrike) GetHmacs() []uint64 {
+	if this != nil {
+		return this.Hmacs
 	}
 	return nil
 }
