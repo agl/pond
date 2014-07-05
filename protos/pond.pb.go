@@ -35,6 +35,7 @@ const (
 	Reply_GENERATION_REVOKED         Reply_Status = 22
 	Reply_CANNOT_PARSE_REVOCATION    Reply_Status = 23
 	Reply_REGISTRATION_DISABLED      Reply_Status = 24
+	Reply_HMAC_KEY_ALREADY_SET       Reply_Status = 25
 )
 
 var Reply_Status_name = map[int32]string{
@@ -57,6 +58,7 @@ var Reply_Status_name = map[int32]string{
 	22: "GENERATION_REVOKED",
 	23: "CANNOT_PARSE_REVOCATION",
 	24: "REGISTRATION_DISABLED",
+	25: "HMAC_KEY_ALREADY_SET",
 }
 var Reply_Status_value = map[string]int32{
 	"OK":                         0,
@@ -78,6 +80,7 @@ var Reply_Status_value = map[string]int32{
 	"GENERATION_REVOKED":         22,
 	"CANNOT_PARSE_REVOCATION":    23,
 	"REGISTRATION_DISABLED":      24,
+	"HMAC_KEY_ALREADY_SET":       25,
 }
 
 func (x Reply_Status) Enum() *Reply_Status {
@@ -143,6 +146,7 @@ type Request struct {
 	Upload           *Upload           `protobuf:"bytes,4,opt,name=upload" json:"upload,omitempty"`
 	Download         *Download         `protobuf:"bytes,5,opt,name=download" json:"download,omitempty"`
 	Revocation       *SignedRevocation `protobuf:"bytes,6,opt,name=revocation" json:"revocation,omitempty"`
+	HmacSetup        *HMACSetup        `protobuf:"bytes,7,opt,name=hmac_setup" json:"hmac_setup,omitempty"`
 	XXX_unrecognized []byte            `json:"-"`
 }
 
@@ -188,6 +192,13 @@ func (this *Request) GetDownload() *Download {
 func (this *Request) GetRevocation() *SignedRevocation {
 	if this != nil {
 		return this.Revocation
+	}
+	return nil
+}
+
+func (this *Request) GetHmacSetup() *HMACSetup {
+	if this != nil {
+		return this.HmacSetup
 	}
 	return nil
 }
@@ -269,6 +280,7 @@ func (this *Reply) GetExtraRevocations() []*SignedRevocation {
 type NewAccount struct {
 	Generation       *uint32 `protobuf:"fixed32,1,req,name=generation" json:"generation,omitempty"`
 	Group            []byte  `protobuf:"bytes,2,req,name=group" json:"group,omitempty"`
+	HmacKey          []byte  `protobuf:"bytes,3,opt,name=hmac_key" json:"hmac_key,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -286,6 +298,13 @@ func (this *NewAccount) GetGeneration() uint32 {
 func (this *NewAccount) GetGroup() []byte {
 	if this != nil {
 		return this.Group
+	}
+	return nil
+}
+
+func (this *NewAccount) GetHmacKey() []byte {
+	if this != nil {
+		return this.HmacKey
 	}
 	return nil
 }
@@ -566,6 +585,22 @@ func (this *SignedRevocation_Revocation) GetGeneration() uint32 {
 func (this *SignedRevocation_Revocation) GetRevocation() []byte {
 	if this != nil {
 		return this.Revocation
+	}
+	return nil
+}
+
+type HMACSetup struct {
+	HmacKey          []byte `protobuf:"bytes,1,req,name=hmac_key" json:"hmac_key,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (this *HMACSetup) Reset()         { *this = HMACSetup{} }
+func (this *HMACSetup) String() string { return proto.CompactTextString(this) }
+func (*HMACSetup) ProtoMessage()       {}
+
+func (this *HMACSetup) GetHmacKey() []byte {
+	if this != nil {
+		return this.HmacKey
 	}
 	return nil
 }

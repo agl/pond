@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -46,12 +47,14 @@ const (
 type Account struct {
 	sync.Mutex
 
-	server     *Server
-	id         [32]byte
-	group      *bbssig.Group
-	filesValid bool
-	filesCount int64
-	filesSize  int64
+	server       *Server
+	id           [32]byte
+	group        *bbssig.Group
+	filesValid   bool
+	filesCount   int64
+	filesSize    int64
+	hmacKey      [32]byte
+	hmacKeyValid bool
 }
 
 func NewAccount(s *Server, id *[32]byte) *Account {
@@ -60,6 +63,30 @@ func NewAccount(s *Server, id *[32]byte) *Account {
 	}
 	copy(a.id[:], id[:])
 	return a
+}
+
+func (a *Account) HMACKey() (*[32]byte, bool) {
+	a.Lock()
+	defer a.Unlock()
+
+	if a.hmacKeyValid {
+		return &a.hmacKey, true
+	}
+
+	keyPath := a.HMACKeyPath()
+	keyBytes, err := ioutil.ReadFile(keyPath)
+	if err != nil {
+		return nil, false
+	}
+	if len(keyBytes) != len(a.hmacKey) {
+		log.Printf("Incorrect hmacKey length for %s", keyPath)
+		return nil, false
+	}
+
+	copy(a.hmacKey[:], keyBytes)
+	a.hmacKeyValid = true
+
+	return &a.hmacKey, true
 }
 
 func (a *Account) Group() *bbssig.Group {
@@ -96,6 +123,10 @@ func (a *Account) FilePath() string {
 
 func (a *Account) RevocationPath() string {
 	return filepath.Join(a.Path(), "revocations")
+}
+
+func (a *Account) HMACKeyPath() string {
+	return filepath.Join(a.Path(), "hmackey")
 }
 
 func (a *Account) LoadFileInfo() bool {
@@ -272,6 +303,8 @@ func (s *Server) Process(conn *transport.Conn) {
 		}
 	} else if req.Revocation != nil {
 		reply = s.revocation(from, req.Revocation)
+	} else if req.HmacSetup != nil {
+		reply = s.hmacSetup(from, req.HmacSetup)
 	} else {
 		reply = &pond.Reply{Status: pond.Reply_NO_REQUEST.Enum()}
 	}
@@ -390,6 +423,10 @@ func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
 	}
 
+	if l := len(req.HmacKey); l != 0 && l != len(account.hmacKey) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
 	if err := os.MkdirAll(path, 0700); err != nil {
 		log.Printf("failed to create directory: %s", err)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
@@ -398,6 +435,15 @@ func (s *Server) newAccount(from *[32]byte, req *pond.NewAccount) *pond.Reply {
 	if err := ioutil.WriteFile(filepath.Join(path, "group"), req.Group, 0600); err != nil {
 		log.Printf("failed to write group file: %s", err)
 		goto err
+	}
+
+	if len(req.HmacKey) > 0 {
+		if err := ioutil.WriteFile(account.HMACKeyPath(), req.HmacKey, 0600); err != nil {
+			log.Printf("failed to write HMAC key file: %s", err)
+			goto err
+		}
+		copy(account.hmacKey[:], req.HmacKey)
+		account.hmacKeyValid = true
 	}
 
 	s.Lock()
@@ -859,6 +905,35 @@ func (s *Server) revocation(from *[32]byte, signedRevocation *pond.SignedRevocat
 	if err := ioutil.WriteFile(groupPath, groupCopy.Marshal(), 0600); err != nil {
 		log.Printf("failed to write group file: %s", err)
 	}
+
+	return nil
+}
+
+func (s *Server) hmacSetup(from *[32]byte, setup *pond.HMACSetup) *pond.Reply {
+	account, ok := s.getAccount(from)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_ACCOUNT.Enum()}
+	}
+
+	if len(setup.HmacKey) != len(account.hmacKey) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
+	existingHMACKey, ok := account.HMACKey()
+	if ok {
+		if subtle.ConstantTimeCompare(setup.HmacKey, existingHMACKey[:]) == 1 {
+			return &pond.Reply{Status: pond.Reply_OK.Enum()}
+		} else {
+			return &pond.Reply{Status: pond.Reply_HMAC_KEY_ALREADY_SET.Enum()}
+		}
+	}
+
+	if err := ioutil.WriteFile(account.HMACKeyPath(), setup.HmacKey, 0600); err != nil {
+		log.Printf("failed to write HMAC key file: %s", err)
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+	}
+	copy(account.hmacKey[:], setup.HmacKey)
+	account.hmacKeyValid = true
 
 	return nil
 }

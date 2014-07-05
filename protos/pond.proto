@@ -18,6 +18,7 @@ message Request {
 	optional Upload upload = 4;
 	optional Download download = 5;
 	optional SignedRevocation revocation = 6;
+	optional HMACSetup hmac_setup = 7;
 }
 
 // Reply is the server's reply to the client.
@@ -52,6 +53,10 @@ message Reply {
 		// request to indicate the the server doesn't accept new
 		// registrations.
 		REGISTRATION_DISABLED = 24;
+
+		// HMAC_KEY_ALREADY_SET is returned in reply to a HMACSetup
+		// request if a different HMAC key has already been setup.
+		HMAC_KEY_ALREADY_SET = 25;
 	}
 	optional Status status = 1 [ default = OK ];
 
@@ -75,6 +80,9 @@ message NewAccount {
 	// group contains the serialised bbssig.Group for authenticating
 	// deliveries to this account.
 	required bytes group = 2;
+	// hmac_key contains an HMAC key used to authenticate delivery
+	// attempts.
+	optional bytes hmac_key = 3;
 }
 
 // AccountDetails contains the state of an account.
@@ -159,6 +167,12 @@ message SignedRevocation {
 	}
 	required Revocation revocation = 1;
 	required bytes signature = 2;
+}
+
+// HMACSetup can be sent by a client to establish an HMAC key if it didn't do
+// so at account creation time.
+message HMACSetup {
+	required bytes hmac_key = 1;
 }
 
 // KeyExchange is a message sent between clients to establish a relation. It's

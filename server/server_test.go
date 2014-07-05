@@ -164,18 +164,21 @@ func runScript(t *testing.T, s script) {
 	}
 
 	groupPrivateKeys := make([]*bbssig.PrivateKey, s.numPlayersWithAccounts)
+	hmacKeys := make([][32]byte, s.numPlayersWithAccounts)
 	for i := range groupPrivateKeys {
 		var err error
 		groupPrivateKeys[i], err = bbssig.GenerateGroup(rand.Reader)
 		if err != nil {
 			panic(err)
 		}
+		rand.Reader.Read(hmacKeys[i][:])
 
 		conn := server.Dial(&identities[i], &publicIdentities[i])
 		if err := conn.WriteProto(&pond.Request{
 			NewAccount: &pond.NewAccount{
 				Generation: proto.Uint32(0),
 				Group:      groupPrivateKeys[i].Group.Marshal(),
+				HmacKey:    hmacKeys[i][:],
 			},
 		}); err != nil {
 			t.Fatal(err)
