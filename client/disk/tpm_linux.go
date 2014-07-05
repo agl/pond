@@ -1,3 +1,5 @@
+// +build !notpm
+
 package disk
 
 import (
