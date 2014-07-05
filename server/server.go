@@ -283,29 +283,30 @@ func (s *Server) Process(conn *transport.Conn) {
 	var reply *pond.Reply
 	var messageFetched string
 
-	if req.NewAccount != nil {
+	switch {
+	case req.NewAccount != nil:
 		reply = s.newAccount(from, req.NewAccount)
-	} else if req.Deliver != nil {
+	case req.Deliver != nil:
 		reply = s.deliver(from, req.Deliver)
-	} else if req.Fetch != nil {
+	case req.Fetch != nil:
 		reply, messageFetched = s.fetch(from, req.Fetch)
-	} else if req.Upload != nil {
+	case req.Upload != nil:
 		reply = s.upload(from, conn, req.Upload)
 		if reply == nil {
 			// Connection will be handled by upload.
 			return
 		}
-	} else if req.Download != nil {
+	case req.Download != nil:
 		reply = s.download(conn, req.Download)
 		if reply == nil {
 			// Connection will be handled by download.
 			return
 		}
-	} else if req.Revocation != nil {
+	case req.Revocation != nil:
 		reply = s.revocation(from, req.Revocation)
-	} else if req.HmacSetup != nil {
+	case req.HmacSetup != nil:
 		reply = s.hmacSetup(from, req.HmacSetup)
-	} else {
+	default:
 		reply = &pond.Reply{Status: pond.Reply_NO_REQUEST.Enum()}
 	}
 
