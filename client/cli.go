@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"code.google.com/p/go.crypto/ssh/terminal"
@@ -103,6 +104,14 @@ func terminalEscape(s string, lineBreaksOk bool) string {
 	return string(out)
 }
 
+func updateTerminalSize(term *terminal.Terminal) {
+	width, height, err := terminal.GetSize(0)
+	if err != nil {
+		return
+	}
+	term.SetSize(width, height)
+}
+
 func (c *cliClient) Start() {
 	oldState, err := terminal.MakeRaw(0)
 	if err != nil {
@@ -118,9 +127,15 @@ func (c *cliClient) Start() {
 	c.termWrapper = wrapper
 
 	c.term = terminal.NewTerminal(wrapper, "> ")
-	if width, height, err := terminal.GetSize(0); err == nil {
-		c.term.SetSize(width, height)
-	}
+	updateTerminalSize(c.term)
+
+	resizeChan := make(chan os.Signal)
+	go func() {
+		for _ = range resizeChan {
+			updateTerminalSize(c.term)
+		}
+	}()
+	signal.Notify(resizeChan, syscall.SIGWINCH)
 
 	c.loadUI()
 
