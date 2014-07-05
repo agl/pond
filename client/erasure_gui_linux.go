@@ -1,4 +1,4 @@
-// +build !nogui,linux
+// +build !nogui,linux,!notpm
 
 package main
 
