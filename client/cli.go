@@ -399,13 +399,27 @@ func (c *cliClient) createAccountUI(stateFile *disk.StateFile, pw string) (bool,
 		defaultServer = msgDefaultDevServer
 	}
 
-	c.Printf("%s %s Just hit enter to use the default server [%s]\n", termInfoPrefix, msgCreateAccount, defaultServer)
+	c.Printf("%s %s\n", termInfoPrefix, msgCreateAccount)
+	c.Printf("%s\n", termInfoPrefix)
+	c.Printf("%s Either leave this blank to use the default server, enter a pondserver:// address, or type one of the following server nicknames:\n", termInfoPrefix)
+	for _, server := range knownServers {
+		if len(server.nickname) == 0 {
+			continue
+		}
+		c.Printf("%s   %s: %s\n", termInfoPrefix, server.nickname, server.description)
+	}
 	c.term.SetPrompt("server> ")
 
 	for {
 		line, err := c.term.ReadLine()
 		if err != nil {
 			return false, err
+		}
+		for _, server := range knownServers {
+			if line == server.nickname {
+				line = server.uri
+				break
+			}
 		}
 		if len(line) == 0 {
 			line = defaultServer

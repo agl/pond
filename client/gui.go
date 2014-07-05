@@ -896,6 +896,12 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 		defaultServer = msgDefaultDevServer
 	}
 
+	serverLabels := []string{"Default"}
+	for _, server := range knownServers {
+		serverLabels = append(serverLabels, server.description)
+	}
+	serverLabels = append(serverLabels, "Custom")
+
 	ui := Grid{
 		widgetBase: widgetBase{margin: 20},
 		rowSpacing: 5,
@@ -918,13 +924,14 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 				}},
 			},
 			{
-				{1, 1, Label{
-					text:   "Server:",
-					yAlign: 0.5,
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      serverLabels,
+					preSelected: "Default",
 				}},
 				{1, 1, Entry{
-					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10},
-					width:      75,
+					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10, insensitive: true},
+					width:      60,
 					text:       defaultServer,
 				}},
 			},
@@ -1037,6 +1044,27 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 
 			c.lastErasureStorageTime = time.Now()
 			return true, nil
+		case "servercombo":
+			selected := click.combos["servercombo"]
+			server := ""
+
+			switch selected {
+			case "Default":
+				server = defaultServer
+			case "Custom":
+				server = ""
+			default:
+				for _, known := range knownServers {
+					if known.description == selected {
+						server = known.uri
+					}
+				}
+			}
+
+			c.gui.Actions() <- Sensitive{name: "server", sensitive: len(server) == 0}
+			c.gui.Actions() <- SetEntry{name: "server", text: server}
+			c.gui.Signal()
+			continue
 		case "create":
 			break
 		default:
