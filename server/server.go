@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"code.google.com/p/goprotobuf/proto"
+	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
@@ -685,25 +687,14 @@ func (s *Server) getAccount(id *[32]byte) (*Account, bool) {
 	return account, true
 }
 
-func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
-	var to [32]byte
-	if len(del.To) != len(to) {
-		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
-	}
-	copy(to[:], del.To)
-
-	account, ok := s.getAccount(&to)
-	if !ok {
-		return &pond.Reply{Status: pond.Reply_NO_SUCH_ADDRESS.Enum()}
-	}
-
+func authenticateDeliveryWithGroupSignature(account *Account, del *pond.Delivery) (*pond.Reply, bool) {
 	revPath := filepath.Join(account.RevocationPath(), fmt.Sprintf("%08x", *del.Generation))
 	revBytes, err := ioutil.ReadFile(revPath)
 	if err == nil {
 		var revocation pond.SignedRevocation
 		if err := proto.Unmarshal(revBytes, &revocation); err != nil {
 			log.Printf("Failed to parse revocation from file %s: %s", revPath, err)
-			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}, false
 		}
 
 		// maxRevocationBytes is the maximum number of bytes that we'll
@@ -728,7 +719,7 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 			revLength += len(revBytes)
 		}
 
-		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation, ExtraRevocations: extraRevocations}
+		return &pond.Reply{Status: pond.Reply_GENERATION_REVOKED.Enum(), Revocation: &revocation, ExtraRevocations: extraRevocations}, false
 	}
 
 	sha := sha256.New()
@@ -738,11 +729,104 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 
 	group := account.Group()
 	if group == nil {
-		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}, false
 	}
 
-	if !group.Verify(digest, sha, del.Signature) {
-		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}
+	if !group.Verify(digest, sha, del.GroupSignature) {
+		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}, false
+	}
+
+	return nil, true
+}
+
+func authenticateDeliveryWithHMAC(account *Account, del *pond.Delivery) (*pond.Reply, bool) {
+	if len(del.OneTimePublicKey) != ed25519.PublicKeySize || len(del.OneTimeSignature) != ed25519.SignatureSize {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}, false
+	}
+
+	hmacKey, ok := account.HMACKey()
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_HMAC_NOT_SETUP.Enum()}, false
+	}
+
+	if x := *del.HmacOfPublicKey; x&hmacValueMask != x {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}, false
+	}
+
+	h := hmac.New(sha256.New, hmacKey[:])
+	h.Write(del.OneTimePublicKey)
+	digestFull := h.Sum(nil)
+	digest := binary.LittleEndian.Uint64(digestFull) & hmacValueMask
+
+	if digest != *del.HmacOfPublicKey {
+		return &pond.Reply{Status: pond.Reply_HMAC_INCORRECT.Enum()}, false
+	}
+
+	var publicKey [ed25519.PublicKeySize]byte
+	var sig [ed25519.SignatureSize]byte
+	copy(publicKey[:], del.OneTimePublicKey)
+	copy(sig[:], del.OneTimeSignature)
+
+	if !ed25519.Verify(&publicKey, del.Message, &sig) {
+		return &pond.Reply{Status: pond.Reply_DELIVERY_SIGNATURE_INVALID.Enum()}, false
+	}
+
+	result, ok := account.InsertHMAC(digest)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}, false
+	}
+	switch result {
+	case hmacUsed:
+		return &pond.Reply{Status: pond.Reply_HMAC_USED.Enum()}, false
+	case hmacRevoked:
+		return &pond.Reply{Status: pond.Reply_HMAC_REVOKED.Enum()}, false
+	case hmacFresh:
+		return nil, true
+	default:
+		panic("should not happen")
+	}
+}
+
+func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
+	var to [32]byte
+	if len(del.To) != len(to) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+	copy(to[:], del.To)
+
+	if b := len(del.OneTimePublicKey) > 0; b != (del.HmacOfPublicKey != nil) || b != (len(del.OneTimeSignature) > 0) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
+	if (len(del.GroupSignature) > 0) != (del.Generation != nil) {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
+	hmacAuthenticated := len(del.OneTimePublicKey) > 0
+	groupSignatureAuthenticated := len(del.GroupSignature) > 0
+
+	if hmacAuthenticated == groupSignatureAuthenticated {
+		return &pond.Reply{Status: pond.Reply_PARSE_ERROR.Enum()}
+	}
+
+	account, ok := s.getAccount(&to)
+	if !ok {
+		return &pond.Reply{Status: pond.Reply_NO_SUCH_ADDRESS.Enum()}
+	}
+
+	switch {
+	case groupSignatureAuthenticated:
+		reply, ok := authenticateDeliveryWithGroupSignature(account, del)
+		if !ok {
+			return reply
+		}
+	case hmacAuthenticated:
+		reply, ok := authenticateDeliveryWithHMAC(account, del)
+		if !ok {
+			return reply
+		}
+	default:
+		panic("internal error")
 	}
 
 	serialized, _ := proto.Marshal(del)
@@ -762,6 +846,11 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	if len(ents) > maxQueue {
 		return &pond.Reply{Status: pond.Reply_MAILBOX_FULL.Enum()}
 	}
+
+	sha := sha256.New()
+	sha.Write(del.Message)
+	digest := sha.Sum(nil)
+
 	msgPath := filepath.Join(path, fmt.Sprintf("%x", digest))
 	if err := ioutil.WriteFile(msgPath, serialized, 0600); err != nil {
 		log.Printf("failed to write %s: %s", msgPath, err)
@@ -878,9 +967,9 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 	}
 
 	fetched := &pond.Fetched{
-		Signature:  del.Signature,
-		Generation: del.Generation,
-		Message:    del.Message,
+		GroupSignature: del.GroupSignature,
+		Generation:     del.Generation,
+		Message:        del.Message,
 		Details: &pond.AccountDetails{
 			Queue:    proto.Uint32(queueLen),
 			MaxQueue: proto.Uint32(0),
