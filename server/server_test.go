@@ -121,6 +121,9 @@ type action struct {
 	validate        func(*testing.T, *pond.Reply)
 	payloadSize     int
 	validatePayload func(*testing.T, []byte)
+	// noAck can be set to suppress reading the ACK byte from the server,
+	// e.g. when simulating a truncated upload.
+	noAck bool
 }
 
 type scriptState struct {
@@ -234,6 +237,12 @@ func runScript(t *testing.T, s script) {
 			}
 			if a.validatePayload != nil {
 				a.validatePayload(t, fromServer)
+			}
+		}
+		if len(a.payload) > 0 && !a.noAck {
+			var ack [1]byte
+			if n, err := conn.Read(ack[:]); err != nil || n != 1 {
+				t.Fatalf("Failed to read ack: %d %s", n, err)
 			}
 		}
 		conn.Close()
@@ -570,6 +579,13 @@ func TestResumeUpload(t *testing.T) {
 					}
 				},
 				payload: payload[:2],
+				// Warning: this is inheriently racy. We don't
+				// wait for the ack from the server (because
+				// one will never come because we don't
+				// complete the upload). However, we don't know
+				// that the server has finished processing the
+				// bytes that we did send it.
+				noAck: true,
 			},
 			{
 				player: 0,
