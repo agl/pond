@@ -23,7 +23,7 @@ title: Threat Model
 
 <p>Lastly, assumptions about the world:</p>
 <ol>
-	<li>The security assumptions of curve25519, Ed25519, salsa20, poly1305, and pairing based group-signatures are valid.</li>
+	<li>The security assumptions of curve25519, Ed25519, salsa20, poly1305, HMAC-SHA256, Rijndael (with a 256-bit block) and pairing based group-signatures are valid.</li>
 </ol>
 
 <p>What the user's home server can achieve:</p>
@@ -37,6 +37,7 @@ title: Threat Model
 	<li>A server can duplicate old messages.</li>
 	<li>A server can drop or corrupt any uploaded detachments.</li>
 	<li>A server can estimate the number of contacts who send messages to a given account after that account has issued a revocation based on the number of clients who try to send messages using an expired group generation number.</li>
+	<li>(Future) A server can falsely inform a contact that they have been revoked.</li>
 </ol>
 
 <p>What a global, passive adversary (one who can observe all Internet traffic) can achieve:</p>
