@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,8 +18,10 @@ import (
 	"time"
 
 	"code.google.com/p/go.crypto/curve25519"
+	"code.google.com/p/go.crypto/salsa20"
 
 	"code.google.com/p/goprotobuf/proto"
+	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
@@ -130,6 +134,7 @@ type scriptState struct {
 	identities       [][32]byte
 	publicIdentities [][32]byte
 	groupPrivateKeys []*bbssig.PrivateKey
+	hmacKeys         [][32]byte
 	testServer       *TestServer
 }
 
@@ -148,10 +153,60 @@ func (s *scriptState) buildDelivery(to int, message []byte, generation uint32) *
 	}
 	return &pond.Request{
 		Deliver: &pond.Delivery{
-			To:         s.publicIdentities[to][:],
-			Signature:  sig,
-			Generation: proto.Uint32(generation),
-			Message:    message,
+			To:             s.publicIdentities[to][:],
+			GroupSignature: sig,
+			Generation:     proto.Uint32(generation),
+			Message:        message,
+		},
+	}
+}
+
+type salsaRNG struct {
+	seed int
+}
+
+func (rng salsaRNG) Read(buf []byte) (n int, err error) {
+	for i := range buf {
+		buf[i] = 0
+	}
+
+	var nonce [8]byte
+	var key [32]byte
+	binary.LittleEndian.PutUint32(key[:], uint32(rng.seed))
+	rng.seed++
+	salsa20.XORKeyStream(buf, buf, nonce[:], &key)
+
+	return len(buf), nil
+}
+
+func (s *scriptState) makeOneTimePubKey(to int, seed int) (pub *[ed25519.PublicKeySize]byte, priv *[ed25519.PrivateKeySize]byte, digest uint64) {
+	rng := rand.Reader
+	if seed >= 0 {
+		rng = &salsaRNG{seed}
+	}
+	pub, priv, err := ed25519.GenerateKey(rng)
+	if err != nil {
+		panic("ed25519 Generate Key failed: " + err.Error())
+	}
+
+	h := hmac.New(sha256.New, s.hmacKeys[to][:])
+	h.Write(pub[:])
+	digestFull := h.Sum(nil)
+	digest = binary.LittleEndian.Uint64(digestFull) & hmacValueMask
+	return
+}
+
+func (s *scriptState) buildHMACDelivery(to int, message []byte, seed int) *pond.Request {
+	pub, priv, digest := s.makeOneTimePubKey(to, seed)
+	sig := ed25519.Sign(priv, message)
+
+	return &pond.Request{
+		Deliver: &pond.Delivery{
+			To:               s.publicIdentities[to][:],
+			Message:          message,
+			OneTimePublicKey: pub[:],
+			HmacOfPublicKey:  proto.Uint64(digest),
+			OneTimeSignature: sig[:],
 		},
 	}
 }
@@ -202,6 +257,7 @@ func runScript(t *testing.T, s script) {
 		identities:       identities,
 		publicIdentities: publicIdentities,
 		groupPrivateKeys: groupPrivateKeys,
+		hmacKeys:         hmacKeys,
 		testServer:       server,
 	}
 
@@ -286,10 +342,10 @@ func TestInvalidAddress(t *testing.T) {
 
 	oneShotTest(t, &pond.Request{
 		Deliver: &pond.Delivery{
-			To:         make([]byte, 5),
-			Signature:  make([]byte, 5),
-			Generation: proto.Uint32(0),
-			Message:    make([]byte, 5),
+			To:             make([]byte, 5),
+			GroupSignature: make([]byte, 5),
+			Generation:     proto.Uint32(0),
+			Message:        make([]byte, 5),
 		},
 	}, func(t *testing.T, reply *pond.Reply) {
 		if reply.Status == nil || *reply.Status != pond.Reply_PARSE_ERROR {
@@ -303,10 +359,10 @@ func TestNoSuchAddress(t *testing.T) {
 
 	oneShotTest(t, &pond.Request{
 		Deliver: &pond.Delivery{
-			To:         make([]byte, 32),
-			Signature:  make([]byte, 5),
-			Generation: proto.Uint32(0),
-			Message:    make([]byte, 5),
+			To:             make([]byte, 32),
+			GroupSignature: make([]byte, 5),
+			Generation:     proto.Uint32(0),
+			Message:        make([]byte, 5),
 		},
 	}, func(t *testing.T, reply *pond.Reply) {
 		if reply.Status == nil || *reply.Status != pond.Reply_NO_SUCH_ADDRESS {
@@ -865,6 +921,76 @@ func TestRevocation(t *testing.T) {
 				validate: func(t *testing.T, reply *pond.Reply) {
 					if reply.Status != nil {
 						t.Errorf("Bad reply to revocation: %s", reply)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestDoubleDelivery(t *testing.T) {
+	t.Parallel()
+
+	message := []byte{1, 2, 3}
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return s.buildHMACDelivery(0, message, 0)
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status != nil {
+						t.Errorf("Bad reply to first message send: %s", reply)
+					}
+				},
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return s.buildHMACDelivery(0, message, 0)
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status == nil || *reply.Status != pond.Reply_HMAC_USED {
+						t.Errorf("Bad reply to duplicate message send: %s", reply)
+					}
+				},
+			},
+		},
+	})
+}
+
+func TestDeliveryAfterRevocation(t *testing.T) {
+	t.Parallel()
+
+	message := []byte{1, 2, 3}
+
+	runScript(t, script{
+		numPlayers:             2,
+		numPlayersWithAccounts: 1,
+		actions: []action{
+			{
+				player: 0,
+				buildRequest: func(s *scriptState) *pond.Request {
+					_, _, hmac := s.makeOneTimePubKey(0, 0)
+					return &pond.Request{
+						HmacStrike: &pond.HMACStrike{
+							Hmacs: []uint64{hmac | 1<<63},
+						},
+					}
+				},
+			},
+			{
+				player: 1,
+				buildRequest: func(s *scriptState) *pond.Request {
+					return s.buildHMACDelivery(0, message, 0)
+				},
+				validate: func(t *testing.T, reply *pond.Reply) {
+					if reply.Status == nil || *reply.Status != pond.Reply_HMAC_REVOKED {
+						t.Errorf("Bad reply to duplicate message send: %s", reply)
 					}
 				},
 			},

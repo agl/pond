@@ -58,6 +58,18 @@ message Reply {
 		// HMAC_KEY_ALREADY_SET is returned in reply to a HMACSetup
 		// request if a different HMAC key has already been setup.
 		HMAC_KEY_ALREADY_SET = 25;
+		// HMAC_NOT_SETUP results from a delivery attempt when the
+		// recipient hasn't configured an HMAC key.
+		HMAC_NOT_SETUP = 26;
+		// HMAC_INCORRECT results from a delivery when the HMAC of the
+		// one-time public key doesn't validate.
+		HMAC_INCORRECT = 27;
+		// HMAC_USED results from a delivery when the HMAC value has
+		// already been used.
+		HMAC_USED = 28;
+		// HMAC_REVOKED results from a delivery when the HMAC value has
+		// been marked as revoked.
+		HMAC_REVOKED = 29;
 	}
 	optional Status status = 1 [ default = OK ];
 
@@ -108,12 +120,20 @@ message Delivery {
 	required bytes to = 1;
 	// A group signature of |message| proving authorisation to deliver
 	// messages to the account.
-	required bytes signature = 2;
+	optional bytes group_signature = 2;
 	// The current generation number in order for the server to send
 	// revocation updates.
-	required fixed32 generation = 3;
+	optional fixed32 generation = 3;
 	// The padded message to deliver.
 	required bytes message = 4;
+	// one_time_public_key contains an Ed25519 public key that was issued
+	// by the recipient in order to authenticate delivery attempts.
+	optional bytes one_time_public_key = 5;
+	// hmac_of_public_key contains a 63-bit HMAC of public key using the
+	// HMAC key known to server and recipient.
+	optional fixed64 hmac_of_public_key = 6;
+	// one_time_signature contains a signature, by public_key, of message.
+	optional bytes one_time_signature = 7;
 }
 
 // Fetch is a request to fetch a message. It may result in either a Fetched, or
@@ -124,8 +144,8 @@ message Fetch {
 // Fetched is the reply to a Fetch request if the server has a message for
 // delivery.
 message Fetched {
-	// signature is the group signature presented by the sender.
-	required bytes signature = 1;
+	// group_signature is the group signature presented by the sender.
+	required bytes group_signature = 1;
 	// generation is the generation number used for delivery.
 	required fixed32 generation = 2;
 	required bytes message = 3;

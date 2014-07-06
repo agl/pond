@@ -36,6 +36,10 @@ const (
 	Reply_CANNOT_PARSE_REVOCATION    Reply_Status = 23
 	Reply_REGISTRATION_DISABLED      Reply_Status = 24
 	Reply_HMAC_KEY_ALREADY_SET       Reply_Status = 25
+	Reply_HMAC_NOT_SETUP             Reply_Status = 26
+	Reply_HMAC_INCORRECT             Reply_Status = 27
+	Reply_HMAC_USED                  Reply_Status = 28
+	Reply_HMAC_REVOKED               Reply_Status = 29
 )
 
 var Reply_Status_name = map[int32]string{
@@ -59,6 +63,10 @@ var Reply_Status_name = map[int32]string{
 	23: "CANNOT_PARSE_REVOCATION",
 	24: "REGISTRATION_DISABLED",
 	25: "HMAC_KEY_ALREADY_SET",
+	26: "HMAC_NOT_SETUP",
+	27: "HMAC_INCORRECT",
+	28: "HMAC_USED",
+	29: "HMAC_REVOKED",
 }
 var Reply_Status_value = map[string]int32{
 	"OK":                         0,
@@ -81,6 +89,10 @@ var Reply_Status_value = map[string]int32{
 	"CANNOT_PARSE_REVOCATION":    23,
 	"REGISTRATION_DISABLED":      24,
 	"HMAC_KEY_ALREADY_SET":       25,
+	"HMAC_NOT_SETUP":             26,
+	"HMAC_INCORRECT":             27,
+	"HMAC_USED":                  28,
+	"HMAC_REVOKED":               29,
 }
 
 func (x Reply_Status) Enum() *Reply_Status {
@@ -359,9 +371,12 @@ func (this *AccountCreated) GetDetails() *AccountDetails {
 
 type Delivery struct {
 	To               []byte  `protobuf:"bytes,1,req,name=to" json:"to,omitempty"`
-	Signature        []byte  `protobuf:"bytes,2,req,name=signature" json:"signature,omitempty"`
-	Generation       *uint32 `protobuf:"fixed32,3,req,name=generation" json:"generation,omitempty"`
+	GroupSignature   []byte  `protobuf:"bytes,2,opt,name=group_signature" json:"group_signature,omitempty"`
+	Generation       *uint32 `protobuf:"fixed32,3,opt,name=generation" json:"generation,omitempty"`
 	Message          []byte  `protobuf:"bytes,4,req,name=message" json:"message,omitempty"`
+	OneTimePublicKey []byte  `protobuf:"bytes,5,opt,name=one_time_public_key" json:"one_time_public_key,omitempty"`
+	HmacOfPublicKey  *uint64 `protobuf:"fixed64,6,opt,name=hmac_of_public_key" json:"hmac_of_public_key,omitempty"`
+	OneTimeSignature []byte  `protobuf:"bytes,7,opt,name=one_time_signature" json:"one_time_signature,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -376,9 +391,9 @@ func (this *Delivery) GetTo() []byte {
 	return nil
 }
 
-func (this *Delivery) GetSignature() []byte {
+func (this *Delivery) GetGroupSignature() []byte {
 	if this != nil {
-		return this.Signature
+		return this.GroupSignature
 	}
 	return nil
 }
@@ -397,6 +412,27 @@ func (this *Delivery) GetMessage() []byte {
 	return nil
 }
 
+func (this *Delivery) GetOneTimePublicKey() []byte {
+	if this != nil {
+		return this.OneTimePublicKey
+	}
+	return nil
+}
+
+func (this *Delivery) GetHmacOfPublicKey() uint64 {
+	if this != nil && this.HmacOfPublicKey != nil {
+		return *this.HmacOfPublicKey
+	}
+	return 0
+}
+
+func (this *Delivery) GetOneTimeSignature() []byte {
+	if this != nil {
+		return this.OneTimeSignature
+	}
+	return nil
+}
+
 type Fetch struct {
 	XXX_unrecognized []byte `json:"-"`
 }
@@ -406,7 +442,7 @@ func (this *Fetch) String() string { return proto.CompactTextString(this) }
 func (*Fetch) ProtoMessage()       {}
 
 type Fetched struct {
-	Signature        []byte          `protobuf:"bytes,1,req,name=signature" json:"signature,omitempty"`
+	GroupSignature   []byte          `protobuf:"bytes,1,req,name=group_signature" json:"group_signature,omitempty"`
 	Generation       *uint32         `protobuf:"fixed32,2,req,name=generation" json:"generation,omitempty"`
 	Message          []byte          `protobuf:"bytes,3,req,name=message" json:"message,omitempty"`
 	Details          *AccountDetails `protobuf:"bytes,4,req,name=details" json:"details,omitempty"`
@@ -417,9 +453,9 @@ func (this *Fetched) Reset()         { *this = Fetched{} }
 func (this *Fetched) String() string { return proto.CompactTextString(this) }
 func (*Fetched) ProtoMessage()       {}
 
-func (this *Fetched) GetSignature() []byte {
+func (this *Fetched) GetGroupSignature() []byte {
 	if this != nil {
-		return this.Signature
+		return this.GroupSignature
 	}
 	return nil
 }

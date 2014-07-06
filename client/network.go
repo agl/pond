@@ -224,10 +224,10 @@ func (c *client) processSigningRequest(sigReq signingRequest) {
 
 	request := &pond.Request{
 		Deliver: &pond.Delivery{
-			To:         to.theirIdentityPublic[:],
-			Signature:  groupSig,
-			Generation: proto.Uint32(to.generation),
-			Message:    sealed,
+			To:             to.theirIdentityPublic[:],
+			GroupSignature: groupSig,
+			Generation:     proto.Uint32(to.generation),
+			Message:        sealed,
 		},
 	}
 
@@ -395,14 +395,14 @@ func (c *client) processFetch(m NewMessage) {
 
 	var tag []byte
 	var ok bool
-	if c.groupPriv.Verify(digest, sha, f.Signature) {
-		tag, ok = c.groupPriv.Open(f.Signature)
+	if c.groupPriv.Verify(digest, sha, f.GroupSignature) {
+		tag, ok = c.groupPriv.Open(f.GroupSignature)
 	} else {
 		found := false
 		for _, prev := range c.prevGroupPrivs {
-			if prev.priv.Verify(digest, sha, f.Signature) {
+			if prev.priv.Verify(digest, sha, f.GroupSignature) {
 				found = true
-				tag, ok = c.groupPriv.Open(f.Signature)
+				tag, ok = c.groupPriv.Open(f.GroupSignature)
 				break
 			}
 		}
