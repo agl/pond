@@ -62,7 +62,8 @@ $GOPATH/bin/client</pre>
 <p><i>WARNING</i>: Using <tt>golang</tt> version 1.0 (Wheezy package) is not recommended and compatibility is untested. If you face any problems compiling pond try to upgrade <tt>golang</tt> to version 1.2 from the testing repository.</p>
 
 <h5>Tails (Version 1.1)</h5>
-<p>Build, install and usage instructions for Tails 1.1 users:</p>
+<p>Build and install instructions for Tails 1.1 users:</p>
+
 <pre>sudo apt-get update
 sudo apt-get install -t unstable golang
 sudo apt-get install gcc git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers mercurial
@@ -71,32 +72,20 @@ mkdir ~/Persistent/go/
 export GOPATH=$HOME/Persistent/go/
 export PATH=$PATH:$GOPATH/bin
 go get -tags ubuntu github.com/agl/pond/client
-alias pond-client="$GOPATH/bin/client --state-file=$HOME/Persistent/.pond"
-alias pond-client-cli="$GOPATH/bin/client -cli=true --state-file=$HOME/Persistent/.pond"</pre>
+echo "#/bin/bash" &gt; Persistent/pond-client
+echo "$GOPATH/bin/client" &gt;&gt; Persistent/pond-client
+echo "#/bin/bash" &gt; Persistent/pond-client-cli
+echo "$GOPATH/bin/client -cli" &gt;&gt; Persistent/pond-client-cli
+chmod +x Persistent/pond-client Persistent/pond-client-cli
+
+<p>To run pond, open a Terminal and type <tt>Persistent/pond-client</tt> and
+hit enter. To run the command-line version (which was the only version
+that worked in earlier versions of Tails), run
+<tt>Persistent/pond-client-cli</tt> instead.
 
 <p>In order to update Pond, from time to time, run:</p>
 
 <pre>go get -u -tags ubuntu github.com/agl/pond/client</pre>
-
-<h5>Tails (Version 1.0.1 or older)</h5>
-<p>Tails only supports the CLI mode of operation for Pond as it is based on an old Debian-stable.
-Build, install and usage instructions for Tails users:</p>
-<pre>sudo apt-get update --fix-missing
-sudo apt-get install -t unstable golang
-sudo apt-get install mercurial trousers gcc
-sudo apt-get install -t squeeze-lts -y libssl-dev
-sudo apt-get install -t backports libtspi-dev
-mkdir ~/Persistent/go/
-export GOPATH=$HOME/Persistent/go/
-export PATH=$PATH:$GOPATH/bin
-go get -tags nogui github.com/agl/pond/client
-alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
-
-<p>(<i>Note:</i> the build process reportedly fails with less than 1GB of memory. You can still run Pond with less than 1GB, but you'll need to build it elsewhere.)</p>
-
-<p>In order to update Pond, from time to time, run:</p>
-
-<pre>go get -u -tags nogui github.com/agl/pond/client</pre>
 
 <h5>Fedora 19</h5>
 
