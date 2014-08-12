@@ -61,7 +61,24 @@ $GOPATH/bin/client</pre>
 
 <p><i>WARNING</i>: Using <tt>golang</tt> version 1.0 (Wheezy package) is not recommended and compatibility is untested. If you face any problems compiling pond try to upgrade <tt>golang</tt> to version 1.2 from the testing repository.</p>
 
-<h5>Tails</h5>
+<h5>Tails (Version 1.1)</h5>
+<p>Build, install and usage instructions for Tails 1.1 users:</p>
+<pre>sudo apt-get update
+sudo apt-get install -t unstable golang
+sudo apt-get install gcc git libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers mercurial
+
+mkdir ~/Persistent/go/
+export GOPATH=$HOME/Persistent/go/
+export PATH=$PATH:$GOPATH/bin
+go get -tags ubuntu github.com/agl/pond/client
+alias pond-client="$GOPATH/bin/client --state-file=$HOME/Persistent/.pond"
+alias pond-client-cli="$GOPATH/bin/client -cli=true --state-file=$HOME/Persistent/.pond"</pre>
+
+<p>In order to update Pond, from time to time, run:</p>
+
+<pre>go get -u -tags ubuntu github.com/agl/pond/client</pre>
+
+<h5>Tails (Version 1.0.1 or older)</h5>
 <p>Tails only supports the CLI mode of operation for Pond as it is based on an old Debian-stable.
 Build, install and usage instructions for Tails users:</p>
 <pre>sudo apt-get update --fix-missing
