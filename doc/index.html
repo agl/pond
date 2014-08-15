@@ -156,6 +156,16 @@ go get github.com/agl/pond/client
 
 <p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
 
+<p>If you just want the CLI version of Pond, you can use the nogui tag like so:</p>
+
+<pre>
+brew install go
+export GOPATH=$HOME/gopkg
+export PATH=$PATH:$GOPATH/bin
+go get -tags nogui github.com/agl/pond/client
+alias pond="$GOPATH/bin/client"
+</pre>
+
 <p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
 
 <h4>Running a Pond server</h4>
