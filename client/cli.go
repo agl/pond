@@ -1717,21 +1717,23 @@ func (c *cliClient) showInbox(msg *InboxMessage) {
 	}
 	table.WriteTo(c.term)
 
-	if len(msg.message.Files) > 0 {
-		c.Printf("%s Attachments (use 'save <#> <filename>' to save):\n", termHeaderPrefix)
-	}
-	for i, attachment := range msg.message.Files {
-		c.Printf("%s     %d: %s (%d bytes):\n", termHeaderPrefix, i+1, terminalEscape(attachment.GetFilename(), false), len(attachment.Contents))
-	}
-	if len(msg.message.DetachedFiles) > 0 {
-		c.Printf("%s Detachments (use '[download|save-key] <#> <filename>' to save):\n", termHeaderPrefix)
-	}
-	for i, detachment := range msg.message.DetachedFiles {
-		disposition := ""
-		if detachment.Url != nil {
-			disposition = ", downloadable"
+	if msg.message != nil {
+		if len(msg.message.Files) > 0 {
+			c.Printf("%s Attachments (use 'save <#> <filename>' to save):\n", termHeaderPrefix)
 		}
-		c.Printf("%s     %d: %s (%d bytes%s):\n", termHeaderPrefix, i+1, terminalEscape(detachment.GetFilename(), false), detachment.GetSize(), disposition)
+		for i, attachment := range msg.message.Files {
+			c.Printf("%s     %d: %s (%d bytes):\n", termHeaderPrefix, i+1, terminalEscape(attachment.GetFilename(), false), len(attachment.Contents))
+		}
+		if len(msg.message.DetachedFiles) > 0 {
+			c.Printf("%s Detachments (use '[download|save-key] <#> <filename>' to save):\n", termHeaderPrefix)
+		}
+		for i, detachment := range msg.message.DetachedFiles {
+			disposition := ""
+			if detachment.Url != nil {
+				disposition = ", downloadable"
+			}
+			c.Printf("%s     %d: %s (%d bytes%s):\n", termHeaderPrefix, i+1, terminalEscape(detachment.GetFilename(), false), detachment.GetSize(), disposition)
+		}
 	}
 	c.Printf("\n")
 	c.term.Write([]byte(terminalEscape(string(msgText), true /* line breaks ok */)))
