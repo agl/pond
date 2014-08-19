@@ -1662,7 +1662,7 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 	// The editor is forced to vim because I'm not sure about leaks from
 	// other editors. (I'm not sure about leaks from vim either, but at
 	// least I can set some arguments to remove the obvious ones.)
-	cmd := exec.Command("vim", "-n", "-c", "set viminfo=", "+4", "--", tempFileName)
+	cmd := exec.Command("vim", "-n", "--cmd", "set modelines=0", "-c", "set viminfo=", "+4", "--", tempFileName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
