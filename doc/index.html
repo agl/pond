@@ -61,25 +61,37 @@ $GOPATH/bin/client</pre>
 
 <p><i>WARNING</i>: Using <tt>golang</tt> version 1.0 (Wheezy package) is not recommended and compatibility is untested. If you face any problems compiling pond try to upgrade <tt>golang</tt> to version 1.2 from the testing repository.</p>
 
-<h5>Tails</h5>
-<p>Tails only supports the CLI mode of operation for Pond as it is based on an old Debian-stable.
-Build, install and usage instructions for Tails users:</p>
-<pre>sudo apt-get update --fix-missing
-sudo apt-get install -t unstable golang
-sudo apt-get install mercurial trousers gcc
-sudo apt-get install -t squeeze-lts -y libssl-dev
-sudo apt-get install -t backports libtspi-dev
-mkdir ~/Persistent/go/
-export GOPATH=$HOME/Persistent/go/
-export PATH=$PATH:$GOPATH/bin
-go get -tags nogui github.com/agl/pond/client
-alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
+<h5>Tails (Version 1.1.1)</h5>
 
-<p>(<i>Note:</i> the build process reportedly fails with less than 1GB of memory. You can still run Pond with less than 1GB, but you'll need to build it elsewhere.)</p>
+<p>First, if you have not done so already, configure Tails persistence (<em>Applications</em> &rarr; <em>Tails</em> &rarr; <em>Configure persistent volume</em>) to persist "Personal Data", "APT Packages", "APT Lists", and "Dotfiles". A reboot is required after these settings are changed.</p>
 
-<p>In order to update Pond, from time to time, run:</p>
+<p>Next, when starting Tails, click "Yes" at the "More options?" prompt to set an Administration password. You'll need this password to install Pond's dependencies.</p>
 
-<pre>go get -u -tags nogui github.com/agl/pond/client</pre>
+<p>Next, open a Terminal and copy and paste the following commands to build and install Pond:</p>
+
+<pre>
+echo 'export GOPATH=$HOME/Persistent/go/' &gt;&gt; ~/.bashrc
+. ~/.bashrc
+mkdir $GOPATH
+alias pond-build='sudo apt-get update &amp;&amp; \
+sudo apt-get install golang/testing gcc git mercurial libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers &amp;&amp; \
+go get -u -tags ubuntu github.com/agl/pond/client &amp;&amp; \
+echo "Success." || echo "Sorry, something went wrong."'
+alias pond-install-deps='sudo apt-get install libtspi1 libgtkspell-3-0'
+alias pond='$GOPATH/bin/client'
+alias pond-cli='$GOPATH/bin/client --cli'
+alias|grep pond &gt;&gt; ~/.bashrc
+pond-build
+</pre>
+
+<p>Finally, run the following command (if you have not previously done so) to add your <tt>~/.bashrc</tt> to the persistent storage:</p>
+<pre>cp ~/.bashrc /live/persistence/TailsData_unlocked/dotfiles/.bashrc</pre>
+
+<p>Each time you start Tails in the future, before you can run Pond, you'll just need to reinstall its runtime dependencies using the <tt>pond-install-deps</tt> command.</p>
+
+<p>At this point, you should be able to run Pond's graphical interface with the <tt>pond</tt> command, or run its command-line interface with the <tt>pond-cli</tt> command.</p>
+
+<p>From time to time you can re-run the <tt>pond-build</tt> command to update to the latest version.</p>
 
 <h5>Fedora 19</h5>
 
