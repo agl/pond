@@ -69,8 +69,7 @@ $GOPATH/bin/client</pre>
 
 <p>Next, open a Terminal and copy and paste the following commands to build and install Pond:</p>
 
-<pre>
-echo 'export GOPATH=$HOME/Persistent/go/' &gt;&gt; ~/.bashrc
+<pre>echo 'export GOPATH=$HOME/Persistent/go/' &gt;&gt; ~/.bashrc
 . ~/.bashrc
 mkdir $GOPATH
 alias pond-build='sudo apt-get update &amp;&amp; \
@@ -81,8 +80,7 @@ alias pond-install-deps='sudo apt-get install libtspi1 libgtkspell-3-0'
 alias pond='$GOPATH/bin/client'
 alias pond-cli='$GOPATH/bin/client --cli'
 alias|grep pond &gt;&gt; ~/.bashrc
-pond-build
-</pre>
+pond-build</pre>
 
 <p>Finally, run the following command (if you have not previously done so) to add your <tt>~/.bashrc</tt> to the persistent storage:</p>
 <pre>cp ~/.bashrc /live/persistence/TailsData_unlocked/dotfiles/.bashrc</pre>
