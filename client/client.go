@@ -1105,6 +1105,28 @@ func (c *client) removeQueuedMessage(index int) {
 	c.queue = newQueue
 }
 
+func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
+	// c.queueMutex must be held before calling this function.
+
+	if len(c.queue) < 2 {
+		// There are no other orders for queues of length zero or one.
+		return
+	}
+
+	newQueue := make([]*queuedMessage, 0, len(c.queue))
+	movedMessages := make([]*queuedMessage, 0, 2)
+
+	for _, queuedMsg := range c.queue {
+		if queuedMsg.to == id {
+			movedMessages = append(movedMessages, queuedMsg)
+		} else {
+			newQueue = append(movedMessages, queuedMsg)
+		}
+	}
+	newQueue = append(newQueue, movedMessages...)
+	c.queue = newQueue
+}
+
 func (c *client) deleteContact(contact *Contact) {
 	var newInbox []*InboxMessage
 	for _, msg := range c.inbox {
