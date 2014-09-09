@@ -903,10 +903,6 @@ func (c *client) transact() {
 		} else {
 			head = c.queue[0]
 			head.sending = true
-			// Move the head of the queue to the end so that we
-			// don't get stuck trying send the same message over
-			// and over.
-			c.queue = append(c.queue[1:], head)
 			req = head.request
 			server = head.server
 			c.log.Printf("Starting message transmission to %s", server)
@@ -952,8 +948,8 @@ func (c *client) transact() {
 		if !isFetch {
 			c.queueMutex.Lock()
 			// Find the index of the message that we just sent (if any) in
-			// the queue. It should be at the end, but another message may
-			// have been enqueued while we were sending it.
+			// the queue. It should be at the front, but something
+			// may have happened while we didn't hold the lock.
 			indexOfSentMessage := c.indexOfQueuedMessage(head)
 
 			// If we sent a message that was removed from the queue while
@@ -968,12 +964,20 @@ func (c *client) transact() {
 				c.removeQueuedMessage(indexOfSentMessage)
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
-			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
-				reply.Revocation != nil {
-				c.queueMutex.Unlock()
-				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation, extraRevocations: reply.ExtraRevocations}
 			} else {
+				// If the send failed for any reason then we
+				// want to move the message to the end of the
+				// queue so that we never clog the queue with
+				// an unsendable message. However, we also
+				// don't want to reorder messages so all
+				// messages to the same contact are moved to
+				// the end of the queue.
+				c.moveContactsMessagesToEndOfQueue(head.to)
 				c.queueMutex.Unlock()
+
+				if *reply.Status == pond.Reply_GENERATION_REVOKED && reply.Revocation != nil {
+					c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation, extraRevocations: reply.ExtraRevocations}
+				}
 			}
 
 			head = nil
