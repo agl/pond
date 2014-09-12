@@ -823,12 +823,24 @@ func (c *cliClient) inboxSummary() (table cliTable) {
 		return
 	}
 
+	heading := "Inbox"
+	var filter uint64
+
+	if obj, isContact := c.currentObj.(*Contact); isContact {
+		heading = "Inbox messages from " + terminalEscape(obj.name, false)
+		filter = obj.id
+	}
+
 	table = cliTable{
-		heading: "Inbox",
+		heading: heading,
 		rows:    make([]cliRow, 0, len(c.inbox)),
 	}
 
 	for _, msg := range c.inbox {
+		if filter != 0 && filter != msg.from {
+			continue
+		}
+
 		var subline string
 		i := indicatorNone
 
@@ -871,12 +883,24 @@ func (c *cliClient) outboxSummary() (table cliTable) {
 		return
 	}
 
+	heading := "Outbox"
+	var filter uint64
+
+	if obj, isContact := c.currentObj.(*Contact); isContact {
+		heading = "Outbox messages to " + terminalEscape(obj.name, false)
+		filter = obj.id
+	}
+
 	table = cliTable{
-		heading: "Outbox",
+		heading: heading,
 		rows:    make([]cliRow, 0, len(c.outbox)),
 	}
 
 	for _, msg := range c.outbox {
+		if filter != 0 && filter != msg.to {
+			continue
+		}
+
 		subline := msg.created.Format(shortTimeFormat)
 
 		if msg.revocation {
@@ -914,16 +938,29 @@ func (c *cliClient) outboxSummary() (table cliTable) {
 }
 
 func (c *cliClient) draftsSummary() (table cliTable) {
+
 	if len(c.drafts) == 0 {
 		return
 	}
 
+	heading := "Drafts"
+	var filter uint64
+
+	if obj, isContact := c.currentObj.(*Contact); isContact {
+		heading = "Draft messages to " + terminalEscape(obj.name, false)
+		filter = obj.id
+	}
+
 	table = cliTable{
-		heading: "Drafts",
+		heading: heading,
 		rows:    make([]cliRow, 0, len(c.drafts)),
 	}
 
 	for _, msg := range c.drafts {
+		if filter != 0 && filter != msg.to {
+			continue
+		}
+
 		if msg.cliId == invalidCliId {
 			msg.cliId = c.newCliId()
 		}
