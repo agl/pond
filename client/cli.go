@@ -824,10 +824,10 @@ func (c *cliClient) inboxSummary() (table cliTable) {
 	}
 
 	heading := "Inbox"
-	filter := uint64(0)
+	var filter uint64
 
 	if obj, isContact := c.currentObj.(*Contact); isContact {
-		heading = "Inbox messages from " + obj.name
+		heading = "Inbox messages from " + terminalEscape(obj.name, false)
 		filter = obj.id
 	}
 
@@ -884,10 +884,10 @@ func (c *cliClient) outboxSummary() (table cliTable) {
 	}
 
 	heading := "Outbox"
-	filter := uint64(0)
+	var filter uint64
 
 	if obj, isContact := c.currentObj.(*Contact); isContact {
-		heading = "Outbox messages to " + obj.name
+		heading = "Outbox messages to " + terminalEscape(obj.name, false)
 		filter = obj.id
 	}
 
@@ -944,10 +944,10 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 	}
 
 	heading := "Drafts"
-	filter := uint64(0)
+	var filter uint64
 
 	if obj, isContact := c.currentObj.(*Contact); isContact {
-		heading = "Draft messages to " + obj.name
+		heading = "Draft messages to " + terminalEscape(obj.name, false)
 		filter = obj.id
 	}
 
