@@ -857,6 +857,8 @@ func (contact *Contact) subline() string {
 		return "pending"
 	case len(contact.pandaResult) > 0:
 		return "failed"
+	case !contact.isPending && contact.ratchet == nil:
+		return "old ratchet"
 	}
 	return ""
 }
