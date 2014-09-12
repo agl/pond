@@ -303,7 +303,7 @@ func (c *client) revoke(to *Contact) *queuedMessage {
 
 func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
 	if from.ratchet != nil {
-		plaintext, err := from.ratchet.Decrypt(sealed)
+		plaintext, _, err := from.ratchet.Decrypt(sealed)
 		if err != nil {
 			return nil, false
 		}

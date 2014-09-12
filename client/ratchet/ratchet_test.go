@@ -64,7 +64,7 @@ func TestExchange(t *testing.T) {
 
 	msg := []byte("test message")
 	encrypted := a.Encrypt(nil, msg)
-	result, err := b.Decrypt(encrypted)
+	result, _, err := b.Decrypt(encrypted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +84,9 @@ type scriptAction struct {
 	// with a sendDelayed.
 	result int
 	id     int
+	// expectedMissing the number of messages that should be reported as
+	// having been skipped.
+	expectedMissing int
 }
 
 const (
@@ -134,12 +137,15 @@ func testScript(t *testing.T, script []scriptAction) {
 
 			switch action.result {
 			case deliver:
-				result, err := receiver.Decrypt(encrypted)
+				result, numMissing, err := receiver.Decrypt(encrypted)
 				if err != nil {
 					t.Fatalf("#%d: receiver returned error: %s", i, err)
 				}
 				if !bytes.Equal(result, msg[:]) {
 					t.Fatalf("#%d: bad message: got %x, not %x", i, result, msg[:])
+				}
+				if numMissing != action.expectedMissing {
+					t.Fatalf("#%d: incorrect number of missing messages reported (%d). Expected %d.", i, numMissing, action.expectedMissing)
 				}
 			case delay:
 				if _, ok := delayedMessages[action.id]; ok {
@@ -159,12 +165,8 @@ func testScript(t *testing.T, script []scriptAction) {
 				receiver = b
 			}
 
-			result, err := receiver.Decrypt(delayed.encrypted)
-			if err != nil {
-				t.Fatalf("#%d: receiver returned error: %s", i, err)
-			}
-			if !bytes.Equal(result, delayed.msg) {
-				t.Fatalf("#%d: bad message: got %x, not %x", i, result, delayed.msg)
+			if _, _, err := receiver.Decrypt(delayed.encrypted); err == nil {
+				t.Fatalf("#%d: receiver did not return an error for a delayed message", i, err)
 			}
 		}
 
@@ -175,42 +177,42 @@ func testScript(t *testing.T, script []scriptAction) {
 
 func TestBackAndForth(t *testing.T) {
 	testScript(t, []scriptAction{
-		{sendA, deliver, -1},
-		{sendB, deliver, -1},
-		{sendA, deliver, -1},
-		{sendB, deliver, -1},
-		{sendA, deliver, -1},
-		{sendB, deliver, -1},
+		{sendA, deliver, -1, 0},
+		{sendB, deliver, -1, 0},
+		{sendA, deliver, -1, 0},
+		{sendB, deliver, -1, 0},
+		{sendA, deliver, -1, 0},
+		{sendB, deliver, -1, 0},
 	})
 }
 
 func TestReorder(t *testing.T) {
 	testScript(t, []scriptAction{
-		{sendA, deliver, -1},
-		{sendA, delay, 0},
-		{sendA, deliver, -1},
-		{sendDelayed, deliver, 0},
+		{sendA, deliver, -1, 0},
+		{sendA, delay, 0, 0},
+		{sendA, deliver, -1, 1},
+		{sendDelayed, deliver, 0, 0},
 	})
 }
 
 func TestReorderAfterRatchet(t *testing.T) {
 	testScript(t, []scriptAction{
-		{sendA, deliver, -1},
-		{sendA, delay, 0},
-		{sendB, deliver, -1},
-		{sendA, deliver, -1},
-		{sendB, deliver, -1},
-		{sendDelayed, deliver, 0},
+		{sendA, deliver, -1, 0},
+		{sendA, delay, 0, 0},
+		{sendB, deliver, -1, 0},
+		{sendA, deliver, -1, 1},
+		{sendB, deliver, -1, 0},
+		{sendDelayed, deliver, 0, 0},
 	})
 }
 
 func TestDrop(t *testing.T) {
 	testScript(t, []scriptAction{
-		{sendA, drop, -1},
-		{sendA, drop, -1},
-		{sendA, drop, -1},
-		{sendA, drop, -1},
-		{sendA, deliver, -1},
-		{sendB, deliver, -1},
+		{sendA, drop, -1, 0},
+		{sendA, drop, -1, 0},
+		{sendA, drop, -1, 0},
+		{sendA, drop, -1, 0},
+		{sendA, deliver, -1, 4},
+		{sendB, deliver, -1, 0},
 	})
 }
