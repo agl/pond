@@ -112,6 +112,10 @@ func main() {
 		log.Fatalf("Failed to parse config: %s", err)
 	}
 
+	if err := maybeConvertMessagesToNewFormat(*baseDirectory); err != nil {
+		log.Fatalf("Failed to convert messages to new naming scheme: %s", err)
+	}
+
 	ip := net.IPv4(127, 0, 0, 1) // IPv4 loopback interface
 
 	if config.Address != nil {
@@ -167,4 +171,57 @@ func handleConnection(server *Server, rawConn net.Conn, identity *[32]byte) {
 
 	server.Process(conn)
 	conn.Close()
+}
+
+// maybeConvertMessagesToNewFormat scans the accounts directory for messages
+// under the old naming scheme and updates them to use the new
+// naming scheme that includes millisecond delivery time at the beginning.
+func maybeConvertMessagesToNewFormat(baseDirectory string) error {
+	accountsPath := filepath.Join(baseDirectory, "accounts")
+	accountsDir, err := os.Open(accountsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer accountsDir.Close()
+
+	accounts, err := accountsDir.Readdir(0)
+	if err != nil {
+		return err
+	}
+
+	for _, ent := range accounts {
+		account := ent.Name()
+		if len(account) != 64 || strings.IndexFunc(account, notLowercaseHex) != -1 {
+			continue
+		}
+
+		accountPath := filepath.Join(accountsPath, account)
+		accountDir, err := os.Open(accountPath)
+		if err != nil {
+			return err
+		}
+		ents, err := accountDir.Readdir(0)
+		accountDir.Close()
+		if err != nil {
+			return err
+		}
+
+		for _, ent := range ents {
+			name := ent.Name()
+			if len(name) != 64 || strings.IndexFunc(name, notLowercaseHex) != -1 {
+				continue
+			}
+
+			oldName := filepath.Join(accountPath, name)
+			newName := filepath.Join(accountPath, timeToFilenamePrefix(ent.ModTime())+name)
+			if err := os.Rename(oldName, newName); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
