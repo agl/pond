@@ -562,35 +562,37 @@ func (s *Server) sweep() {
 
 	for _, ent := range ents {
 		name := ent.Name()
-		if len(name) == 64 && strings.IndexFunc(name, notLowercaseHex) == -1 {
-			filesPath := filepath.Join(accountsPath, name, "files")
-			filesDir, err := os.Open(filesPath)
-			if os.IsNotExist(err) {
-				continue
-			} else if err != nil {
-				log.Printf("Failed to open %s: %s", filesPath, err)
-				continue
-			}
+		if len(name) != 64 || strings.IndexFunc(name, notLowercaseHex) != -1 {
+			continue
+		}
 
-			filesEnts, err := filesDir.Readdir(0)
-			if err == nil {
-				for _, fileEnt := range filesEnts {
-					name := fileEnt.Name()
-					if len(name) > 0 && strings.IndexFunc(name, notLowercaseHex) == -1 {
-						mtime := fileEnt.ModTime()
-						if now.After(mtime) && now.Sub(mtime) > fileLifetime {
-							if err := os.Remove(filepath.Join(filesPath, name)); err != nil {
-								log.Printf("Failed to delete file: %s", err)
-							}
+		filesPath := filepath.Join(accountsPath, name, "files")
+		filesDir, err := os.Open(filesPath)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			log.Printf("Failed to open %s: %s", filesPath, err)
+			continue
+		}
+
+		filesEnts, err := filesDir.Readdir(0)
+		if err == nil {
+			for _, fileEnt := range filesEnts {
+				name := fileEnt.Name()
+				if len(name) > 0 && strings.IndexFunc(name, notLowercaseHex) == -1 {
+					mtime := fileEnt.ModTime()
+					if now.After(mtime) && now.Sub(mtime) > fileLifetime {
+						if err := os.Remove(filepath.Join(filesPath, name)); err != nil {
+							log.Printf("Failed to delete file: %s", err)
 						}
 					}
 				}
-			} else {
-				log.Printf("Failed to read %s: %s", filesPath, err)
 			}
-
-			filesDir.Close()
+		} else {
+			log.Printf("Failed to read %s: %s", filesPath, err)
 		}
+
+		filesDir.Close()
 	}
 }
 
@@ -787,6 +789,12 @@ func authenticateDeliveryWithHMAC(account *Account, del *pond.Delivery) (*pond.R
 	}
 }
 
+// timeToFilenamePrefix returns a string that contains a hex encoding of t,
+// accurate to the millisecond.
+func timeToFilenamePrefix(t time.Time) string {
+	return fmt.Sprintf("%016x", uint64(t.UnixNano()/1000000))
+}
+
 func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	var to [32]byte
 	if len(del.To) != len(to) {
@@ -851,7 +859,7 @@ func (s *Server) deliver(from *[32]byte, del *pond.Delivery) *pond.Reply {
 	sha.Write(del.Message)
 	digest := sha.Sum(nil)
 
-	msgPath := filepath.Join(path, fmt.Sprintf("%x", digest))
+	msgPath := filepath.Join(path, timeToFilenamePrefix(time.Now())+fmt.Sprintf("%x", digest))
 	if err := ioutil.WriteFile(msgPath, serialized, 0600); err != nil {
 		log.Printf("failed to write %s: %s", msgPath, err)
 		return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}
@@ -890,27 +898,29 @@ func (s *Server) fetch(from *[32]byte, fetch *pond.Fetch) (*pond.Reply, string) 
 			return &pond.Reply{Status: pond.Reply_INTERNAL_ERROR.Enum()}, ""
 		}
 
-		var minTime time.Time
 		var minName string
+		names := make([]string, 0, len(ents))
+
 		for _, ent := range ents {
 			name := ent.Name()
-			if len(name) != sha256.Size*2 &&
-				(!strings.HasPrefix(name, announcePrefix) || len(name) != len(announcePrefix)+8) {
-				continue
-			}
-			if mtime := ent.ModTime(); minTime.IsZero() || mtime.Before(minTime) {
-				minTime = mtime
+			if strings.HasPrefix(name, announcePrefix) {
+				isAnnounce = true
 				minName = name
+				break
 			}
+			if len(name) == (32+8)*2 && strings.IndexFunc(name, notLowercaseHex) == -1 {
+				names = append(names, name)
+			}
+		}
+
+		sort.Strings(names)
+		if len(minName) == 0 && len(names) > 0 {
+			minName = names[0]
 		}
 
 		if len(minName) == 0 {
 			// No messages at this time.
 			return nil, ""
-		}
-
-		if strings.HasPrefix(minName, announcePrefix) {
-			isAnnounce = true
 		}
 
 		msgPath := filepath.Join(path, minName)
