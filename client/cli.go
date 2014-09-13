@@ -852,7 +852,7 @@ func (c *cliClient) inboxSummary() (table cliTable) {
 			}
 			if !msg.read {
 				i = indicatorBlue
-			} else if !msg.acked {
+			} else if !msg.acked && msg.from != 0 {
 				i = indicatorYellow
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
@@ -938,7 +938,6 @@ func (c *cliClient) outboxSummary() (table cliTable) {
 }
 
 func (c *cliClient) draftsSummary() (table cliTable) {
-
 	if len(c.drafts) == 0 {
 		return
 	}
@@ -1149,6 +1148,10 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 		msg, ok := c.currentObj.(*InboxMessage)
 		if !ok {
 			c.Printf("%s Select inbox message first\n", termWarnPrefix)
+			return
+		}
+		if msg.from == 0 {
+			c.Printf("%s Cannot reply to server announcement\n", termWarnPrefix)
 			return
 		}
 		c.compose(c.contacts[msg.from], nil, msg)
@@ -1385,6 +1388,10 @@ Handle:
 		}
 		if msg.acked {
 			c.Printf("%s Message has already been acknowledged\n", termWarnPrefix)
+			return
+		}
+		if msg.from == 0 {
+			c.Printf("%s Cannot ack server announcement\n", termWarnPrefix)
 			return
 		}
 		msg.acked = true
