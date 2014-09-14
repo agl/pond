@@ -72,8 +72,9 @@ $GOPATH/bin/client</pre>
 <pre>echo 'export GOPATH=$HOME/Persistent/go/' &gt;&gt; ~/.bashrc
 . ~/.bashrc
 mkdir $GOPATH
-alias pond-build='sudo apt-get update &amp;&amp; \
-sudo apt-get install golang/testing gcc git mercurial libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers &amp;&amp; \
+alias pond-build='sudo bash -c "sudo apt-get update &amp;&amp; \
+apt-get install -y -t testing golang &amp;&amp; \
+apt-get install -y gcc git mercurial libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers" &amp;&amp; \
 go get -u -tags ubuntu github.com/agl/pond/client &amp;&amp; \
 echo "Success." || echo "Sorry, something went wrong."'
 alias pond-install-deps='sudo apt-get install libtspi1 libgtkspell-3-0'
