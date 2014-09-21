@@ -870,7 +870,9 @@ func (c *client) transact() {
 					delaySeconds = 5
 				}
 				delay := time.Duration(delaySeconds*1000) * time.Millisecond
-				c.log.Printf("Next network transaction in %s seconds", delay)
+				c.nextTransactionTime = c.Now().Add(delay)
+				c.log.Printf("Next network transaction in %s", (delay/time.Second*time.Second))
+
 				timerChan = time.After(delay)
 			}
 
