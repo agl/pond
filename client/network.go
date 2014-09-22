@@ -301,29 +301,29 @@ func (c *client) revoke(to *Contact) *queuedMessage {
 	return out
 }
 
-func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
+func decryptMessage(sealed []byte, from *Contact) ([]byte, error) {
 	if from.ratchet != nil {
 		plaintext, err := from.ratchet.Decrypt(sealed)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
-		return plaintext, true
+		return plaintext, nil
 	}
 
 	var nonce [24]byte
 	if len(sealed) < len(nonce) {
-		return nil, false
+		return nil, errors.New("message shorter than nonce")
 	}
 	copy(nonce[:], sealed)
 	sealed = sealed[24:]
 	headerLen := ephemeralBlockLen - len(nonce)
 	if len(sealed) < headerLen {
-		return nil, false
+		return nil, errors.New("message shorter than header")
 	}
 
 	publicBytes, ok := decryptMessageInner(sealed[:headerLen], &nonce, from)
 	if !ok || len(publicBytes) != 32 {
-		return nil, false
+		return nil, errors.New("failed to decrypt inner message")
 	}
 	var innerNonce [nonceLen]byte
 	sealed = sealed[headerLen:]
@@ -333,12 +333,12 @@ func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
 	copy(ephemeralPublicKey[:], publicBytes)
 
 	if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
-		return plaintext, ok
+		return plaintext, nil
 	}
 
 	plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
 	if !ok {
-		return nil, false
+		return nil, errors.New("failed to decrypt with either DH values (old ratchet)")
 	}
 
 	// They have clearly received our current DH value. Time to
@@ -347,7 +347,7 @@ func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
 	if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
 		panic(err)
 	}
-	return plaintext, true
+	return plaintext, nil
 }
 
 func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
@@ -486,10 +486,10 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	}
 
 	sealed := inboxMsg.sealed
-	plaintext, ok := decryptMessage(sealed, from)
+	plaintext, err := decryptMessage(sealed, from)
 
-	if !ok {
-		c.logEvent(from, "Failed to decrypt message")
+	if err != nil {
+		c.logEvent(from, "Failed to decrypt message: "+err.Error())
 		return false
 	}
 
