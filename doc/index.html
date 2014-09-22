@@ -48,7 +48,9 @@ title: Pond
 
 <h5>Ubuntu 13.10</h5>
 
-<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell3-3-dev libtspi-dev trousers tor mercurial tpm-tools
+<p>First, <a href="https://golang.org/doc/install">install Go</a>. The packaged version of Go (usually called <tt>golang</tt>) is unlikely to work.</p>
+
+<pre>sudo apt-get install git libgtk-3-dev libgtkspell3-3-dev libtspi-dev trousers tor mercurial tpm-tools
 cd
 mkdir gopkg
 export GOPATH=$HOME/gopkg
@@ -58,8 +60,6 @@ $GOPATH/bin/client</pre>
 <h5>Debian Wheezy and Ubuntu 12.04</h5>
 
 <p>Same as Ubuntu, above, but 1) on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL and 2) the gtkspell package is called <tt>libgtkspell-3-dev</tt>. On more recent versions of Debian, the instructions should be exactly the same as Ubuntu.</p>
-
-<p><i>WARNING</i>: Using <tt>golang</tt> version 1.0 (Wheezy package) is not recommended and compatibility is untested. If you face any problems compiling pond try to upgrade <tt>golang</tt> to version 1.2 from the testing repository.</p>
 
 <h5>Tails (Version 1.1.1)</h5>
 
