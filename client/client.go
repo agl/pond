@@ -70,6 +70,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"sync"
 	"time"
@@ -213,6 +214,9 @@ type client struct {
 	// disableV2Ratchet causes the client to advertise and process V1
 	// axolotl ratchet support.
 	disableV2Ratchet bool
+
+	// command to run upon receiving messages
+	receiveHookCommand string
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -725,6 +729,8 @@ func (c *client) loadUI() error {
 			return err
 		}
 	}
+
+	c.receiveHookCommand = os.Getenv("POND_HOOK_RECEIVE")
 
 	c.ui.loadingUI()
 
@@ -1410,4 +1416,15 @@ func (c *client) importTombFile(stateFile *disk.StateFile, keyHex, path string) 
 	<-writerDone
 
 	return nil
+}
+
+func (c *client) receiveHook() {
+	if c.receiveHookCommand != "" {
+		cmd := exec.Command(c.receiveHookCommand)
+		go func() {
+			if err := cmd.Run(); err != nil {
+				c.log.Errorf("Failed to run receive hook command: %s", err.Error())
+			}
+		}()
+	}
 }

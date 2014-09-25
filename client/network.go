@@ -464,6 +464,9 @@ NextCandidate:
 	c.inbox = append(c.inbox, inboxMsg)
 	c.ui.processFetch(inboxMsg)
 	c.save()
+
+	c.receiveHook()
+
 }
 
 func (c *client) processServerAnnounce(m NewMessage) {
