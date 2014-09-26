@@ -1145,17 +1145,18 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 		}
 
 	case replyCommand:
-		msg, ok := c.currentObj.(*InboxMessage)
-		if !ok {
-			c.Printf("%s Select inbox message first\n", termWarnPrefix)
-			return
+		switch msg := c.currentObj.(type) {
+		case *InboxMessage:
+			if msg.from == 0 {
+				c.Printf("%s Cannot reply to server announcement\n", termWarnPrefix)
+				return
+			}
+			c.compose(c.contacts[msg.from], nil, msg)
+		case *queuedMessage:
+			c.compose(c.contacts[msg.to], nil, msg)
+		default:
+			c.Printf("%s Select inbox or outbox message first\n", termWarnPrefix)
 		}
-		if msg.from == 0 {
-			c.Printf("%s Cannot reply to server announcement\n", termWarnPrefix)
-			return
-		}
-		c.compose(c.contacts[msg.from], nil, msg)
-
 	default:
 		goto Handle
 	}
@@ -1656,7 +1657,7 @@ Handle:
 	return
 }
 
-func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
+func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo interface{}) {
 	if draft == nil {
 		draft = &Draft{
 			id:      c.randId(),
@@ -1664,9 +1665,18 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 			to:      to.id,
 			cliId:   c.newCliId(),
 		}
-		if inReplyTo != nil && inReplyTo.message != nil {
-			draft.inReplyTo = inReplyTo.message.GetId()
-			draft.body = indentForReply(inReplyTo.message.GetBody())
+		if inReplyTo != nil {
+			switch obj := inReplyTo.(type) {
+			case *InboxMessage:
+				if obj.message != nil {
+					draft.inReplyTo = obj.message.GetId()
+					draft.body = indentForReply(obj.message.GetBody())
+				}
+			case *queuedMessage:
+				if obj.message != nil {
+					draft.body = indentForReply(obj.message.GetBody())
+				}
+	        }
 		}
 		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
 		c.drafts[draft.id] = draft
