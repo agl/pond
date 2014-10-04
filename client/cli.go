@@ -1287,7 +1287,11 @@ Handle:
 				c.queueMutex.Unlock()
 				c.Printf("%s You attempted to delete a message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.to].name, false))
 			case *InboxMessage:
-				c.Printf("%s You attempted to delete a message (from %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.from].name, false))
+				fromName := "Home Server"
+				if obj.from != 0 {
+					fromName = c.contacts[obj.from].name
+				}
+				c.Printf("%s You attempted to delete a message (from %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(fromName, false))
 			default:
 				c.Printf("%s Cannot delete current object\n", termWarnPrefix)
 				return
