@@ -1883,7 +1883,7 @@ func nameValuesLHS(entries []nvEntry) Grid {
 			GridE{1, 1, Label{
 				widgetBase: widgetBase{font: font},
 				text:       ent.value,
-				selectable: true,
+				selectable: false,
 			}},
 		})
 	}
@@ -2105,21 +2105,24 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "edit",
+					},
+					text: "Edit",
+				}},
+			},
 		},
 	}
 
 	left := nameValuesLHS(entries)
-	left.rows[0][1].widget = Entry{
-		// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
-		widgetBase:     widgetBase{name: "name"}, 
-		text:           contact.name,
-		updateOnChange: false,
-	}
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
 
 	deleteArmed := false
+	editArmed := false
 
 	for {
 		event, wanted := c.nextEvent(0)
@@ -2135,18 +2138,17 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					return event
 				}
 			}
-			c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
-			contact.name = n
 			c.save()
-			// c.gui.Actions() <- UIState{uiStateMain}
-			// c.gui.Signal()
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			return event
 		}
 		if !ok {
 			continue
 		}
 
-		if click.name == "delete" {
+		switch click.name {
+		case "delete":
 			if deleteArmed {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
@@ -2161,7 +2163,61 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
-		}		
+		case "edit":
+			if editArmed {
+				editArmed = false
+				newName := click.entries["name"]
+				contact.name = newName
+				c.contactsUI.SetLine(contact.id, newName)
+				entries = []nvEntry{
+					{"NAME", contact.name},
+					{"SERVER", contact.theirServer},
+					{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+					{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+					{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+					{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
+					{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+					{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
+				}
+				left := nameValuesLHS(entries)
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+        // update the inboxUI and outboxUI message for current contact name change
+        for _, msg := range c.inbox {
+          if msg.from == contact.id {
+            c.inboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.outbox {
+          if msg.to == contact.id {
+            c.outboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.drafts {
+          if msg.to == contact.id {
+            c.draftsUI.SetLine(msg.id, newName)
+          }
+        }
+
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
+				c.gui.Signal()
+				c.save()
+			} else {
+				editArmed = true
+				left.rows[0][1].widget = Entry{
+					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+					widgetBase:     widgetBase{name: "name"},
+					text:           contact.name,
+					updateOnChange: true,
+				}
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Done"}
+				c.gui.Signal()
+			}
+		}
 	}
 
 	panic("unreachable")
