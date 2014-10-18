@@ -356,7 +356,7 @@ func (c *guiClient) processFetch(inboxMsg *InboxMessage) {
 
 func (c *guiClient) processServerAnnounce(inboxMsg *InboxMessage) {
 	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
+	c.inboxUI.Add(inboxMsg.id, c.ContactName(inboxMsg.from), subline, indicatorBlue)
 	c.updateWindowTitle()
 }
 
@@ -555,14 +555,12 @@ func (c *guiClient) mainUI() {
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
-		fromString := "Home Server"
 		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
 			if i == indicatorNone && !msg.acked {
 				i = indicatorYellow
 			}
 		}
-		c.inboxUI.Add(msg.id, fromString, subline, i)
+		c.inboxUI.Add(msg.id, c.ContactName(msg.from), subline, i)
 		c.updateInboxBackgroundColor(msg)
 	}
 	c.updateWindowTitle()
@@ -580,7 +578,7 @@ func (c *guiClient) mainUI() {
 		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator(c.contacts[msg.to]))
+			c.outboxUI.Add(msg.id, c.ContactName(msg.to), subline, msg.indicator(c.contacts[msg.to]))
 		}
 	}
 
@@ -592,7 +590,7 @@ func (c *guiClient) mainUI() {
 	for _, draft := range c.drafts {
 		to := "Unknown"
 		if draft.to != 0 {
-			to = c.contacts[draft.to].name
+			to = c.ContactName(draft.to)
 		}
 		subline := draft.created.Format(shortTimeFormat)
 		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
@@ -1220,15 +1218,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		c.save()
 	}
 
-	fromString, sentTimeText, eraseTimeText, msgText := msg.Strings()
-
-	var contact *Contact
-	if !isServerAnnounce {
-		contact = c.contacts[msg.from]
-	}
-	if len(fromString) == 0 && contact != nil {
-		fromString = contact.name
-	}
+	sentTimeText, eraseTimeText, msgText := msg.Strings()
 
 	left := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
@@ -1243,7 +1233,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 				// We set hExpand true here so that the
 				// attachments/detachments UI doesn't cause the
 				// first column to expand.
-				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: fromString}},
+				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: c.ContactName(msg.from)}},
 			},
 			{
 				{1, 1, Label{
@@ -1777,7 +1767,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.outboxUI.Remove(msg.id)
 
 			draft := c.outboxToDraft(msg)
-			c.draftsUI.Add(draft.id, c.contacts[msg.to].name, draft.created.Format(shortTimeFormat), indicatorNone)
+			c.draftsUI.Add(draft.id, c.ContactName(msg.to), draft.created.Format(shortTimeFormat), indicatorNone)
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()

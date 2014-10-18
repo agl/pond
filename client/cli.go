@@ -485,7 +485,7 @@ func (c *cliClient) processFetch(inboxMsg *InboxMessage) {
 		inboxMsg.cliId = c.newCliId()
 	}
 
-	c.Printf("\x07%s (%s) New message (%s%s%s) received from %s\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.contacts[inboxMsg.from].name, false))
+	c.Printf("\x07%s (%s) New message (%s%s%s) received from %s\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, inboxMsg.cliId.String(), termReset, terminalEscape(c.ContactName(inboxMsg.from), false))
 }
 
 func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
@@ -493,11 +493,11 @@ func (c *cliClient) processServerAnnounce(inboxMsg *InboxMessage) {
 }
 
 func (c *cliClient) processAcknowledgement(ackedMsg *queuedMessage) {
-	c.Printf("%s (%s) Message acknowledged by %s\n", termPrefix, time.Now().Format(shortTimeFormat), terminalEscape(c.contacts[ackedMsg.to].name, false))
+	c.Printf("%s (%s) Message acknowledged by %s\n", termPrefix, time.Now().Format(shortTimeFormat), terminalEscape(c.ContactName(ackedMsg.to), false))
 }
 
 func (c *cliClient) processRevocationOfUs(by *Contact) {
-	c.Printf("%s Access to contact revoked. All outgoing messages dropped: %s\n", termPrefix, terminalEscape(c.contacts[by.id].name, false))
+	c.Printf("%s Access to contact revoked. All outgoing messages dropped: %s\n", termPrefix, terminalEscape(c.ContactName(by.id), false))
 }
 
 func (c *cliClient) processRevocation(by *Contact) {
@@ -541,7 +541,7 @@ func (c *cliClient) processPANDAUpdateUI(update pandaUpdate) {
 
 func (c *cliClient) processMessageDelivered(msg *queuedMessage) {
 	if !msg.revocation && len(msg.message.Body) > 0 {
-		c.Printf("%s (%s) Message %s%s%s to %s transmitted successfully\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, msg.cliId.String(), termReset, terminalEscape(c.contacts[msg.to].name, false))
+		c.Printf("%s (%s) Message %s%s%s to %s transmitted successfully\n", termPrefix, time.Now().Format(shortTimeFormat), termCliIdStart, msg.cliId.String(), termReset, terminalEscape(c.ContactName(msg.to), false))
 	}
 	c.showQueueState()
 }
@@ -857,10 +857,6 @@ func (c *cliClient) inboxSummary() (table cliTable) {
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
-		fromString := "Home Server"
-		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
-		}
 		if msg.cliId == invalidCliId {
 			msg.cliId = c.newCliId()
 		}
@@ -868,7 +864,7 @@ func (c *cliClient) inboxSummary() (table cliTable) {
 		table.rows = append(table.rows, cliRow{
 			i,
 			[]string{
-				terminalEscape(fromString, false),
+				terminalEscape(c.ContactName(msg.from), false),
 				subline,
 			},
 			msg.cliId,
@@ -967,7 +963,7 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 		subline := msg.created.Format(shortTimeFormat)
 		to := "(nobody)"
 		if msg.to != 0 {
-			to = c.contacts[msg.to].name
+			to = c.ContactName(msg.to)
 		}
 
 		table.rows = append(table.rows, cliRow{
@@ -1274,7 +1270,7 @@ Handle:
 			case *Draft:
 				toName := "<unknown>"
 				if obj.to != 0 {
-					toName = c.contacts[obj.to].name
+					toName = c.ContactName(obj.to)
 				}
 				c.Printf("%s You attempted to delete a draft message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(toName, false))
 			case *queuedMessage:
@@ -1285,9 +1281,9 @@ Handle:
 					return
 				}
 				c.queueMutex.Unlock()
-				c.Printf("%s You attempted to delete a message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.to].name, false))
+				c.Printf("%s You attempted to delete a message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.ContactName(obj.to), false))
 			case *InboxMessage:
-				c.Printf("%s You attempted to delete a message (from %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.contacts[obj.from].name, false))
+				c.Printf("%s You attempted to delete a message (from %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(c.ContactName(obj.from), false))
 			default:
 				c.Printf("%s Cannot delete current object\n", termWarnPrefix)
 				return
@@ -1737,23 +1733,14 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 }
 
 func (c *cliClient) showInbox(msg *InboxMessage) {
-	isServerAnnounce := msg.from == 0
-	fromString, sentTimeText, eraseTimeText, msgText := msg.Strings()
+	sentTimeText, eraseTimeText, msgText := msg.Strings()
 	msg.read = true
-
-	var contact *Contact
-	if !isServerAnnounce {
-		contact = c.contacts[msg.from]
-	}
-	if len(fromString) == 0 && contact != nil {
-		fromString = contact.name
-	}
 
 	table := cliTable{
 		noIndicators:      true,
 		noTrailingNewline: true,
 		rows: []cliRow{
-			cliRow{cols: []string{"From", terminalEscape(fromString, false)}},
+			cliRow{cols: []string{"From", terminalEscape(c.ContactName(msg.from), false)}},
 			cliRow{cols: []string{"Sent", sentTimeText}},
 			cliRow{cols: []string{"Erase", eraseTimeText}},
 			cliRow{cols: []string{"Retain", fmt.Sprintf("%t", msg.retained)}},
@@ -1829,7 +1816,7 @@ func (c *cliClient) showOutbox(msg *queuedMessage) {
 func (c *cliClient) showDraft(msg *Draft) {
 	to := "(not specified)"
 	if msg.to != 0 {
-		to = c.contacts[msg.to].name
+		to = c.ContactName(msg.to)
 	}
 	c.Printf("%s To: %s\n", termHeaderPrefix, terminalEscape(to, false))
 	c.Printf("%s Created: %s\n", termHeaderPrefix, formatTime(msg.created))
