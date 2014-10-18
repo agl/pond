@@ -384,12 +384,7 @@ type InboxMessage struct {
 	decryptions map[uint64]*pendingDecryption
 }
 
-func (msg *InboxMessage) Strings() (from, sentTime, eraseTime, body string) {
-	isServerAnnounce := msg.from == 0
-
-	if isServerAnnounce {
-		from = "<Home Server>"
-	}
+func (msg *InboxMessage) Strings() (sentTime, eraseTime, body string) {
 	isPending := msg.message == nil
 	if isPending {
 		body = "(cannot display message as key exchange is still pending)"
@@ -650,6 +645,13 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	}
 
 	return draft
+}
+
+func (c *client) ContactName(id uint64) string {
+	if id == 0 {
+		return "Home Server"
+	}
+	return c.contacts[id].name
 }
 
 // detectTor sets c.torAddress, either from the POND_TOR_ADDRESS environment
