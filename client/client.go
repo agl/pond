@@ -659,6 +659,8 @@ func (c *client) ContactName(id uint64) string {
 // the local host and assuming that Tor is running on the first port that it
 // finds to be open.
 func (c *client) detectTor() bool {
+	c.torAddress = "127.0.0.1:9050" // default for dev mode.
+
 	if addr := os.Getenv("POND_TOR_ADDRESS"); len(addr) != 0 {
 		if _, _, err := net.SplitHostPort(addr); err != nil {
 			c.log.Printf("Ignoring POND_TOR_ADDRESS because of parse error: %s", err)
@@ -721,8 +723,7 @@ var errInterrupted = errors.New("cli: interrupt signal")
 func (c *client) loadUI() error {
 	c.ui.initUI()
 
-	c.torAddress = "127.0.0.1:9050" // default for dev mode.
-	if !c.dev && !c.detectTor() {
+	if !c.detectTor() && !c.dev {
 		if err := c.ui.torPromptUI(); err != nil {
 			return err
 		}
