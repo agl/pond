@@ -2171,17 +2171,12 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				newName := click.entries["name"]
 				contact.name = newName
 				c.contactsUI.SetLine(contact.id, newName)
-				entries = []nvEntry{
-					{"NAME", contact.name},
-					{"SERVER", contact.theirServer},
-					{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
-					{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
-					{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
-					{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
-					{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
-					{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
+				left.rows[0][1].widget = Label{
+					// nameValuesLHS leaves blank font and vAlign here
+					widgetBase:     widgetBase{name: "name"},
+					text:           contact.name,
+                    selectable: false,
 				}
-				left := nameValuesLHS(entries)
 				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 				c.gui.Actions() <- UIState{uiStateShowContact}
 				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
@@ -2190,7 +2185,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			} else {
 				editArmed = true
 				left.rows[0][1].widget = Entry{
-					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+					// nameValuesLHS leaves blank font and vAlign here
 					widgetBase:     widgetBase{name: "name"},
 					text:           contact.name,
 					updateOnChange: true,
