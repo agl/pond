@@ -1135,6 +1135,10 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 
 	case editCommand:
 		if draft, ok := c.currentObj.(*Draft); ok {
+			if draft.to == 0 {
+				c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
+				return
+			}
 			c.compose(nil, draft, nil)
 		} else {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
