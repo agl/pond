@@ -2136,10 +2136,10 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				if t.name == n {
 					c.log.Printf("Another contact already has the name %s.\n", n)
 					return event
+				} else {
+					c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
 				}
 			}
-			c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
-			contact.name = n
 			c.save()
 			// c.gui.Actions() <- UIState{uiStateMain}
 			// c.gui.Signal()
@@ -2186,6 +2186,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- UIState{uiStateShowContact}
 				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
 				c.gui.Signal()
+				c.save()
 			} else {
 				editArmed = true
 				left.rows[0][1].widget = Entry{
