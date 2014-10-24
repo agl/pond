@@ -2188,7 +2188,6 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					// nameValuesLHS leaves blank font and vAlign here
 					widgetBase:     widgetBase{name: "name"},
 					text:           contact.name,
-					updateOnChange: true,
 				}
 				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 				c.gui.Actions() <- UIState{uiStateShowContact}
