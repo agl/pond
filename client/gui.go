@@ -2169,12 +2169,17 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				newName := click.entries["name"]
 				contact.name = newName
 				c.contactsUI.SetLine(contact.id, newName)
-				left.rows[0][1].widget = Label{
-					// nameValuesLHS leaves blank font and vAlign here
-					widgetBase:     widgetBase{name: "name"},
-					text:           contact.name,
-                    selectable: false,
+				entries = []nvEntry{
+					{"NAME", contact.name},
+					{"SERVER", contact.theirServer},
+					{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+					{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+					{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+					{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
+					{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+					{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
 				}
+				left := nameValuesLHS(entries)
 				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
         // update the inboxUI and outboxUI message for current contact name change
         for _, msg := range c.inbox {
@@ -2189,6 +2194,12 @@ func (c *guiClient) showContact(id uint64) interface{} {
           }
         }
 
+        for _, msg := range c.drafts {
+          if msg.to == contact.id {
+            c.draftsUI.SetLine(msg.id, newName)
+          }
+        }
+
 				c.gui.Actions() <- UIState{uiStateShowContact}
 				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
 				c.gui.Signal()
@@ -2196,9 +2207,10 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			} else {
 				editArmed = true
 				left.rows[0][1].widget = Entry{
-					// nameValuesLHS leaves blank font and vAlign here
+					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
 					widgetBase:     widgetBase{name: "name"},
 					text:           contact.name,
+					updateOnChange: true,
 				}
 				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 				c.gui.Actions() <- UIState{uiStateShowContact}
