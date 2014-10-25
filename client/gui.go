@@ -2136,13 +2136,11 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				if t.name == n {
 					c.log.Printf("Another contact already has the name %s.\n", n)
 					return event
-				} else {
-					c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
 				}
 			}
 			c.save()
-			// c.gui.Actions() <- UIState{uiStateMain}
-			// c.gui.Signal()
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			return event
 		}
 		if !ok {
@@ -2178,6 +2176,19 @@ func (c *guiClient) showContact(id uint64) interface{} {
                     selectable: false,
 				}
 				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+        // update the inboxUI and outboxUI message for current contact name change
+        for _, msg := range c.inbox {
+          if msg.from == contact.id {
+            c.inboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.outbox {
+          if msg.to == contact.id {
+            c.outboxUI.SetLine(msg.id, newName)
+          }
+        }
+
 				c.gui.Actions() <- UIState{uiStateShowContact}
 				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
 				c.gui.Signal()
