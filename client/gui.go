@@ -531,8 +531,8 @@ func (c *guiClient) mainUI() {
 		vboxName: "contactsVbox",
 	}
 
-	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
+	for _, contact := range c.client.ContactsSorted() {
+		c.contactsUI.Add(contact.id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
