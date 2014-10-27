@@ -1441,6 +1441,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		contents, size, err := openAttachment(cmd.Filename)
 		if err != nil {
@@ -1546,6 +1547,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		i, ok := c.prepareSubobjectCommand(cmd.Number, len(draft.attachments)+len(draft.detachments), "attachment")
 		if !ok {
