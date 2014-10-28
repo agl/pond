@@ -356,6 +356,15 @@ NextChar:
 	return
 }
 
+func (c *client) cliIdToContact(id cliId) (*Contact) {
+	for _, contact := range c.contacts {
+		if contact.cliId == id {
+			return contact
+		}
+	}
+	return nil
+}
+
 func hexDecodeSafe(dst []byte, src string) bool {
 	l := len(dst) // amazingly this actually works if you call using [:]
 	if hex.DecodedLen(len(src)) != l { return false }
