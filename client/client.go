@@ -496,7 +496,7 @@ func (cl contactList) Swap(i, j int) {
 	cl[i], cl[j] = cl[j], cl[i]
 }
 
-func (c *client) ContactsSorted() ([]*Contact) {
+func (c *client) contactsSorted() ([]*Contact) {
 	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
 	for i := range c.contacts {
 		contacts = append(contacts, c.contacts[i])
