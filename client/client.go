@@ -1143,6 +1143,8 @@ func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 		return
 	}
 
+	c.log.Printf("Moving messages to %s to the end of the queue.",c.contacts[id].name)
+
 	newQueue := make([]*queuedMessage, 0, len(c.queue))
 	movedMessages := make([]*queuedMessage, 0, 2)
 
