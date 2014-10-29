@@ -1644,28 +1644,11 @@ Handle:
 	return
 }
 
-func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
-	if draft == nil {
-		draft = &Draft{
-			id:      c.randId(),
-			created: time.Now(),
-			to:      to.id,
-			cliId:   c.newCliId(),
-		}
-		if inReplyTo != nil && inReplyTo.message != nil {
-			draft.inReplyTo = inReplyTo.message.GetId()
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
-		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
-		c.drafts[draft.id] = draft
-		c.setCurrentObject(draft)
-	}
-	if to == nil {
-		to = c.contacts[draft.to]
-	}
-	if to.isPending {
-		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
-		return
+func (c *cliClient) inputTextBlock(draft string,isMessage bool) (body string, ok bool) {
+	ok = false
+	predraft := map[bool]string{
+		true: "# Pond message. Lines prior to the first blank line are ignored.\n",
+		false: "",
 	}
 
 	tempDir, err := system.SafeTempDir()
@@ -1684,12 +1667,10 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		os.Remove(tempFileName)
 	}()
 
-	fmt.Fprintf(tempFile, "# Pond message. Lines prior to the first blank line are ignored.\nTo: %s\n\n", to.name)
-	if len(draft.body) == 0 {
-		tempFile.WriteString("\n")
-	} else {
-		tempFile.WriteString(draft.body)
-	}
+	if len(draft) == 0 {
+		draft = "\n"
+	} 
+	fmt.Fprintf(tempFile, predraft[isMessage] + draft)
 
 	// The editor is forced to vim because I'm not sure about leaks from
 	// other editors. (I'm not sure about leaks from vim either, but at
@@ -1715,10 +1696,43 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		return
 	}
 
-	if i := bytes.Index(contents, []byte("\n\n")); i >= 0 {
-		contents = contents[i+2:]
+	if isMessage {
+		if i := bytes.Index(contents, []byte("\n\n")); i >= 0 {
+			contents = contents[i+2:]
+		}
 	}
-	draft.body = string(contents)
+	body = string(contents)
+	ok = true
+	return
+}
+
+func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
+	if draft == nil {
+		draft = &Draft{
+			id:      c.randId(),
+			created: time.Now(),
+			to:      to.id,
+			cliId:   c.newCliId(),
+		}
+		if inReplyTo != nil && inReplyTo.message != nil {
+			draft.inReplyTo = inReplyTo.message.GetId()
+			draft.body = indentForReply(inReplyTo.message.GetBody())
+		}
+		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
+		c.drafts[draft.id] = draft
+		c.setCurrentObject(draft)
+	}
+	if to == nil {
+		to = c.contacts[draft.to]
+	}
+	if to.isPending {
+		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
+		return
+	}
+
+	body, ok := c.inputTextBlock(fmt.Sprintf("To: %s\n\n" + draft.body, to.name),true)
+	if ! ok { return }
+	draft.body = body
 	c.printDraftSize(draft)
 
 	c.save()
