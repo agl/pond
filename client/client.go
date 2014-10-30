@@ -1130,7 +1130,7 @@ func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 		if queuedMsg.to == id {
 			movedMessages = append(movedMessages, queuedMsg)
 		} else {
-			newQueue = append(movedMessages, queuedMsg)
+			newQueue = append(newQueue, queuedMsg)
 		}
 	}
 	newQueue = append(newQueue, movedMessages...)
