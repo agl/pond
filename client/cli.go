@@ -1339,7 +1339,9 @@ Handle:
 				if msg.cliId == invalidCliId {
 					msg.cliId = c.newCliId()
 				}
-				c.Printf("%s Created new outbox entry %s%s%s\n", termInfoPrefix, termCliIdStart, msg.cliId.String(), termReset)
+				nextTransaction :=  c.nextTransactionTime.Sub(c.Now())/time.Second*time.Second
+				c.Printf("%s (%s) Created new outbox entry %s%s%s, next transaction in %s\n", termInfoPrefix, c.Now().Format(shortTimeFormat), termCliIdStart, msg.cliId.String(), termReset, nextTransaction)
+
 				c.setCurrentObject(msg)
 				c.showQueueState()
 				break
