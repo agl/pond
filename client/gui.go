@@ -2106,6 +2106,9 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				}},
 			},
 			{
+				{1, 1, Label{} },
+			},
+			{
 				{1, 1, Button{
 					widgetBase: widgetBase{
 						name: "edit",
