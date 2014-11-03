@@ -651,7 +651,7 @@ func (c *guiClient) mainUI() {
 		}
 		if id, ok := c.draftsUI.Event(event); ok {
 			c.draftsUI.Select(id)
-			nextEvent = c.composeUI(c.drafts[id], nil)
+			nextEvent = c.composeUI(c.drafts[id])
 		}
 
 		click, ok := event.(Click)
@@ -662,7 +662,7 @@ func (c *guiClient) mainUI() {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
 		case "compose":
-			nextEvent = c.composeUI(nil, nil)
+			nextEvent = c.composeUI(nil)
 		}
 	}
 }
@@ -1593,7 +1593,7 @@ NextEvent:
 			c.gui.Signal()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
-			return c.composeUI(nil, msg)
+			return c.composeUI(c.createDraft(msg,0))
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
 			c.deleteInboxMsg(msg.id)
@@ -1771,7 +1771,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()
-			return c.composeUI(draft, nil)
+			return c.composeUI(draft)
 		}
 
 		if click, ok := event.(Click); ok && click.name == "delete" {
@@ -2882,9 +2882,39 @@ func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
 	return over
 }
 
-func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
-	if draft != nil && inReplyTo != nil {
-		panic("draft and inReplyTo both set")
+func (c *guiClient) createDraft(inReplyTo *InboxMessage,to uint64) (draft *Draft) {
+	if inReplyTo != nil && to != 0 {
+		panic("createDraft : inReplyTo and to both set")
+	}
+
+	draft = &Draft{
+		id:      c.randId(),
+		created: c.Now(),
+	}
+
+	if inReplyTo != nil {
+		draft.inReplyTo = inReplyTo.id
+		to = inReplyTo.from
+		draft.body = indentForReply(inReplyTo.message.GetBody())
+	}
+
+	fromName := "Unknown"
+	if to != 0 {
+		if from, ok := c.contacts[to]; ok {
+			fromName = from.name
+		}
+		draft.to = to
+	}
+
+	c.draftsUI.Add(draft.id, fromName, draft.created.Format(shortTimeFormat), indicatorNone)
+	c.draftsUI.Select(draft.id)
+	c.drafts[draft.id] = draft
+	return
+}
+
+func (c *guiClient) composeUI(draft *Draft) interface{} {
+	if draft == nil {
+		draft = c.createDraft(nil,0)
 	}
 
 	var contactNames []string
@@ -2895,55 +2925,27 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	}
 
 	var preSelected string
-	if inReplyTo != nil {
-		if from, ok := c.contacts[inReplyTo.from]; ok {
-			preSelected = from.name
-		}
+	if to, ok := c.contacts[draft.to]; ok {
+		preSelected = to.name
 	}
 
 	attachments := make(map[uint64]int)
 	detachments := make(map[uint64]int)
-
-	if draft != nil {
-		if to, ok := c.contacts[draft.to]; ok {
-			preSelected = to.name
-		}
-		for i := range draft.attachments {
-			attachments[c.randId()] = i
-		}
-		for i := range draft.detachments {
-			detachments[c.randId()] = i
-		}
+	for i := range draft.attachments {
+		attachments[c.randId()] = i
+	}
+	for i := range draft.detachments {
+		detachments[c.randId()] = i
 	}
 
-	if draft != nil && draft.inReplyTo != 0 {
+	var inReplyTo *InboxMessage
+	if draft.inReplyTo != 0 {
 		for _, msg := range c.inbox {
 			if msg.id == draft.inReplyTo {
 				inReplyTo = msg
 				break
 			}
 		}
-	}
-
-	if draft == nil {
-		from := preSelected
-		if len(preSelected) == 0 {
-			from = "Unknown"
-		}
-
-		draft = &Draft{
-			id:      c.randId(),
-			created: c.Now(),
-		}
-		if inReplyTo != nil {
-			draft.inReplyTo = inReplyTo.id
-			draft.to = inReplyTo.from
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
-
-		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
-		c.draftsUI.Select(draft.id)
-		c.drafts[draft.id] = draft
 	}
 
 	initialUsageMessage, overSize := draft.usageString()
