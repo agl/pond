@@ -70,6 +70,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -480,6 +481,30 @@ type Event struct {
 	msg string
 }
 
+// clientList is a sortable listing of contacts
+type contactList []*Contact
+
+func (cl contactList) Len() int {
+	return len(cl)
+}
+
+func (cl contactList) Less(i, j int) bool {
+	return cl[i].name < cl[j].name
+}
+
+func (cl contactList) Swap(i, j int) {
+	cl[i], cl[j] = cl[j], cl[i]
+}
+
+func (c *client) contactsSorted() ([]*Contact) {
+	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
+	for i := range c.contacts {
+		contacts = append(contacts, c.contacts[i])
+	}
+	sort.Sort(contacts)
+	return contacts
+}
+
 // previousTagLifetime contains the amount of time that we'll store a previous
 // tag (or previous group private key) for.
 const previousTagLifetime = 14 * 24 * time.Hour
@@ -659,6 +684,8 @@ func (c *client) ContactName(id uint64) string {
 // the local host and assuming that Tor is running on the first port that it
 // finds to be open.
 func (c *client) detectTor() bool {
+	c.torAddress = "127.0.0.1:9050" // default for dev mode.
+
 	if addr := os.Getenv("POND_TOR_ADDRESS"); len(addr) != 0 {
 		if _, _, err := net.SplitHostPort(addr); err != nil {
 			c.log.Printf("Ignoring POND_TOR_ADDRESS because of parse error: %s", err)
@@ -721,8 +748,7 @@ var errInterrupted = errors.New("cli: interrupt signal")
 func (c *client) loadUI() error {
 	c.ui.initUI()
 
-	c.torAddress = "127.0.0.1:9050" // default for dev mode.
-	if !c.dev && !c.detectTor() {
+	if !c.detectTor() && !c.dev {
 		if err := c.ui.torPromptUI(); err != nil {
 			return err
 		}
