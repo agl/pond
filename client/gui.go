@@ -2116,6 +2116,14 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Edit",
 				}},
 			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "composeTo",
+					},
+					text: "Compose",
+				}},
+			},
 		},
 	}
 
@@ -2220,6 +2228,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "edit", text: "Done"}
 				c.gui.Signal()
 			}
+		case "composeTo":
+			return c.composeUI(c.createDraft(nil,contact.id))
 		}
 	}
 
