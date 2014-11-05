@@ -1843,16 +1843,23 @@ func (c *cliClient) showDraft(msg *Draft) {
 	c.Printf("\n")
 }
 
+func (c *client) findContactByName(name string) uint64 {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact.id
+		}
+	}
+	return 0
+}
+
 func (c *cliClient) renameContact(contact *Contact, newName string) {
 	if contact.name == newName {
 		return
 	}
 
-	for _, contact := range c.contacts {
-		if contact.name == newName {
-			c.Printf("%s Another contact already has that name.\n", termErrPrefix)
-			return
-		}
+	if c.findContactByName(newName) != 0 {
+		c.Printf("%s Another contact already has that name.\n", termErrPrefix)
+		return
 	}
 
 	contact.name = newName

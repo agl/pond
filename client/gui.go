@@ -2143,11 +2143,9 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			if contact.name == n {
 				return event
 			}
-			for _, t := range c.contacts {
-				if t.name == n {
-					c.log.Printf("Another contact already has the name %s.\n", n)
-					return event
-				}
+			if c.findContactByName(n) != 0 {
+				c.log.Printf("Another contact already has the name %s.\n", n)
+				return event
 			}
 			c.save()
 			c.gui.Actions() <- UIState{uiStateMain}
