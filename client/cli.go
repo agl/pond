@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -979,38 +978,21 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 	return
 }
 
-type contactList []*Contact
-
-func (cl contactList) Len() int {
-	return len(cl)
-}
-
-func (cl contactList) Less(i, j int) bool {
-	return cl[i].name < cl[j].name
-}
-
-func (cl contactList) Swap(i, j int) {
-	cl[i], cl[j] = cl[j], cl[i]
-}
-
-func (c *cliClient) contactsSummary() (table cliTable) {
+func (c *cliClient) contactsSummaryRaw(title string,
+			filter func (*Contact) bool) (table cliTable) {
 	if len(c.contacts) == 0 {
 		return
 	}
 
 	table = cliTable{
-		heading: "Contacts",
+		heading: title,
 		rows:    make([]cliRow, 0, len(c.contacts)),
 	}
 
-	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
-	for i := range c.contacts {
-		contacts = append(contacts, c.contacts[i])
-	}
-
-	sort.Sort(contacts)
+	contacts := c.contactsSorted()
 
 	for _, contact := range contacts {
+		if ! filter(contact) { continue }
 		if contact.cliId == invalidCliId {
 			contact.cliId = c.newCliId()
 		}
@@ -1030,6 +1012,10 @@ func (c *cliClient) contactsSummary() (table cliTable) {
 	}
 
 	return
+}
+
+func (c *cliClient) contactsSummary() (cliTable) {
+	return c.contactsSummaryRaw("Contacts",func (c *Contact) bool { return true })
 }
 
 func (c *cliClient) showQueueState() {
@@ -1135,6 +1121,10 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 
 	case editCommand:
 		if draft, ok := c.currentObj.(*Draft); ok {
+			if draft.to == 0 {
+				c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
+				return
+			}
 			c.compose(nil, draft, nil)
 		} else {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
@@ -1437,6 +1427,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		contents, size, err := openAttachment(cmd.Filename)
 		if err != nil {
@@ -1542,6 +1533,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		i, ok := c.prepareSubobjectCommand(cmd.Number, len(draft.attachments)+len(draft.detachments), "attachment")
 		if !ok {
@@ -1652,28 +1644,11 @@ Handle:
 	return
 }
 
-func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
-	if draft == nil {
-		draft = &Draft{
-			id:      c.randId(),
-			created: time.Now(),
-			to:      to.id,
-			cliId:   c.newCliId(),
-		}
-		if inReplyTo != nil && inReplyTo.message != nil {
-			draft.inReplyTo = inReplyTo.message.GetId()
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
-		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
-		c.drafts[draft.id] = draft
-		c.setCurrentObject(draft)
-	}
-	if to == nil {
-		to = c.contacts[draft.to]
-	}
-	if to.isPending {
-		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
-		return
+func (c *cliClient) inputTextBlock(draft string,isMessage bool) (body string, ok bool) {
+	ok = false
+	predraft := map[bool]string{
+		true: "# Pond message. Lines prior to the first blank line are ignored.\n",
+		false: "",
 	}
 
 	tempDir, err := system.SafeTempDir()
@@ -1692,12 +1667,10 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		os.Remove(tempFileName)
 	}()
 
-	fmt.Fprintf(tempFile, "# Pond message. Lines prior to the first blank line are ignored.\nTo: %s\n\n", to.name)
-	if len(draft.body) == 0 {
-		tempFile.WriteString("\n")
-	} else {
-		tempFile.WriteString(draft.body)
-	}
+	if len(draft) == 0 {
+		draft = "\n"
+	} 
+	fmt.Fprintf(tempFile, predraft[isMessage] + draft)
 
 	// The editor is forced to vim because I'm not sure about leaks from
 	// other editors. (I'm not sure about leaks from vim either, but at
@@ -1723,10 +1696,43 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		return
 	}
 
-	if i := bytes.Index(contents, []byte("\n\n")); i >= 0 {
-		contents = contents[i+2:]
+	if isMessage {
+		if i := bytes.Index(contents, []byte("\n\n")); i >= 0 {
+			contents = contents[i+2:]
+		}
 	}
-	draft.body = string(contents)
+	body = string(contents)
+	ok = true
+	return
+}
+
+func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
+	if draft == nil {
+		draft = &Draft{
+			id:      c.randId(),
+			created: time.Now(),
+			to:      to.id,
+			cliId:   c.newCliId(),
+		}
+		if inReplyTo != nil && inReplyTo.message != nil {
+			draft.inReplyTo = inReplyTo.message.GetId()
+			draft.body = indentForReply(inReplyTo.message.GetBody())
+		}
+		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
+		c.drafts[draft.id] = draft
+		c.setCurrentObject(draft)
+	}
+	if to == nil {
+		to = c.contacts[draft.to]
+	}
+	if to.isPending {
+		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
+		return
+	}
+
+	body, ok := c.inputTextBlock(fmt.Sprintf("To: %s\n\n" + draft.body, to.name),true)
+	if ! ok { return }
+	draft.body = body
 	c.printDraftSize(draft)
 
 	c.save()
@@ -1837,16 +1843,23 @@ func (c *cliClient) showDraft(msg *Draft) {
 	c.Printf("\n")
 }
 
+func (c *client) findContactByName(name string) uint64 {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact.id
+		}
+	}
+	return 0
+}
+
 func (c *cliClient) renameContact(contact *Contact, newName string) {
 	if contact.name == newName {
 		return
 	}
 
-	for _, contact := range c.contacts {
-		if contact.name == newName {
-			c.Printf("%s Another contact already has that name.\n", termErrPrefix)
-			return
-		}
+	if c.findContactByName(newName) != 0 {
+		c.Printf("%s Another contact already has that name.\n", termErrPrefix)
+		return
 	}
 
 	contact.name = newName

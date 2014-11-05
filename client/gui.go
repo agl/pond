@@ -531,8 +531,8 @@ func (c *guiClient) mainUI() {
 		vboxName: "contactsVbox",
 	}
 
-	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
+	for _, contact := range c.contactsSorted() {
+		c.contactsUI.Add(contact.id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
@@ -651,7 +651,7 @@ func (c *guiClient) mainUI() {
 		}
 		if id, ok := c.draftsUI.Event(event); ok {
 			c.draftsUI.Select(id)
-			nextEvent = c.composeUI(c.drafts[id], nil)
+			nextEvent = c.composeUI(c.drafts[id])
 		}
 
 		click, ok := event.(Click)
@@ -662,7 +662,7 @@ func (c *guiClient) mainUI() {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
 		case "compose":
-			nextEvent = c.composeUI(nil, nil)
+			nextEvent = c.composeUI(nil)
 		}
 	}
 }
@@ -1593,7 +1593,7 @@ NextEvent:
 			c.gui.Signal()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
-			return c.composeUI(nil, msg)
+			return c.composeUI(c.createDraft(msg,0))
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
 			c.deleteInboxMsg(msg.id)
@@ -1771,7 +1771,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()
-			return c.composeUI(draft, nil)
+			return c.composeUI(draft)
 		}
 
 		if click, ok := event.(Click); ok && click.name == "delete" {
@@ -1860,7 +1860,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func nameValuesLHS(entries []nvEntry) Grid {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -1883,7 +1883,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 			GridE{1, 1, Label{
 				widgetBase: widgetBase{font: font},
 				text:       ent.value,
-				selectable: true,
+				selectable: false,
 			}},
 		})
 	}
@@ -2105,6 +2105,25 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{
+				{1, 1, Label{} },
+			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "edit",
+					},
+					text: "Edit",
+				}},
+			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "composeTo",
+					},
+					text: "Compose",
+				}},
+			},
 		},
 	}
 
@@ -2114,19 +2133,31 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	c.gui.Signal()
 
 	deleteArmed := false
+	editArmed := false
 
 	for {
 		event, wanted := c.nextEvent(0)
+		click, ok := event.(Click)
 		if wanted {
+			n := click.entries["name"]
+			if contact.name == n {
+				return event
+			}
+			if c.findContactByName(n) != 0 {
+				c.log.Printf("Another contact already has the name %s.\n", n)
+				return event
+			}
+			c.save()
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			return event
 		}
-
-		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
 
-		if click.name == "delete" {
+		switch click.name {
+		case "delete":
 			if deleteArmed {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
@@ -2141,6 +2172,62 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
+		case "edit":
+			if editArmed {
+				editArmed = false
+				newName := click.entries["name"]
+				contact.name = newName
+				c.contactsUI.SetLine(contact.id, newName)
+				entries = []nvEntry{
+					{"NAME", contact.name},
+					{"SERVER", contact.theirServer},
+					{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+					{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+					{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+					{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
+					{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+					{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
+				}
+				left := nameValuesLHS(entries)
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+        // update the inboxUI and outboxUI message for current contact name change
+        for _, msg := range c.inbox {
+          if msg.from == contact.id {
+            c.inboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.outbox {
+          if msg.to == contact.id {
+            c.outboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.drafts {
+          if msg.to == contact.id {
+            c.draftsUI.SetLine(msg.id, newName)
+          }
+        }
+
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
+				c.gui.Signal()
+				c.save()
+			} else {
+				editArmed = true
+				left.rows[0][1].widget = Entry{
+					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+					widgetBase:     widgetBase{name: "name"},
+					text:           contact.name,
+					updateOnChange: true,
+				}
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Done"}
+				c.gui.Signal()
+			}
+		case "composeTo":
+			return c.composeUI(c.createDraft(nil,contact.id))
 		}
 	}
 
@@ -2882,9 +2969,39 @@ func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
 	return over
 }
 
-func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
-	if draft != nil && inReplyTo != nil {
-		panic("draft and inReplyTo both set")
+func (c *guiClient) createDraft(inReplyTo *InboxMessage,to uint64) (draft *Draft) {
+	if inReplyTo != nil && to != 0 {
+		panic("createDraft : inReplyTo and to both set")
+	}
+
+	draft = &Draft{
+		id:      c.randId(),
+		created: c.Now(),
+	}
+
+	if inReplyTo != nil {
+		draft.inReplyTo = inReplyTo.id
+		to = inReplyTo.from
+		draft.body = indentForReply(inReplyTo.message.GetBody())
+	}
+
+	fromName := "Unknown"
+	if to != 0 {
+		if from, ok := c.contacts[to]; ok {
+			fromName = from.name
+		}
+		draft.to = to
+	}
+
+	c.draftsUI.Add(draft.id, fromName, draft.created.Format(shortTimeFormat), indicatorNone)
+	c.draftsUI.Select(draft.id)
+	c.drafts[draft.id] = draft
+	return
+}
+
+func (c *guiClient) composeUI(draft *Draft) interface{} {
+	if draft == nil {
+		draft = c.createDraft(nil,0)
 	}
 
 	var contactNames []string
@@ -2895,55 +3012,27 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	}
 
 	var preSelected string
-	if inReplyTo != nil {
-		if from, ok := c.contacts[inReplyTo.from]; ok {
-			preSelected = from.name
-		}
+	if to, ok := c.contacts[draft.to]; ok {
+		preSelected = to.name
 	}
 
 	attachments := make(map[uint64]int)
 	detachments := make(map[uint64]int)
-
-	if draft != nil {
-		if to, ok := c.contacts[draft.to]; ok {
-			preSelected = to.name
-		}
-		for i := range draft.attachments {
-			attachments[c.randId()] = i
-		}
-		for i := range draft.detachments {
-			detachments[c.randId()] = i
-		}
+	for i := range draft.attachments {
+		attachments[c.randId()] = i
+	}
+	for i := range draft.detachments {
+		detachments[c.randId()] = i
 	}
 
-	if draft != nil && draft.inReplyTo != 0 {
+	var inReplyTo *InboxMessage
+	if draft.inReplyTo != 0 {
 		for _, msg := range c.inbox {
 			if msg.id == draft.inReplyTo {
 				inReplyTo = msg
 				break
 			}
 		}
-	}
-
-	if draft == nil {
-		from := preSelected
-		if len(preSelected) == 0 {
-			from = "Unknown"
-		}
-
-		draft = &Draft{
-			id:      c.randId(),
-			created: c.Now(),
-		}
-		if inReplyTo != nil {
-			draft.inReplyTo = inReplyTo.id
-			draft.to = inReplyTo.from
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
-
-		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
-		c.draftsUI.Select(draft.id)
-		c.drafts[draft.id] = draft
 	}
 
 	initialUsageMessage, overSize := draft.usageString()
