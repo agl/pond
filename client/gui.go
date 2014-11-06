@@ -1311,6 +1311,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 	// The UI names widgets with strings so these prefixes are used to
 	// generate names for the dynamic parts of the UI.
 	const (
+		greetPrefix              = "greet-"
 		detachmentDecryptPrefix  = "detachment-decrypt-"
 		detachmentVBoxPrefix     = "detachment-decrypt-"
 		detachmentProgressPrefix = "detachment-progress-"
@@ -1318,6 +1319,53 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		detachmentSavePrefix     = "detachment-save-"
 		attachmentPrefix         = "attachment-"
 	)
+
+	pcs := c.parsePandaURLs(msg.from,string(msg.message.Body))
+	if len(pcs) > 0 {
+		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
+
+		for i, pc := range pcs {
+			var greet string
+			if pc.id == 0 {
+				greet = "Greet"
+			} else {
+				cnt := c.contacts[pc.id]
+				if cnt.isPending {
+					greet = "Pending"
+				} else {
+					greet = "Exists"
+					if pc.name != cnt.name {
+						greet += " as " + cnt.name
+					}
+				}
+				// Should say Verified if the contact existed previously
+			}
+			grid.rows = append(grid.rows, []GridE{
+				{1, 1, Label{
+					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart},
+					text:       maybeTruncate(pc.name),
+				}},
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        fmt.Sprintf("%s%d", greetPrefix, i),
+						insensitive: greet != "Greet",
+					},
+					text: greet,
+				}},
+			})
+		}
+
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
+			{1, 1, Label{
+				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+				text:       "INTRODUCTIONS",
+			}},
+		}}
+		lhsNextRow++
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
+		lhsNextRow++
+	}
+
 
 	widgetForDetachmentProcess := func(index int) Widget {
 		return VBox{
@@ -1548,6 +1596,16 @@ NextEvent:
 			continue
 		}
 		switch {
+		case strings.HasPrefix(click.name, greetPrefix):
+			i, ok := strconv.Atoi(click.name[len(greetPrefix):])
+			if ok != nil || i >= len(pcs) { panic("invalid greet command") }
+			contact := c.beginProposedPandaKeyExchange(pcs[i])
+			c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
+			c.contactsUI.Select(contact.id)
+			c.gui.Actions() <- Sensitive{name: click.name, sensitive: false}
+			c.gui.Actions() <- SetButtonText{name: click.name, text: "Pending"}
+			c.gui.Signal()
+			continue
 		case strings.HasPrefix(click.name, attachmentPrefix):
 			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
 			c.gui.Actions() <- FileOpen{
