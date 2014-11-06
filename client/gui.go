@@ -2764,19 +2764,11 @@ SharedSecretEvent:
 					secret.Hours = click.spinButtons["hour"]
 					secret.Minutes = click.spinButtons["minute"]
 				}
-				mp := c.newMeetingPlace()
 
-				c.contacts[contact.id] = contact
+				// c.newKeyExchange(contact) was run earlier
+				c.beginPandaKeyExchange(contact,secret)
 				c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
 				c.contactsUI.Select(contact.id)
-
-				kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
-				if err != nil {
-					panic(err)
-				}
-				kx.Testing = c.testing
-				contact.pandaKeyExchange = kx.Marshal()
-				contact.kxsBytes = nil
 				break SharedSecretEvent
 			case click.name == "generate":
 				c.gui.Actions() <- SetEntry{name: "shared", text: panda.NewSecretString(c.rand)}
@@ -2785,10 +2777,6 @@ SharedSecretEvent:
 		}
 	}
 
-	c.save()
-	c.pandaWaitGroup.Add(1)
-	contact.pandaShutdownChan = make(chan struct{})
-	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 	return c.showContact(contact.id)
 }
 

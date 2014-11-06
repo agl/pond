@@ -1582,8 +1582,6 @@ Handle:
 			cliId:     c.newCliId(),
 		}
 
-		c.newKeyExchange(contact)
-
 		stack := &panda.CardStack{
 			NumDecks: 1,
 		}
@@ -1592,21 +1590,8 @@ Handle:
 			Cards:  *stack,
 		}
 
-		mp := c.newMeetingPlace()
-
-		c.contacts[contact.id] = contact
-		kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
-		if err != nil {
-			panic(err)
-		}
-		kx.Testing = c.testing
-		contact.pandaKeyExchange = kx.Marshal()
-		contact.kxsBytes = nil
-
-		c.save()
-		c.pandaWaitGroup.Add(1)
-		contact.pandaShutdownChan = make(chan struct{})
-		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+		c.newKeyExchange(contact)
+		c.beginPandaKeyExchange(contact,secret)
 		c.Printf("%s Key exchange running in background.\n", termPrefix)
 
 	case renameCommand:

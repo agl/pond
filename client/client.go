@@ -1286,6 +1286,31 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, 
 	}
 }
 
+// Launches a runPANDA goroutine based upon a panda.SharedSecret and a
+// preliminary contact struct. 
+func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecret) {
+	if _, ok := c.contactByName(contact.name); ok {
+		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
+		return
+	}
+
+	mp := c.newMeetingPlace()
+
+	c.contacts[contact.id] = contact
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+}
+
 // processPANDAUpdate runs on the main client goroutine and handles messages
 // from a runPANDA goroutine.
 func (c *client) processPANDAUpdate(update pandaUpdate) {
