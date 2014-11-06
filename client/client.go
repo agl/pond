@@ -356,6 +356,15 @@ NextChar:
 	return
 }
 
+func hexDecodeSafe(dst []byte, src string) bool {
+	l := len(dst) // amazingly this actually works if you call using [:]
+	if hex.DecodedLen(len(src)) != l { return false }
+	s := []byte(src)
+	n, err := hex.Decode(dst,s)
+	if err != nil || n != l { return false }
+	return true
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
