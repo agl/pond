@@ -496,6 +496,10 @@ type Contact struct {
 	// New ratchet support.
 	ratchet *ratchet.Ratchet
 
+	introducedBy uint64
+	verifiedBy   []uint64
+	introducedTo []uint64
+
 	cliId cliId
 }
 
