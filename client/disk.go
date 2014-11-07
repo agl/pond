@@ -108,6 +108,14 @@ func (c *client) unmarshal(state *disk.State) error {
 
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
+		}
+
+		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) && !contact.isPending {
+			return errors.New("client: contact missing identity public key")
+		}
+		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
+
+		if contact.isPending == true {
 			continue
 		}
 
@@ -128,11 +136,6 @@ func (c *client) unmarshal(state *disk.State) error {
 			return errors.New("client: contact missing public key")
 		}
 		copy(contact.theirPub[:], cont.TheirPub)
-
-		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) {
-			return errors.New("client: contact missing identity public key")
-		}
-		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
 
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
@@ -268,6 +271,7 @@ func (c *client) marshal() []byte {
 			PandaError:       proto.String(contact.pandaResult),
 			RevokedUs:        proto.Bool(contact.revokedUs),
 		}
+		cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
 			cont.TheirGroup = contact.myGroupKey.Group.Marshal()
@@ -275,7 +279,6 @@ func (c *client) marshal() []byte {
 			cont.TheirPub = contact.theirPub[:]
 			cont.Generation = proto.Uint32(contact.generation)
 
-			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
 		}
