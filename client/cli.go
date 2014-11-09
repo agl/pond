@@ -988,7 +988,7 @@ func (c *cliClient) contactsSummary() (table cliTable) {
 		rows:    make([]cliRow, 0, len(c.contacts)),
 	}
 
-	contacts := c.client.ContactsSorted()
+	contacts := c.client.contactsSorted()
 
 	for _, contact := range contacts {
 		if contact.cliId == invalidCliId {
