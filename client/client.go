@@ -1052,6 +1052,16 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
+func (c *client) contactByName(name string) (*Contact, bool) {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact, true
+		}
+	}
+
+	return nil, false
+}
+
 func (c *client) deleteInboxMsg(id uint64) {
 	newInbox := make([]*InboxMessage, 0, len(c.inbox))
 	for _, inboxMsg := range c.inbox {
