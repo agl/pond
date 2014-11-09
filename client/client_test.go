@@ -2386,3 +2386,58 @@ func TestEntombing(t *testing.T) {
 		t.Fatalf("No messages in outbox")
 	}
 }
+
+func TestContactNameChange(t *testing.T) {
+	// Exercise the code to change a contact's name.
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client1, err := NewTestClient(t, "client1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client1.Close()
+
+	client2, err := NewTestClient(t, "client2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client2.Close()
+
+	// Setup a normal pair of clients.
+	proceedToPaired(t, client1, client2, server)
+
+	const testMsg = "test message"
+	sendMessage(client1, "client2", testMsg)
+	from, _ := fetchMessage(client2)
+	if from != "client1" {
+		t.Fatalf("message from %s, expected client1", from)
+	}
+
+	clickOnContact(client1, "client2")
+	const newName = "client2x"
+	client1.gui.events <- Update{name: "contactname", text: newName}
+	client1.gui.events <- Click{
+		name:    "changebutton",
+		entries: map[string]string{"contactname": newName},
+	}
+	client1.AdvanceTo(uiStateContactNameChanged)
+
+	if contact, _ := client1.contactByName(newName); contact == nil {
+		t.Errorf("name not updated in client")
+	}
+
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
+
+	if contact, _ := client1.contactByName(newName); contact == nil {
+		t.Errorf("name not updated in client after reload")
+	}
+}
