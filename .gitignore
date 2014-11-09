@@ -1,1 +1,9 @@
+*.swp
+*.test
+
 doc/_site
+
+client/client
+decrypt/decrypt
+editstate/editstate
+server/server
