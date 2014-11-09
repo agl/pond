@@ -70,6 +70,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -478,6 +479,30 @@ type Contact struct {
 type Event struct {
 	t   time.Time
 	msg string
+}
+
+// contactList is a sortable slice of Contacts.
+type contactList []*Contact
+
+func (cl contactList) Len() int {
+	return len(cl)
+}
+
+func (cl contactList) Less(i, j int) bool {
+	return cl[i].name < cl[j].name
+}
+
+func (cl contactList) Swap(i, j int) {
+	cl[i], cl[j] = cl[j], cl[i]
+}
+
+func (c *client) contactsSorted() []*Contact {
+	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
+	for _, contact := range c.contacts {
+		contacts = append(contacts, contact)
+	}
+	sort.Sort(contacts)
+	return contacts
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
