@@ -466,7 +466,6 @@ NextCandidate:
 	c.save()
 
 	c.receiveHook()
-
 }
 
 func (c *client) processServerAnnounce(m NewMessage) {
