@@ -481,7 +481,7 @@ type Event struct {
 	msg string
 }
 
-// clientList is a sortable listing of contacts
+// contactList is a sortable slice of Contacts.
 type contactList []*Contact
 
 func (cl contactList) Len() int {
@@ -496,10 +496,10 @@ func (cl contactList) Swap(i, j int) {
 	cl[i], cl[j] = cl[j], cl[i]
 }
 
-func (c *client) ContactsSorted() ([]*Contact) {
+func (c *client) contactsSorted() []*Contact {
 	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
-	for i := range c.contacts {
-		contacts = append(contacts, c.contacts[i])
+	for _, contact := range c.contacts {
+		contacts = append(contacts, contact)
 	}
 	sort.Sort(contacts)
 	return contacts
