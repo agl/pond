@@ -215,7 +215,7 @@ type client struct {
 	// axolotl ratchet support.
 	disableV2Ratchet bool
 
-	// command to run upon receiving messages
+	// receiveHookCommand is command to run upon receiving a message.
 	receiveHookCommand string
 }
 
@@ -1418,13 +1418,17 @@ func (c *client) importTombFile(stateFile *disk.StateFile, keyHex, path string) 
 	return nil
 }
 
+// receiveHook runs any configured commands to notify the user that a new
+// message has been received.
 func (c *client) receiveHook() {
-	if c.receiveHookCommand != "" {
-		cmd := exec.Command(c.receiveHookCommand)
-		go func() {
-			if err := cmd.Run(); err != nil {
-				c.log.Errorf("Failed to run receive hook command: %s", err.Error())
-			}
-		}()
+	if len(c.receiveHookCommand) == 0 {
+		return
 	}
+
+	cmd := exec.Command(c.receiveHookCommand)
+	go func() {
+		if err := cmd.Run(); err != nil {
+			c.log.Errorf("Failed to run receive hook command: %s", err.Error())
+		}
+	}()
 }
