@@ -1691,20 +1691,25 @@ func (c *cliClient) inputTextBlock(draft string,isMessage bool) (body string, ok
 	return
 }
 
+func (c *client) newDraft(to *Contact, inReplyTo *InboxMessage) (*Draft) {
+	draft := &Draft{
+		id:      c.randId(),
+		created: time.Now(),
+		to:      to.id,
+	}
+	if inReplyTo != nil && inReplyTo.message != nil {
+		draft.inReplyTo = inReplyTo.message.GetId()
+		draft.body = indentForReply(inReplyTo.message.GetBody())
+	}
+	c.drafts[draft.id] = draft
+	return draft
+}
+
 func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
 	if draft == nil {
-		draft = &Draft{
-			id:      c.randId(),
-			created: time.Now(),
-			to:      to.id,
-			cliId:   c.newCliId(),
-		}
-		if inReplyTo != nil && inReplyTo.message != nil {
-			draft.inReplyTo = inReplyTo.message.GetId()
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
+		draft = c.newDraft(to,inReplyTo)
+		draft.cliId = c.newCliId()
 		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
-		c.drafts[draft.id] = draft
 		c.setCurrentObject(draft)
 	}
 	if to == nil {
