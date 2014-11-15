@@ -1626,7 +1626,7 @@ Handle:
 		if !ok { c.Printf("Not OK, what now?") }
 
 		// c.introduceContact_onemany(contact,cl)
-		urls := c.introducePandaMessages_onemany(cl)
+		urls := c.introducePandaMessages_onemany(cl,true)
 		for i := range cl {
 			draft := c.newDraft(cl[i],nil)
 			draft.cliId = c.newCliId()
@@ -1655,7 +1655,7 @@ Handle:
 		body, ok := c.inputTextBlock(prebody,true)
 		if !ok { c.Printf("Not OK, what now?") }
 
-		urls := c.introducePandaMessages_group(cl)
+		urls := c.introducePandaMessages_group(cl,true)
 		for i := range cl {
 			draft := c.newDraft(cl[i],nil)
 			draft.cliId = c.newCliId()
@@ -1682,7 +1682,7 @@ Handle:
 					   return
 				   }
 				   c.Printf("%s Begining PANDA key exchange with %s\n", termPrefix,pc.name)
-				   c.beginProposedPandaKeyExchange(pc);
+				   c.beginProposedPandaKeyExchange(pc,msg.from);
 				   if cmd.Index != "*" { return } 
 			}
 		}

@@ -1606,7 +1606,7 @@ NextEvent:
 		case strings.HasPrefix(click.name, greetPrefix):
 			i, ok := strconv.Atoi(click.name[len(greetPrefix):])
 			if ok != nil || i >= len(pcs) { panic("invalid greet command") }
-			contact := c.beginProposedPandaKeyExchange(pcs[i])
+			contact := c.beginProposedPandaKeyExchange(pcs[i],msg.from)
 			c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
 			c.contactsUI.Select(contact.id)
 			c.gui.Actions() <- Sensitive{name: click.name, sensitive: false}
@@ -2470,15 +2470,15 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 
 			var urls []string
 			if id != 0 {
-				urls = c.introducePandaMessages_onemany(cl)
+				urls = c.introducePandaMessages_onemany(cl,true)
 			} else {
-				urls = c.introducePandaMessages_group(cl)
+				urls = c.introducePandaMessages_group(cl,true)
 			}
 			for i := range cl {
 				draft := c.newDraft(cl[i],nil)
 				draft.body = messageBody + introducePandaMessageDesc + urls[i]
 				c.sendDraft(draft)
-				c.log.Printf("Sending introduction message to %s\n", cl[i].name)
+				c.log.Printf("Queued introduction message for %s.", cl[i].name)
 			}
 			c.save()
 
