@@ -1112,7 +1112,15 @@ func (c *client) contactByName(name string) (*Contact, bool) {
 			return contact, true
 		}
 	}
+	return nil, false
+}
 
+func (c *client) contactByIdentity(theirIdentityPublic []byte) (*Contact, bool) {
+	for _, contact := range c.contacts {
+		if bytes.Equal(contact.theirIdentityPublic[:], theirIdentityPublic) {
+			return contact, true
+		}
+	}
 	return nil, false
 }
 
@@ -1218,6 +1226,14 @@ func (c *client) deleteContact(contact *Contact) {
 		if draft.to == contact.id {
 			draft.to = 0
 		}
+	}
+
+	for id, contact := range c.contacts {
+		if contact.introducedBy == id {
+			contact.introducedBy = 0
+		}
+		removeIdSet(&contact.verifiedBy, id)
+		removeIdSet(&contact.introducedTo, id)
 	}
 
 	c.queueMutex.Lock()
