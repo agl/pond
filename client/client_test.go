@@ -1195,8 +1195,10 @@ func testDetached(t *testing.T, upload bool) {
 		break
 	}
 
-	for len(draft.detachments) == 0 {
-		client1.gui.WaitForSignal()
+	client1.AdvanceTo(uiStateDetachmentComplete)
+
+	if len(draft.detachments) == 0 {
+		t.Errorf("detachments still empty")
 	}
 
 	client1.gui.events <- Click{
@@ -1246,21 +1248,7 @@ WaitForAck:
 		fo = client2.gui.WaitForFileOpen()
 		client2.gui.events <- OpenResult{ok: true, path: outputPath, arg: fo.arg}
 	}
-	client2.gui.WaitForSignal()
-
-	var id uint64
-	for dID := range msg.decryptions {
-		id = dID
-		break
-	}
-
-	if id == 0 {
-		t.Fatalf("Failed to get id of decryption")
-	}
-
-	for len(msg.decryptions) > 0 {
-		client2.gui.WaitForSignal()
-	}
+	client2.AdvanceTo(uiStateDetachmentComplete)
 
 	result, err := ioutil.ReadFile(outputPath)
 	if err != nil {
