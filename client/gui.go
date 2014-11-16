@@ -78,6 +78,7 @@ const (
 	uiStateEntomb
 	uiStateEntombComplete
 	uiStateContactNameChanged
+	uiStateDetachmentComplete
 )
 
 type guiClient struct {
@@ -1195,6 +1196,7 @@ func (i InboxDetachmentUI) OnFinal(id uint64) {
 
 func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
 }
+
 func (c *guiClient) showInbox(id uint64) interface{} {
 	var msg *InboxMessage
 	for _, candidate := range c.inbox {
@@ -2926,6 +2928,7 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 		}
 		ui.OnFinal(id)
 		ui.OnSuccess(id, complete.detachment)
+		c.gui.Actions() <- UIState{uiStateDetachmentComplete}
 		c.gui.Signal()
 		return true
 	}
