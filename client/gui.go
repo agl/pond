@@ -2147,6 +2147,19 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
 	}
 
+	if contact.introducedBy != 0 {
+		cnt,ok := c.contacts[contact.introducedBy]
+		name := "Unknown"
+		if ok { name = cnt.name }
+		entries = append(entries, nvEntry{"INTRODUCED BY", name})
+	}
+	if len(contact.verifiedBy) > 0 {
+		entries = append(entries, nvEntry{"VERIFIED BY", c.listContactsAndUnknowns(contact.verifiedBy)})
+	}
+	if len(contact.introducedTo) > 0 {
+		entries = append(entries, nvEntry{"INTRODUCED TO", c.listContactsAndUnknowns(contact.introducedTo)})
+	}
+
 	if len(contact.events) > 0 {
 		eventsText := ""
 		for i, event := range contact.events {

@@ -1997,6 +1997,24 @@ func (c *cliClient) inputContactList(title string,
 	}
 }
 
+func (c *client) listContactsAndUnknowns(ids []uint64) (string) {
+	unknowns := 0
+	listing := ""
+	for _, id := range ids {
+		cnt,ok := c.contacts[id]
+		if ok {
+			listing += cnt.name + ", "
+		} else {
+			unknowns++
+		}
+	}
+	if unknowns > 0 {
+		listing += fmt.Sprintf("and %d unknown contacts.",unknowns)
+	}
+	listing = strings.TrimSuffix(listing,", ")
+	return listing
+}
+
 func (c *cliClient) showContact(contact *Contact) {
 	if len(contact.pandaResult) > 0 {
 		c.Printf("%s PANDA error: %s\n", termErrPrefix, terminalEscape(contact.pandaResult, false))
@@ -2022,6 +2040,27 @@ func (c *cliClient) showContact(contact *Contact) {
 			cliRow{cols: []string{"Client version", fmt.Sprintf("%d", contact.supportedVersion)}},
 		},
 	}
+
+	if contact.introducedBy != 0 {
+		cnt,ok := c.contacts[contact.introducedBy]
+		name := "Unknown"
+		if ok { name = terminalEscape(cnt.name,false) }
+		table.rows = append(table.rows, 
+			cliRow{cols: []string{"Introduced By", name }},
+		)
+	}
+	if len(contact.verifiedBy) > 0 {
+		table.rows = append(table.rows, 
+			cliRow{cols: []string{"Verified By", terminalEscape(c.listContactsAndUnknowns(contact.verifiedBy), false) }},
+		)
+	}
+	if len(contact.introducedTo) > 0 {
+		table.rows = append(table.rows, 
+			cliRow{cols: []string{"Introduced To", terminalEscape(c.listContactsAndUnknowns(contact.introducedTo), false) }},
+		)
+	}
+
+
 	table.WriteTo(c.term)
 
 	if len(contact.events) > 0 {
