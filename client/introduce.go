@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	introducePandaMessageDesc = "Introduction URLs for proposed new contacts :\n"
+	introducePandaMessageDesc = "\n---- Introduction URIs for proposed new contacts ----\n"
 )
 
 func addIdSet(set *[]uint64,id uint64) {
@@ -26,6 +26,20 @@ func removeIdSet(set *[]uint64,id uint64) {
 			return
 		}
 	}
+}
+
+func isInIdSet(set []uint64,id uint64) bool {
+	for _,s := range set {
+		if s == id { return true }
+	}
+	return false
+}
+
+func (c *client) contactListFromIdSet(set []uint64) (ci contactList) {
+	for _,id := range set {
+		ci = append(ci,c.contacts[id])
+	}
+	return
 }
 
 func (c *client) introducePandaMessages_pair(cnt1,cnt2 *Contact,real bool) (string,string) {

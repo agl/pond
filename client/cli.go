@@ -933,6 +933,11 @@ func (c *cliClient) outboxSummary() (table cliTable) {
 	return
 }
 
+func (c *client) listDraftRecipients(draft *Draft,nobody string) string {
+	if len(draft.toNormal) == 0 && len(draft.toIntroduce) == 0 { return nobody }
+	return c.listContactsAndUnknowns(append(draft.toNormal,draft.toIntroduce...))
+}
+
 func (c *cliClient) draftsSummary() (table cliTable) {
 	if len(c.drafts) == 0 {
 		return
@@ -951,28 +956,25 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 		rows:    make([]cliRow, 0, len(c.drafts)),
 	}
 
-	for _, msg := range c.drafts {
-		if filter != 0 && filter != msg.to {
+	for _, draft := range c.drafts {
+		if filter != 0 && !isInIdSet(draft.toNormal,filter) && !isInIdSet(draft.toIntroduce,filter) {
 			continue
 		}
 
-		if msg.cliId == invalidCliId {
-			msg.cliId = c.newCliId()
+		if draft.cliId == invalidCliId {
+			draft.cliId = c.newCliId()
 		}
 
-		subline := msg.created.Format(shortTimeFormat)
-		to := "(nobody)"
-		if msg.to != 0 {
-			to = c.ContactName(msg.to)
-		}
+		subline := draft.created.Format(shortTimeFormat)
+		toName := c.listDraftRecipients(draft,"(nobody)")
 
 		table.rows = append(table.rows, cliRow{
 			indicatorNone,
 			[]string{
-				terminalEscape(to, false),
+				terminalEscape(toName, false),
 				subline,
 			},
-			msg.cliId,
+			draft.cliId,
 		})
 	}
 
@@ -1115,18 +1117,22 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 	switch cmd.(type) {
 	case composeCommand:
 		if contact, ok := c.currentObj.(*Contact); ok {
-			c.compose(contact, nil, nil)
+			c.compose(c.newDraftCLI([]uint64{contact.id}, nil, nil))
 		} else {
 			c.Printf("%s Select contact first\n", termWarnPrefix)
 		}
 
 	case editCommand:
 		if draft, ok := c.currentObj.(*Draft); ok {
-			if draft.to == 0 {
+			if len(draft.toNormal) < 1 {
 				c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
 				return
 			}
-			c.compose(nil, draft, nil)
+			if len(draft.toNormal) > 1 || len(draft.toIntroduce) > 1 {
+				c.Printf("%s Draft was created in the GUI and has multiple destinations specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
+				return
+			}
+			c.compose(draft)
 		} else {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
 		}
@@ -1141,7 +1147,7 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 			c.Printf("%s Cannot reply to server announcement\n", termWarnPrefix)
 			return
 		}
-		c.compose(c.contacts[msg.from], nil, msg)
+		c.compose(c.newDraftCLI([]uint64{msg.from}, nil, msg))
 
 	default:
 		goto Handle
@@ -1259,11 +1265,11 @@ Handle:
 			case *Contact:
 				c.Printf("%s You attempted to delete a contact (%s). Doing so removes all messages to and from that contact and revokes their ability to send you messages. To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(obj.name, false))
 			case *Draft:
-				toName := "<unknown>"
-				if obj.to != 0 {
-					toName = c.ContactName(obj.to)
+				toName := ""
+				if len(obj.toNormal) > 0 || len(obj.toIntroduce) > 0 {
+					toName = " to " + c.listContactsAndUnknowns(append(obj.toNormal,obj.toIntroduce...))
 				}
-				c.Printf("%s You attempted to delete a draft message (to %s). To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(toName, false))
+				c.Printf("%s You attempted to delete a draft message%s. To confirm, enter the delete command again.\n", termWarnPrefix, terminalEscape(toName, false))
 			case *queuedMessage:
 				c.queueMutex.Lock()
 				if c.indexOfQueuedMessage(obj) != -1 {
@@ -1306,14 +1312,13 @@ Handle:
 			c.Printf("%s Select draft first\n", termWarnPrefix)
 			return
 		}
-		if draft.to == 0 {
+		if len(draft.toNormal) == 0 && len(draft.toIntroduce) == 0 {
 			c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
 			return
 		}
-		id, _, err := c.sendDraft(draft)
+		messages, err := c.sendDraft(draft)
 		if err != nil {
 			c.Printf("%s Error sending: %s\n", termErrPrefix, err)
-			return
 		}
 		if draft.inReplyTo != 0 {
 			for _, msg := range c.inbox {
@@ -1325,17 +1330,18 @@ Handle:
 		}
 		delete(c.drafts, draft.id)
 		c.setCurrentObject(nil)
-		for _, msg := range c.outbox {
-			if msg.id == id {
-				if msg.cliId == invalidCliId {
-					msg.cliId = c.newCliId()
-				}
-				c.Printf("%s Created new outbox entry %s%s%s\n", termInfoPrefix, termCliIdStart, msg.cliId.String(), termReset)
+		// We previously ranged over c.outbox compairing ids here, but it's safe
+		// to assume messages contains pointers to the actual outbox messages.
+		for _, msg := range messages {
+			if msg.cliId == invalidCliId {
+				msg.cliId = c.newCliId()
+			}
+			c.Printf("%s Created new outbox entry %s%s%s\n", termInfoPrefix, termCliIdStart, msg.cliId.String(), termReset)
+			if len(messages) == 1 {
 				c.setCurrentObject(msg)
-				c.showQueueState()
-				break
 			}
 		}
+				c.showQueueState()
 		c.save()
 
 	case abortCommand:
@@ -1628,7 +1634,7 @@ Handle:
 		// c.introduceContact_onemany(contact,cl)
 		urls := c.introducePandaMessages_onemany(cl,true)
 		for i := range cl {
-			draft := c.newDraft(cl[i],nil)
+			draft := c.newDraft([]uint64{cl[i].id},nil,nil)
 			draft.cliId = c.newCliId()
 			if i == 0 {
 				draft.body = body0
@@ -1657,7 +1663,7 @@ Handle:
 
 		urls := c.introducePandaMessages_group(cl,true)
 		for i := range cl {
-			draft := c.newDraft(cl[i],nil)
+			draft := c.newDraft([]uint64{cl[i].id},nil,nil)
 			draft.cliId = c.newCliId()
 			draft.body = body + introducePandaMessageDesc + urls[i]
 			c.sendDraft(draft)
@@ -1777,40 +1783,58 @@ func (c *cliClient) inputTextBlock(draft string,isMessage bool) (body string, ok
 	return
 }
 
-func (c *client) newDraft(to *Contact, inReplyTo *InboxMessage) (*Draft) {
+func (c *client) newDraft(toNormal, toIntroduce []uint64, inReplyTo *InboxMessage) (*Draft) {
+	// Any recipients specified now overide inReplyTo.from, no panic.
 	draft := &Draft{
-		id:      c.randId(),
-		created: time.Now(),
-		to:      to.id,
+		id:          c.randId(),
+		created:     time.Now(),
+		toNormal:    toNormal,
+		toIntroduce: toIntroduce,
 	}
 	if inReplyTo != nil && inReplyTo.message != nil {
 		draft.inReplyTo = inReplyTo.message.GetId()
 		draft.body = indentForReply(inReplyTo.message.GetBody())
+		if len(toNormal) == 0 && len(toIntroduce) == 0 && inReplyTo.from != 0 {
+			toNormal = []uint64{inReplyTo.from}
+		}
 	}
 	c.drafts[draft.id] = draft
 	return draft
 }
 
-func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) {
+func (c *cliClient) newDraftCLI(toNormal, toIntroduce []uint64, inReplyTo *InboxMessage) (*Draft) {
+	draft := c.newDraft(toNormal,toIntroduce,inReplyTo)
+	draft.cliId = c.newCliId()
+	c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
+	c.setCurrentObject(draft)
+	return draft
+}
+
+func (c *cliClient) compose(draft *Draft) {
 	if draft == nil {
-		draft = c.newDraft(to,inReplyTo)
-		draft.cliId = c.newCliId()
-		c.Printf("%s Created new draft: %s%s%s\n", termInfoPrefix, termCliIdStart, draft.cliId.String(), termReset)
-		c.setCurrentObject(draft)
-	}
-	if to == nil {
-		to = c.contacts[draft.to]
-	}
-	if to.isPending {
-		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
-		return
+		c.Printf("%s Internal error, compose nolonger initializes drafts.\n", termErrPrefix)
 	}
 
-	body, ok := c.inputTextBlock(fmt.Sprintf("To: %s\n\n" + draft.body, to.name),true)
+	body0 := ""
+	funTo := func(title string,tos []uint64) bool {
+		if len(tos) == 0 { return true }
+		body0 += title + c.listContactsAndUnknowns(tos) + "\n"
+		// TODO : Allow writing messages to pending contacts, issue warning here
+		for _,to := range tos {
+			if c.contacts[to].isPending {
+				c.Printf("%s Cannot send message to pending contact %s.\n", termErrPrefix, c.contacts[to].name)
+				return false
+			}
+		}
+		return true
+	}
+	if ! funTo("Introdiucing: ",draft.toIntroduce) ||
+	   ! funTo("To: ",draft.toNormal)  { return }
+
+	body, ok := c.inputTextBlock(body0 + "\n" + draft.body,true)
 	if ! ok { return }
 	draft.body = body
 	c.printDraftSize(draft)
-
 	c.save()
 }
 
@@ -1915,27 +1939,38 @@ func (c *cliClient) showOutbox(msg *queuedMessage) {
 	c.Printf("\n")
 }
 
-func (c *cliClient) showDraft(msg *Draft) {
-	to := "(not specified)"
-	if msg.to != 0 {
-		to = c.ContactName(msg.to)
+func (c *cliClient) showDraft(draft *Draft) {
+	toLine := ""
+	if len(draft.toIntroduce) > 0 {
+		toLine = fmt.Sprintf("%s Introdiucing: %s\n", termHeaderPrefix, 
+			terminalEscape(c.listContactsAndUnknowns(draft.toIntroduce), false))
 	}
-	c.Printf("%s To: %s\n", termHeaderPrefix, terminalEscape(to, false))
-	c.Printf("%s Created: %s\n", termHeaderPrefix, formatTime(msg.created))
-	if len(msg.attachments) > 0 {
+	if len(draft.toNormal) > 0 {
+		also := ""
+		if len(toLine) > 0 { also = "Also " }
+		toLine += fmt.Sprintf("%s %sTo: %s\n", termHeaderPrefix, also, 
+			terminalEscape(c.listContactsAndUnknowns(draft.toNormal), false))
+	}
+	if len(toLine) == 0 {
+		toLine = fmt.Sprintf("%s To: %s\n", termHeaderPrefix, "(not specified)")
+	}
+	c.Printf(toLine)
+
+	c.Printf("%s Created: %s\n", termHeaderPrefix, formatTime(draft.created))
+	if len(draft.attachments) > 0 {
 		c.Printf("%s Attachments (use 'remove <#>' to remove):\n", termHeaderPrefix)
 	}
-	for i, attachment := range msg.attachments {
+	for i, attachment := range draft.attachments {
 		c.Printf("%s     %d: %s (%d bytes):\n", termHeaderPrefix, i+1, terminalEscape(attachment.GetFilename(), false), len(attachment.Contents))
 	}
-	if len(msg.detachments) > 0 {
+	if len(draft.detachments) > 0 {
 		c.Printf("%s Detachments (use 'remove <#>' to remove):\n", termHeaderPrefix)
 	}
-	for i, detachment := range msg.detachments {
-		c.Printf("%s     %d: %s (%d bytes):\n", termHeaderPrefix, 1+len(msg.attachments)+i, terminalEscape(detachment.GetFilename(), false), detachment.GetSize())
+	for i, detachment := range draft.detachments {
+		c.Printf("%s     %d: %s (%d bytes):\n", termHeaderPrefix, 1+len(draft.attachments)+i, terminalEscape(detachment.GetFilename(), false), detachment.GetSize())
 	}
 	c.Printf("\n")
-	c.term.Write([]byte(terminalEscape(string(msg.body), true /* line breaks ok */)))
+	c.term.Write([]byte(terminalEscape(string(draft.body), true /* line breaks ok */)))
 	c.Printf("\n")
 }
 
@@ -2009,7 +2044,8 @@ func (c *client) listContactsAndUnknowns(ids []uint64) (string) {
 		}
 	}
 	if unknowns > 0 {
-		listing += fmt.Sprintf("and %d unknown contacts.",unknowns)
+		if len(listing) > 0 { listing += "and " }
+		listing += fmt.Sprintf("%d unknown contacts.",unknowns)
 	}
 	listing = strings.TrimSuffix(listing,", ")
 	return listing

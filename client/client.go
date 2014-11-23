@@ -566,7 +566,8 @@ type pendingDetachment struct {
 type Draft struct {
 	id          uint64
 	created     time.Time
-	to          uint64
+	toNormal    []uint64
+	toIntroduce []uint64
 	body        string
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
@@ -626,8 +627,14 @@ func (draft *Draft) usageString() (string, bool) {
 	if err != nil {
 		panic("error while serialising candidate Message: " + err.Error())
 	}
+	l := uint64(len(serialized))
 
-	s := fmt.Sprintf("%s of %s bytes", prettyNumber(uint64(len(serialized))), prettyNumber(pond.MaxSerializedMessage))
+	// We must overestimate the size of introductions 
+	to := append(draft.toNormal,draft.toIntroduce...)
+	expectedContactNameSize := 30
+	l += uint64( (len(to) - 1) * (len("pond-introduce-panda://") + 64 + expectedContactNameSize) )
+
+	s := fmt.Sprintf("%s of %s bytes", prettyNumber(l), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
@@ -675,7 +682,7 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	draft := &Draft{
 		id:          msg.id,
 		created:     msg.created,
-		to:          msg.to,
+		toNormal:    []uint64{msg.to},
 		body:        string(msg.message.Body),
 		attachments: msg.message.Files,
 		detachments: msg.message.DetachedFiles,
@@ -1215,9 +1222,8 @@ func (c *client) deleteContact(contact *Contact) {
 	c.inbox = newInbox
 
 	for _, draft := range c.drafts {
-		if draft.to == contact.id {
-			draft.to = 0
-		}
+		removeIdSet(&draft.toNormal,contact.id)
+		removeIdSet(&draft.toIntroduce,contact.id)
 	}
 
 	for id, contact := range c.contacts {
