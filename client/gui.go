@@ -389,6 +389,10 @@ func (c *guiClient) processMessageDelivered(msg *queuedMessage) {
 	c.outboxUI.SetIndicator(msg.id, indicatorYellow)
 }
 
+func (c *guiClient) sideDraftRecipients(draft *Draft) string {
+	return maybeTruncate(c.listDraftRecipients(draft, "Unknown"))
+}
+
 func (c *guiClient) mainUI() {
 	ui := Paned{
 		left: Scrolled{
@@ -595,12 +599,9 @@ func (c *guiClient) mainUI() {
 	}
 
 	for _, draft := range c.drafts {
-		to := "Unknown"
-		if draft.to != 0 {
-			to = c.ContactName(draft.to)
-		}
+		toLine := c.sideDraftRecipients(draft)
 		subline := draft.created.Format(shortTimeFormat)
-		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
+		c.draftsUI.Add(draft.id, toLine, subline, indicatorNone)
 	}
 
 	c.clientUI = &listUI{
@@ -1662,7 +1663,7 @@ NextEvent:
 			c.gui.Signal()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
-			return c.composeUI(c.newDraftUI(msg, 0))
+			return c.composeUI(c.newDraftUI(nil, nil, msg))
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
 			c.deleteInboxMsg(msg.id)
@@ -2297,14 +2298,9 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					c.outboxUI.SetLine(msg.id, newName)
 				}
 			}
-			for _, msg := range c.drafts {
-				if msg.to == contact.id {
-					c.draftsUI.SetLine(msg.id, newName)
-				}
-			}
-			for _, msg := range c.drafts {
-				if msg.to == contact.id {
-					c.draftsUI.SetLine(msg.id, newName)
+			for _, draft := range c.drafts {
+				if isInIdSet(draft.toNormal, contact.id) || isInIdSet(draft.toIntroduce, contact.id) {
+					c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
 				}
 			}
 			c.contactsUI.SetLine(contact.id, newName)
@@ -2514,7 +2510,7 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 				urls = c.introducePandaMessages_group(cl, true)
 			}
 			for i := range cl {
-				draft := c.newDraft(cl[i], nil)
+				draft := c.newDraft(nil, []uint64{cl[i].id}, nil)
 				draft.body = messageBody + introducePandaMessageDesc + urls[i]
 				c.sendDraft(draft)
 				c.log.Printf("Queued introduction message for %s.", cl[i].name)
@@ -3240,65 +3236,19 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 	return false
 }
 
-func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
-	usageMessage, over := draft.usageString()
-	c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
-	color := uint32(colorBlack)
-	if over {
-		color = colorRed
-		c.gui.Actions() <- Sensitive{name: "send", sensitive: false}
-	} else if validContactSelected {
-		c.gui.Actions() <- Sensitive{name: "send", sensitive: true}
-	}
-	c.gui.Actions() <- SetForeground{name: "usage", foreground: color}
-	return over
-}
-
-func (c *guiClient) newDraftUI(inReplyTo *InboxMessage, to uint64) (draft *Draft) {
-	if inReplyTo != nil && to != 0 {
-		panic("newDraftUI : inReplyTo and to both set")
-	}
-
-	draft = &Draft{
-		id:      c.randId(),
-		created: c.Now(),
-	}
-
-	if inReplyTo != nil {
-		draft.inReplyTo = inReplyTo.id
-		to = inReplyTo.from
-		draft.body = indentForReply(inReplyTo.message.GetBody())
-	}
-
-	fromName := "Unknown"
-	if to != 0 {
-		if from, ok := c.contacts[to]; ok {
-			fromName = from.name
-		}
-		draft.to = to
-	}
-
-	c.draftsUI.Add(draft.id, fromName, draft.created.Format(shortTimeFormat), indicatorNone)
+func (c *guiClient) newDraftUI(toNormal, toIntroduce []uint64, inReplyTo *InboxMessage) *Draft {
+	draft := c.newDraft(toNormal, toIntroduce, inReplyTo)
+	// If the reply has selected text, then the caller should change draft.body
+	// because we default to quoting the whole reply in newDraft
+	c.draftsUI.Add(draft.id, c.sideDraftRecipients(draft),
+		draft.created.Format(shortTimeFormat), indicatorNone)
 	c.draftsUI.Select(draft.id)
-	c.drafts[draft.id] = draft
-	return
+	return draft
 }
 
 func (c *guiClient) composeUI(draft *Draft) interface{} {
 	if draft == nil {
-		draft = c.newDraftUI(nil, 0)
-	}
-
-	var contactNames []string
-	for _, contact := range c.contacts {
-		if !contact.isPending && !contact.revokedUs {
-			contactNames = append(contactNames, contact.name)
-		}
-	}
-
-	var preSelected string
-	if to, ok := c.contacts[draft.to]; ok {
-		preSelected = to.name
+		draft = c.newDraftUI(nil, nil, nil)
 	}
 
 	attachments := make(map[uint64]int)
@@ -3310,36 +3260,30 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		detachments[c.randId()] = i
 	}
 
-	var inReplyTo *InboxMessage
-	if draft.inReplyTo != 0 {
-		for _, msg := range c.inbox {
-			if msg.id == draft.inReplyTo {
-				inReplyTo = msg
-				break
-			}
-		}
-	}
-
-	initialUsageMessage, overSize := draft.usageString()
-	validContactSelected := len(preSelected) > 0
+	// We modify overSize in updateSend() and updateUsage()
+	// We modify usageMessage in updateUsage() but do not use it currently
+	usageMessage, overSize := draft.usageString()
 
 	lhs := VBox{
 		children: []Widget{
 			HBox{
 				widgetBase: widgetBase{padding: 2},
 				children: []Widget{
-					Label{
-						widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
-						text:       "TO",
-						yAlign:     0.5,
-					},
-					Combo{
-						widgetBase: widgetBase{
-							name:        "to",
-							insensitive: len(preSelected) > 0 && inReplyTo != nil,
+					VBox{
+						widgetBase: widgetBase{},
+						children: []Widget{
+							Label{
+								widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, padding: 10},
+								text:       "TO",
+								yAlign:     0.5,
+							},
+							Label{
+								widgetBase: widgetBase{expand: true, fill: true},
+							},
 						},
-						labels:      contactNames,
-						preSelected: preSelected,
+					},
+					VBox{
+						widgetBase: widgetBase{name: "to-box", padding: 0},
 					},
 				},
 			},
@@ -3353,7 +3297,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 					},
 					Label{
 						widgetBase: widgetBase{name: "usage"},
-						text:       initialUsageMessage,
+						text:       usageMessage,
 					},
 				},
 			},
@@ -3385,7 +3329,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		widgetBase: widgetBase{padding: 5},
 		children: []Widget{
 			Button{
-				widgetBase: widgetBase{name: "send", insensitive: !validContactSelected, padding: 2},
+				widgetBase: widgetBase{name: "send", insensitive: true, padding: 2},
 				text:       "Send",
 			},
 			Button{
@@ -3439,6 +3383,127 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 
 	c.gui.Actions() <- SetChild{name: "right", child: ui}
 
+	toBoxName := func(s string, i uint64) string {
+		return fmt.Sprintf("to-box-%s-%x", s, i)
+	}
+	toBoxAddEntry := func(id uint64, introduce bool) {
+		if introduce {
+			addIdSet(&draft.toIntroduce, id)
+			removeIdSet(&draft.toNormal, id)
+		} else {
+			addIdSet(&draft.toNormal, id)
+			removeIdSet(&draft.toIntroduce, id)
+		}
+		c.gui.Actions() <- Append{
+			name: "to-box",
+			children: []Widget{
+				HBox{
+					widgetBase: widgetBase{name: toBoxName("entry", id)},
+					children: []Widget{
+						Entry{
+							widgetBase: widgetBase{insensitive: true},
+							text:       c.contacts[id].name,
+						},
+						Button{
+							widgetBase: widgetBase{name: toBoxName("remove", id), font: "Liberation Sans 8"},
+							image:      indicatorRemove,
+						},
+						CheckButton{
+							widgetBase: widgetBase{
+								name:    toBoxName("introduce", id),
+								padding: 10,
+							},
+							checked: introduce,
+							text:    "Introduce",
+						},
+					},
+				},
+			},
+		}
+	}
+	originalToIntroduce := draft.toIntroduce
+	draft.toIntroduce = nil
+	originalToNormal := draft.toNormal
+	draft.toNormal = nil
+	for _, id := range originalToIntroduce {
+		toBoxAddEntry(id, true)
+	}
+	for _, id := range originalToNormal {
+		toBoxAddEntry(id, false)
+	}
+	// Should we panic here if draft.toNormal != originalToNormal or
+	// draft.toIntroduce != originalToIntroduce?
+
+	var toBoxLines uint64 = 1 // zero signifies that no combo box exists
+	toBoxAddCombo := func() {
+		var contactNames []string
+		for _, contact := range c.contacts {
+			if !contact.isPending && !contact.revokedUs &&
+				!isInIdSet(draft.toNormal, contact.id) &&
+				!isInIdSet(draft.toIntroduce, contact.id) {
+				contactNames = append(contactNames, contact.name)
+			}
+		}
+		if len(contactNames) == 0 {
+			toBoxLines = 0
+			return
+		}
+		more := ""
+		if len(draft.toNormal)+len(draft.toIntroduce) > 0 {
+			more = "+"
+		}
+		c.gui.Actions() <- Append{
+			name: "to-box",
+			children: []Widget{
+				HBox{
+					widgetBase: widgetBase{name: toBoxName("adder", toBoxLines)},
+					children: []Widget{
+						Label{
+							widgetBase: widgetBase{padding: 10},
+							text:       more,
+							yAlign:     0.5,
+						},
+						Combo{
+							widgetBase: widgetBase{name: "to-box-add"},
+							labels:     contactNames,
+						},
+					},
+				},
+			},
+		}
+	}
+	toBoxAddCombo()
+	toBoxUpdateCombo := func() {
+		if toBoxLines > 0 {
+			c.gui.Actions() <- Destroy{name: toBoxName("adder", toBoxLines)}
+		}
+		toBoxLines++
+		toBoxAddCombo()
+	}
+
+	updateSend := func() {
+		sendable := len(draft.toNormal) > 0 || len(draft.toIntroduce) > 1
+		for _, id := range append(draft.toNormal, draft.toIntroduce...) {
+			if c.contacts[id].isPending || c.contacts[id].revokedUs {
+				c.gui.Actions() <- SetForeground{name: toBoxName("remove", id), foreground: colorRed}
+				sendable = false
+			}
+		}
+		c.gui.Actions() <- Sensitive{name: "send", sensitive: sendable && !overSize}
+	}
+	updateSend()
+
+	// We should probably just remove introduceSensitivity() because
+	// the Introduce setting is copied after the first line.
+	introduceSensitivity := func() {
+		/*
+			if len(draft.toNormal) == 0 { return }
+			c.gui.Actions() <- Sensitive{name: toBoxName("introduce",draft.toNormal[0]),
+					sensitive: len(draft.toNormal) > 1 || len(draft.toIntroduce) > 0 }
+		*/
+	}
+	introduceSensitivity()
+
 	if draft.pendingDetachments == nil {
 		draft.pendingDetachments = make(map[uint64]*pendingDetachment)
 	}
@@ -3469,9 +3534,18 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		}
 	}
 
-	detachmentUI := ComposeDetachmentUI{draft, detachments, c.gui, func() {
-		overSize = c.updateUsage(validContactSelected, draft)
-	}}
+	updateUsage := func() {
+		usageMessage, overSize = draft.usageString()
+		c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
+		color := uint32(colorBlack)
+		if overSize {
+			color = colorRed
+		}
+		c.gui.Actions() <- SetForeground{name: "usage", foreground: color}
+		updateSend()
+	}
+
+	detachmentUI := ComposeDetachmentUI{draft, detachments, c.gui, updateUsage}
 
 	c.gui.Actions() <- UIState{uiStateCompose}
 	c.gui.Signal()
@@ -3483,7 +3557,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		}
 
 		if update, ok := event.(Update); ok {
-			overSize = c.updateUsage(validContactSelected, draft)
+			updateUsage()
 			draft.body = update.text
 			c.gui.Signal()
 			continue
@@ -3553,7 +3627,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 					widgetForAttachment(id, label, err != nil, extraWidgets),
 				},
 			}
-			overSize = c.updateUsage(validContactSelected, draft)
+			updateUsage()
 			c.gui.Signal()
 		}
 		if open, ok := event.(OpenResult); ok && open.ok && open.arg != nil {
@@ -3582,30 +3656,6 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		if !ok {
 			continue
 		}
-		if click.name == "attach" {
-			c.gui.Actions() <- FileOpen{
-				title: "Attach File",
-			}
-			c.gui.Signal()
-			continue
-		}
-		if click.name == "to" {
-			selected := click.combos["to"]
-			if len(selected) > 0 {
-				validContactSelected = true
-			}
-			for _, contact := range c.contacts {
-				if contact.name == selected {
-					draft.to = contact.id
-				}
-			}
-			c.draftsUI.SetLine(draft.id, selected)
-			if validContactSelected && !overSize {
-				c.gui.Actions() <- Sensitive{name: "send", sensitive: true}
-				c.gui.Signal()
-			}
-			continue
-		}
 		if click.name == "discard" {
 			c.draftsUI.Remove(draft.id)
 			delete(c.drafts, draft.id)
@@ -3614,6 +3664,68 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
 			return nil
+		}
+
+		// Recipients interface
+		if click.name == "to-box-add" {
+			name := click.combos["to-box-add"]
+			if len(name) == 0 {
+				continue
+			}
+			contact, ok := c.contactByName(name)
+			if !ok {
+				panic("unreachable")
+			}
+			introduce := len(draft.toIntroduce) > 0 && len(draft.toNormal) == 0
+			toBoxAddEntry(contact.id, introduce)
+			toBoxUpdateCombo()
+			updateSend()
+			introduceSensitivity()
+			c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
+			c.gui.Signal()
+			continue
+		}
+		const toRemovePrefix = "to-box-remove-"
+		if strings.HasPrefix(click.name, toRemovePrefix) {
+			id, err := strconv.ParseUint(click.name[len(toRemovePrefix):], 16, 64)
+			if _, ok := c.contacts[id]; err != nil || !ok {
+				panic(click.name)
+			}
+			removeIdSet(&draft.toNormal, id)
+			removeIdSet(&draft.toIntroduce, id)
+			c.gui.Actions() <- Destroy{name: toBoxName("entry", id)}
+			toBoxUpdateCombo()
+			updateSend()
+			introduceSensitivity()
+			c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
+			c.gui.Signal()
+			continue
+		}
+		const toIntroducePrefix = "to-box-introduce-"
+		if strings.HasPrefix(click.name, toIntroducePrefix) {
+			id, err := strconv.ParseUint(click.name[len(toIntroducePrefix):], 16, 64)
+			if _, ok := c.contacts[id]; err != nil || !ok {
+				panic(click.name)
+			}
+			introduce := click.checks[click.name]
+			if introduce {
+				addIdSet(&draft.toIntroduce, id)
+				removeIdSet(&draft.toNormal, id)
+			} else {
+				addIdSet(&draft.toNormal, id)
+				removeIdSet(&draft.toIntroduce, id)
+			}
+			// c.gui.Signal()
+			continue
+		}
+
+		// Attachment interface
+		if click.name == "attach" {
+			c.gui.Actions() <- FileOpen{
+				title: "Attach File",
+			}
+			c.gui.Signal()
+			continue
 		}
 		if strings.HasPrefix(click.name, "remove-") {
 			// One of the attachment remove buttons.
@@ -3636,7 +3748,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 				draft.detachments = append(draft.detachments[:index], draft.detachments[index+1:]...)
 				delete(detachments, id)
 			}
-			overSize = c.updateUsage(validContactSelected, draft)
+			updateUsage()
 			c.gui.Signal()
 			continue
 		}
@@ -3681,44 +3793,46 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		if click.name != "send" {
 			continue
 		}
+		// if len(click.combos["to-box-add"]) > 0 { panic(click.name) }
 
-		toName := click.combos["to"]
-		if len(toName) == 0 {
-			continue
-		}
-		for _, contact := range c.contacts {
-			if contact.name == toName {
-				draft.to = contact.id
-				break
-			}
-		}
-
-		if inReplyTo != nil {
-			draft.inReplyTo = inReplyTo.message.GetId()
-		}
 		draft.body = click.textViews["body"]
 
-		id, created, err := c.sendDraft(draft)
+		messages, err := c.sendDraft(draft)
 		if err != nil {
 			// TODO: handle this case better.
 			println(err.Error())
 			c.log.Errorf("Error sending message: %s", err)
 			continue
 		}
-		to := c.contacts[draft.to]
-		c.outboxUI.Add(id, to.name, created.Format(shortTimeFormat), indicatorRed)
-		if inReplyTo != nil {
-			inReplyTo.acked = true
-			c.inboxUI.SetIndicator(inReplyTo.id, indicatorNone)
+
+		for _, msg := range messages {
+			c.outboxUI.Add(msg.id, c.ContactName(msg.to),
+				msg.created.Format(shortTimeFormat), indicatorRed)
+		}
+
+		if draft.inReplyTo != 0 {
+			for _, msg := range c.inbox {
+				if msg.id == draft.inReplyTo {
+					msg.acked = true
+					c.inboxUI.SetIndicator(msg.id, indicatorNone)
+					break
+				}
+			}
 		}
 
 		c.draftsUI.Remove(draft.id)
 		delete(c.drafts, draft.id)
-
 		c.save()
-
-		c.outboxUI.Select(id)
-		return c.showOutbox(id)
+		if len(messages) == 1 {
+			id := messages[0].id
+			c.outboxUI.Select(id)
+			return c.showOutbox(id)
+		} else {
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
+			return nil
+		}
 	}
 
 	return nil
