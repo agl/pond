@@ -279,6 +279,11 @@ type Sensitive struct {
 	sensitive bool
 }
 
+type SetChecked struct {
+	name    string
+	checked bool
+}
+
 type SetBackground struct {
 	name  string
 	color uint32
