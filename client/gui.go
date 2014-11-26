@@ -2147,6 +2147,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	entries = append(entries,
 		nvEntry{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
 		nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)})
+	rowName := 0
 
 	var pandaMessage string
 
@@ -2164,7 +2165,10 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		entries = append(entries, nvEntry{"KEY EXCHANGE", string(out.Bytes())})
 	}
 
-	if contact.introducedBy != 0 {
+	rowDarkWebOfTrust := len(entries)
+	entries = append(entries, nvEntry{"", ""})
+
+	if contact.introducedBy != 0 && contact.introducedBy != disableDarkWebOfTrust {
 		cnt, ok := c.contacts[contact.introducedBy]
 		name := "Unknown"
 		if ok {
@@ -2228,7 +2232,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	left := nameValuesLHS(entries)
 
 	// Switch the label next to "name" with an entry and a button.
-	left.rows[0][1].widget = HBox{
+	left.rows[rowName][1].widget = HBox{
 		children: []Widget{
 			Entry{
 				widgetBase: widgetBase{
@@ -2243,6 +2247,19 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					name:        "changebutton",
 				},
 				text: "Change name",
+			},
+		},
+	}
+
+	left.rows[rowDarkWebOfTrust][1].widget = HBox{
+		children: []Widget{
+			CheckButton{
+				widgetBase: widgetBase{
+					name:    "disableSocialGraph",
+					padding: 2,
+				},
+				checked: contact.keepSocialGraphRecords(),
+				text:    "Retain introduction records",
 			},
 		},
 	}
@@ -2315,8 +2332,18 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			c.contactsUI.SetLine(contact.id, newName)
 			c.gui.Actions() <- UIState{uiStateContactNameChanged}
 			c.gui.Signal()
-
 			c.save()
+
+		case "disableSocialGraph":
+			if !click.checks["disableSocialGraph"] {
+				c.deleteSocialGraphRecords(id)
+				contact.introducedBy = disableDarkWebOfTrust
+				contact.verifiedBy = nil
+				contact.introducedTo = nil
+			} else if contact.introducedBy == disableDarkWebOfTrust {
+				contact.introducedBy = 0
+			} // else { panic("unreachable") }
+
 		case "composeTo":
 			return c.composeUI(c.newDraftUI([]uint64{contact.id}, nil, nil))
 		case "introduceTo":
@@ -2651,6 +2678,7 @@ Manual keying (not generally recommended) involves exchanging key material with 
 		isPending: true,
 		id:        c.randId(),
 	}
+	c.initSocialGraphRecords(contact)
 
 	c.gui.Actions() <- SetText{name: "error1", text: ""}
 	c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
