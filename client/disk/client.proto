@@ -134,7 +134,8 @@ message Outbox {
 message Draft {
 	required fixed64 id = 1;
 	required int64 created = 2;
-	optional fixed64 to = 3;
+	repeated fixed64 to_normal = 3;
+	repeated fixed64 to_introduce = 8;
 	required string body = 4;
 	optional fixed64 in_reply_to = 5;
 	repeated protos.Message.Attachment attachments = 6;
