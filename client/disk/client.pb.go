@@ -756,7 +756,8 @@ func (m *Outbox) GetRevocation() bool {
 type Draft struct {
 	Id               *uint64                      `protobuf:"fixed64,1,req,name=id" json:"id,omitempty"`
 	Created          *int64                       `protobuf:"varint,2,req,name=created" json:"created,omitempty"`
-	To               *uint64                      `protobuf:"fixed64,3,opt,name=to" json:"to,omitempty"`
+	ToNormal         []uint64                     `protobuf:"fixed64,3,rep,name=to_normal" json:"to_normal,omitempty"`
+	ToIntroduce      []uint64                     `protobuf:"fixed64,8,rep,name=to_introduce" json:"to_introduce,omitempty"`
 	Body             *string                      `protobuf:"bytes,4,req,name=body" json:"body,omitempty"`
 	InReplyTo        *uint64                      `protobuf:"fixed64,5,opt,name=in_reply_to" json:"in_reply_to,omitempty"`
 	Attachments      []*protos.Message_Attachment `protobuf:"bytes,6,rep,name=attachments" json:"attachments,omitempty"`
@@ -782,11 +783,18 @@ func (m *Draft) GetCreated() int64 {
 	return 0
 }
 
-func (m *Draft) GetTo() uint64 {
-	if m != nil && m.To != nil {
-		return *m.To
+func (m *Draft) GetToNormal() []uint64 {
+	if m != nil {
+		return m.ToNormal
 	}
-	return 0
+	return nil
+}
+
+func (m *Draft) GetToIntroduce() []uint64 {
+	if m != nil {
+		return m.ToIntroduce
+	}
+	return nil
 }
 
 func (m *Draft) GetBody() string {
