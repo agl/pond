@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	disableDarkWebOfTrust = 0xFFFFFFFFFFFFFFFF
 	introducePandaMessageDesc = "\n---- Introduction URIs for proposed new contacts ----\n"
 )
 
@@ -42,6 +43,34 @@ func (c *client) contactListFromIdSet(set []uint64) (ci contactList) {
 	return
 }
 
+func (contact *Contact) keepSocialGraphRecords() bool {
+	return contact.introducedBy != disableDarkWebOfTrust
+}
+
+func (c *client) initSocialGraphRecords(contact *Contact) {
+	// If all existing contacts have the Dark Web of Trust disabled then 
+	// new contacts should start with the Dark Web of Trust disabled too.
+	if contact.introducedBy == 0 && len(c.contacts) > 0 {
+		contact.introducedBy = disableDarkWebOfTrust 
+		for _,cnt := range c.contacts {
+			if cnt.introducedBy != disableDarkWebOfTrust {
+				contact.introducedBy = 0
+				break
+			}
+		}
+	}
+}
+
+func (c *client) deleteSocialGraphRecords(id uint64) {
+	for id, contact := range c.contacts {
+		if contact.introducedBy == id {
+			contact.introducedBy = 0
+		}
+		removeIdSet(&contact.verifiedBy,id)
+		removeIdSet(&contact.introducedTo,id)
+	}
+}
+
 func (c *client) introducePandaMessages_pair(cnt1,cnt2 *Contact,real bool) (string,string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
 	s := func(cnt *Contact) (string) {
@@ -49,7 +78,7 @@ func (c *client) introducePandaMessages_pair(cnt1,cnt2 *Contact,real bool) (stri
 			url.QueryEscape(cnt.name),panda_secret,
 			cnt.theirIdentityPublic) // no EncodeToString?
 	}
-	if real {
+	if real && cnt1.keepSocialGraphRecords() && cnt2.keepSocialGraphRecords() {
 		addIdSet(&cnt1.introducedTo,cnt2.id)
 		addIdSet(&cnt2.introducedTo,cnt1.id)
 	}
@@ -176,10 +205,12 @@ func (c *client) parsePandaURLs(sender uint64,body string) ([]ProposedContact) {
 			c.log.Printf("Bad public identity %s, skipping.",m[urlparse_theirIdentityPublic]); 
 			continue
 		}
-		if contact,found := c.contactByIdentity(pc.theirIdentityPublic[:]); found {
-			pc.id = contact.id
-			if contact.introducedBy != sender {
-				addIdSet(&contact.verifiedBy,sender)
+		if c.contacts[sender].keepSocialGraphRecords() {
+			if contact,found := c.contactByIdentity(pc.theirIdentityPublic[:]); found {
+				pc.id = contact.id
+				if contact.introducedBy != sender && contact.keepSocialGraphRecords() {
+					addIdSet(&contact.verifiedBy,sender)
+				}
 			}
 		}
 
@@ -214,13 +245,14 @@ func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,introducedBy u
 		isPending: true,
 		id:        c.randId(),
 		theirIdentityPublic: pc.theirIdentityPublic,
-		introducedBy: introducedBy,
 	}
-	// theirIdentityPublic is set only for contacts pending by introduction
-//	if introducedBy != 0 {
-//		contact.introducedBy = introducedBy
-//		copy(contact.theirIdentityPublic[:], pc.theirIdentityPublic[:])
-//	}
+	// theirIdentityPublic is only set only for contacts pending by introduction
+	if c.contacts[introducedBy].keepSocialGraphRecords() {
+		contact.introducedBy = introducedBy
+	} else {
+		c.log.Printf("Introduced contact %s is not marked as introduced by %s because %s has keeping such records disabled.\n",
+			pc.name,c.contacts[introducedBy].name,c.contacts[introducedBy].name)
+	}
 
 	stack := &panda.CardStack{
 		NumDecks: 1,

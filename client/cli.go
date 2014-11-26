@@ -1588,6 +1588,7 @@ Handle:
 			id:        c.randId(),
 			cliId:     c.newCliId(),
 		}
+		c.initSocialGraphRecords(contact)
 
 		stack := &panda.CardStack{
 			NumDecks: 1,

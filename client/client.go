@@ -1225,14 +1225,7 @@ func (c *client) deleteContact(contact *Contact) {
 		removeIdSet(&draft.toNormal,contact.id)
 		removeIdSet(&draft.toIntroduce,contact.id)
 	}
-
-	for id, contact := range c.contacts {
-		if contact.introducedBy == id {
-			contact.introducedBy = 0
-		}
-		removeIdSet(&contact.verifiedBy,id)
-		removeIdSet(&contact.introducedTo,id)
-	}
+	c.deleteSocialGraphRecords(contact.id)
 
 	c.queueMutex.Lock()
 	var newQueue []*queuedMessage
