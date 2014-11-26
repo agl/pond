@@ -248,10 +248,14 @@ func (c *client) unmarshal(state *disk.State) error {
 			created:     time.Unix(*m.Created, 0),
 		}
 		c.registerId(draft.id)
-		if m.To != nil {
-			// draft.to
-			draft.toNormal = []uint64{*m.To}
+
+		if m.ToNormal != nil && len(m.ToNormal) > 0 {
+			draft.toNormal = m.ToNormal
 		}
+		if m.ToIntroduce != nil && len(m.ToIntroduce) > 0 {
+			draft.toIntroduce = m.ToIntroduce
+		}
+
 		if m.InReplyTo != nil {
 			draft.inReplyTo = *m.InReplyTo
 		}
@@ -382,10 +386,8 @@ func (c *client) marshal() []byte {
 			Attachments: draft.attachments,
 			Detachments: draft.detachments,
 			Created:     proto.Int64(draft.created.Unix()),
-		}
-		// draft.to
-		if len(draft.toNormal) > 0 {
-			m.To = proto.Uint64(draft.toNormal[0])
+			ToNormal:    draft.toNormal,
+			ToIntroduce: draft.toIntroduce,
 		}
 
 		if draft.inReplyTo != 0 {
