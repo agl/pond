@@ -477,6 +477,14 @@ type Contact struct {
 	cliId cliId
 }
 
+func (contact *Contact) fingerprint() []byte {
+	return fingerprint(contact.theirIdentityPublic[:],nil)
+}
+
+func (c *client) fingerprint() []byte {
+	return fingerprint(c.identityPublic[:],nil)
+}
+
 // Event represents a log entry. This does not apply to the global log, which
 // is quite chatty, but rather to significant events related to a given
 // contact. These events are surfaced in the UI and recorded in the statefile.
