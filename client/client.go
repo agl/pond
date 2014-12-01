@@ -476,6 +476,17 @@ type Contact struct {
 	cliId cliId
 }
 
+func (contact *Contact) fingerprint() []byte {
+	if contact.isPending {
+		return []byte{}
+	}
+	return fingerprint(contact.theirPub[:])
+}
+
+func (c *client) fingerprint() []byte {
+	return fingerprint(c.pub[:])
+}
+
 // Event represents a log entry. This does not apply to the global log, which
 // is quite chatty, but rather to significant events related to a given
 // contact. These events are surfaced in the UI and recorded in the statefile.

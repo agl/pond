@@ -153,6 +153,14 @@ func tooLarge(msg *queuedMessage) bool {
 	return len(messageBytes) > pond.MaxSerializedMessage
 }
 
+func fingerprint(s ...[]byte) []byte {
+	sha := sha256.New()
+	for _, x := range s {
+		sha.Write(x)
+	}
+	return sha.Sum(nil)
+}
+
 // processSigningRequest is run on the main goroutine in response to a request
 // from the network thread to apply a group signature to a message that is just
 // about to be sent to the destination server.
