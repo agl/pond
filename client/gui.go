@@ -2505,9 +2505,7 @@ func (c *guiClient) newContactUI(contact *Contact) interface{} {
 	existing := contact != nil
 	if existing {
 		name = contact.name
-	} else {
-		c.initSocialGraphRecords(contact)
-	}
+	} 
 
 	grid := Grid{
 		widgetBase: widgetBase{name: "grid", margin: 5},
@@ -2641,6 +2639,7 @@ Manual keying (not generally recommended) involves exchanging key material with 
 		isPending: true,
 		id:        c.randId(),
 	}
+	c.initSocialGraphRecords(contact)
 
 	c.gui.Actions() <- SetText{name: "error1", text: ""}
 	c.gui.Actions() <- Sensitive{name: "name", sensitive: false}

@@ -50,13 +50,13 @@ func (contact *Contact) keepSocialGraphRecords() bool {
 func (c *client) initSocialGraphRecords(contact *Contact) {
 	// If all existing contacts have the Dark Web of Trust disabled then 
 	// new contacts should start with the Dark Web of Trust disabled too.
-	if contact.introducedBy == 0 && len(c.contacts) > 0 {
-		contact.introducedBy = disableDarkWebOfTrust 
-		for _,cnt := range c.contacts {
-			if cnt.introducedBy != disableDarkWebOfTrust {
-				contact.introducedBy = 0
-				break
-			}
+	if contact.introducedBy != 0 { return }
+	if c.contacts == nil || len(c.contacts) == 0 { return }
+	contact.introducedBy = disableDarkWebOfTrust 
+	for _,cnt := range c.contacts {
+		if cnt.introducedBy != disableDarkWebOfTrust {
+			contact.introducedBy = 0
+			break
 		}
 	}
 }
