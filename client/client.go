@@ -478,11 +478,12 @@ type Contact struct {
 }
 
 func (contact *Contact) fingerprint() []byte {
-	return fingerprint(contact.theirIdentityPublic[:],nil)
+	if contact.isPending { return []byte{} }
+	return fingerprint(contact.theirPub[:],contact.theirIdentityPublic[:],nil)
 }
 
 func (c *client) fingerprint() []byte {
-	return fingerprint(c.identityPublic[:],nil)
+	return fingerprint(c.pub[:],c.identityPublic[:],nil)
 }
 
 // Event represents a log entry. This does not apply to the global log, which

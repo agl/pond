@@ -153,10 +153,11 @@ func tooLarge(msg *queuedMessage) bool {
 	return len(messageBytes) > pond.MaxSerializedMessage
 }
 
-func fingerprint(data []byte,b []byte) []byte {
+func fingerprint(a,b,c []byte) []byte {
 	sha := sha256.New()
-	sha.Write(data)
-	digest := sha.Sum(b)
+	sha.Write(a)
+	sha.Write(b)
+	digest := sha.Sum(c)
 	sha.Reset()
 	return digest
 }
