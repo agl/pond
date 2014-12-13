@@ -3361,6 +3361,34 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 	toBoxName := func (s string,i uint64) string {
 		return fmt.Sprintf("to-box-%s-%x",s,i)
 	}
+	var toBoxAddExplainId uint64 = 0
+	toBoxAddExplain := func() {
+		var id uint64
+		if len(draft.toIntroduce) > 0 {
+			id = draft.toIntroduce[0]
+		} else if len(draft.toNormal) > 0 {
+			id = draft.toNormal[0]
+		} else {
+			toBoxAddExplainId = 0
+			return
+		}
+		toBoxAddExplainId = id
+		c.gui.Actions() <- Append{
+			name: toBoxName("entry",id),
+			children: []Widget{
+				Button{
+					widgetBase: widgetBase{
+						name: "explain-introductions", 
+						font: "Liberation Sans 8", 
+						foreground: colorBlue,
+						padding: 10,
+						width: 1,
+					},
+					text:      "i",
+				},
+			},
+		}
+	}
 	toBoxAddEntry := func(id uint64,introduce bool) {
 		if introduce {
 			addIdSet(&draft.toIntroduce,id)
@@ -3368,19 +3396,6 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 		} else {
 			addIdSet(&draft.toNormal,id)
 			removeIdSet(&draft.toIntroduce,id)
-		}
-		var infoCircle Widget = Label{text: ""}
-		if len(draft.toIntroduce)+len(draft.toNormal) == 1 {
-			infoCircle = Button{
-				widgetBase: widgetBase{
-					name: "explain-introductions", 
-					font: "Liberation Sans 8", 
-					foreground: colorBlue,
-					padding: 10,
-					width: 1,
-				},
-				text:      "i",
-			}
 		}
 		c.gui.Actions() <- Append{
 			name: "to-box",
@@ -3404,10 +3419,12 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 							checked:    introduce,
 							text:       "Introduce",
 						},
-						infoCircle,
 					},
 				},
 			},
+		}
+		if len(draft.toIntroduce) + len(draft.toNormal) == 1 {
+			toBoxAddExplain()
 		}
 	}
 	originalToIntroduce := draft.toIntroduce
@@ -3675,6 +3692,9 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			removeIdSet(&draft.toNormal,id)
 			removeIdSet(&draft.toIntroduce,id)
 			c.gui.Actions() <- Destroy{name: toBoxName("entry",id)}
+			if id == toBoxAddExplainId {
+				toBoxAddExplain()
+			}
 			toBoxUpdateCombo()
 			updateSend()
 			introduceSensitivity()
