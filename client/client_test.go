@@ -1839,7 +1839,7 @@ func TestSendToPendingContact(t *testing.T) {
 	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
-	if contacts, ok := client.gui.combos["to-box-add"]; !ok || len(contacts) > 0 {
+	if contacts, _ := client.gui.combos["to-box-add"]; len(contacts) > 0 {
 		t.Error("can send message to pending contact")
 	}
 }
