@@ -670,8 +670,12 @@ func composeMessage(client *TestClient, to string, message string) {
 	client.AdvanceTo(uiStateCompose)
 
 	client.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": to},
+	}
+
+	client.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": to},
 		textViews: map[string]string{"body": message},
 	}
 
@@ -1202,8 +1206,12 @@ func testDetached(t *testing.T, upload bool) {
 	}
 
 	client1.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": "client2"},
+	}
+
+	client1.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": "client2"},
 		textViews: map[string]string{"body": "foo"},
 	}
 
@@ -1724,8 +1732,12 @@ func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 	}
 
 	client2.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": "client1"},
+	}
+
+	client2.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": "client1"},
 		textViews: map[string]string{"body": "reply message"},
 	}
 	client2.AdvanceTo(uiStateOutbox)
@@ -1735,10 +1747,15 @@ func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 		client2.AdvanceTo(uiStateCompose)
 
 		client2.gui.events <- Click{
+			name:   "to-box-add",
+			combos: map[string]string{"to-box-add": "client1"},
+		}
+
+		client2.gui.events <- Click{
 			name:      "send",
-			combos:    map[string]string{"to": "client1"},
 			textViews: map[string]string{"body": "reply message"},
 		}
+
 		client2.AdvanceTo(uiStateOutbox)
 	}
 
@@ -1822,7 +1839,7 @@ func TestSendToPendingContact(t *testing.T) {
 	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
-	if contacts, ok := client.gui.combos["to"]; !ok || len(contacts) > 0 {
+	if contacts, _ := client.gui.combos["to-box-add"]; len(contacts) > 0 {
 		t.Error("can send message to pending contact")
 	}
 }
