@@ -1808,7 +1808,7 @@ func (c *client) newDraft(toNormal, toIntroduce []uint64, inReplyTo *InboxMessag
 		toIntroduce: toIntroduce,
 	}
 	if inReplyTo != nil && inReplyTo.message != nil {
-		draft.inReplyTo = inReplyTo.message.GetId()
+		draft.inReplyTo = inReplyTo.id
 		draft.body = indentForReply(inReplyTo.message.GetBody())
 		if len(toNormal) == 0 && len(toIntroduce) == 0 && inReplyTo.from != 0 {
 			toNormal = []uint64{inReplyTo.from}

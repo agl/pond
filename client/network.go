@@ -134,7 +134,13 @@ func (c *client) sendDraftTo(draft *Draft, to *Contact) (*queuedMessage, error) 
 	}
 
 	if r := draft.inReplyTo; r != 0 {
-		message.InReplyTo = proto.Uint64(r)
+		for _, msg := range c.inbox {
+			if msg.id == draft.inReplyTo {
+				r = msg.message.GetId()
+				message.InReplyTo = proto.Uint64(r)
+				break
+			}
+		}
 	}
 
 	if to.ratchet == nil {
