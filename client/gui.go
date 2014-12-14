@@ -1329,7 +1329,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		attachmentPrefix         = "attachment-"
 	)
 
-	pcs := c.parsePandaURLs(msg.from,string(msg.message.Body))
+	pcs := c.parsePandaURLs(msg)
 	if len(pcs) > 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
 
@@ -3796,7 +3796,11 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			c.save()
 			return c.introduceUI(draft)
 		}
-		if click.name == "send" { 
+		if click.name == "send" {
+			if len(draft.toIntroduce) + len(draft.toNormal) == 0 {
+				panic("Can't send messge with no recipients") 
+			}
+
 			draft.body = click.textViews["body"]
 			if r,err := c.composeUIsend(draft); err == nil { return r }
 		}

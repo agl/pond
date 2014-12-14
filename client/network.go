@@ -157,7 +157,9 @@ func (c *client) sendDraft(draft *Draft) ([]*queuedMessage, error) {
 			c.contactListFromIdSet(draft.toNormal), true )
 	urls := append(urlsIntroduce,urlsNormal...)
 	for i, to := range append(draft.toIntroduce,draft.toNormal...) {
-		draft.body = body + introducePandaMessageDesc + urls[i]
+		if len(draft.toIntroduce) > 0 {
+			draft.body = body + introducePandaMessageDesc + urls[i]
+		}
 		out, err := c.sendDraftTo(draft,c.contacts[to])
 		if err != nil {
 			if i == 0 {

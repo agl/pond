@@ -182,7 +182,7 @@ func (c *client) fixProposedContactName(pc ProposedContact,sender uint64) {
 // Returns a list of ProposedContacts from which to create add contact buttons.
 // We allow contacts to be added even if they fail most checks here because
 // maybe they're the legit contact and the existing one is bad.
-func (c *client) parsePandaURLs(sender uint64,body string) ([]ProposedContact) {
+func (c *client) parsePandaURLsText(sender uint64,body string) ([]ProposedContact) {
 	var l []ProposedContact
 	re := regexp.MustCompile("(pond-introduce-panda)://([^/]+)/([^/]+)/([0-9A-Fa-f]{64})/")
 	ms := re.FindAllStringSubmatch(body,-1)  // -1 means find all
@@ -225,6 +225,15 @@ func (c *client) parsePandaURLs(sender uint64,body string) ([]ProposedContact) {
 		l = append(l,pc)
 	}
 	return l
+}
+
+func (c *client) parsePandaURLs(msg *InboxMessage) ([]ProposedContact) {
+	var body string
+	// msg.message could be nil if we're in a half paired message situation
+	if msg.message != nil {
+		body = string(msg.message.Body)
+	}
+	return c.parsePandaURLsText(msg.from,body)
 }
 
 // Add a ProposedContact using PANDA once by building panda.SharedSecret and

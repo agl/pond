@@ -1680,7 +1680,7 @@ Handle:
 			return
 		}
 
-		pcs := c.parsePandaURLs(msg.from,string(msg.message.Body))
+		pcs := c.parsePandaURLs(msg)
 		for i, pc := range pcs {
 			if cmd.Index == "*" || cmd.Index == pc.name || 
 			   cmd.Index == fmt.Sprintf("%d",i) {
@@ -1877,7 +1877,7 @@ func (c *cliClient) showInbox(msg *InboxMessage) {
 	c.term.Write([]byte(terminalEscape(string(msgText), true /* line breaks ok */)))
 	c.Printf("\n")
 
-	pcs := c.parsePandaURLs(msg.from,string(msg.message.Body))
+	pcs := c.parsePandaURLs(msg)
 	if len(pcs) > 0 {
 		c.Printf("%s Introduced contacts.  Add with greet command.\n", termPrefix)
 	}
