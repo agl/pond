@@ -1,6 +1,6 @@
 // +build !nogui,!linux
 
-// Any packages 
+// Any build options that posses their own createErasureStorage should be excluded above.
 
 package main
 
