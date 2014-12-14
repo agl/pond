@@ -3238,7 +3238,7 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 
 	// We modify overSize in updateSend() and updateUsage()
 	// We modify usageMessage in updateUsage() but do not use it currently
-	usageMessage, overSize := draft.usageString()
+	usageMessage, overSize := c.usageString(draft)
 
 	lhs := VBox{
 		children: []Widget{
@@ -3542,7 +3542,8 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 	}
 
 	updateUsage := func() {
-		usageMessage, overSize = draft.usageString()
+		// We should avoid marshaling the attachments with every keypress here
+		usageMessage, overSize = c.usageString(draft)
 		c.gui.Actions() <- SetText{name: "usage", text: usageMessage}
 		color := uint32(colorBlack)
 		if overSize { color = colorRed } 
@@ -3680,7 +3681,8 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			introduce := len(draft.toIntroduce) > 0 && len(draft.toNormal) == 0
 			toBoxAddEntry(contact.id,introduce)
 			toBoxUpdateCombo()
-			updateSend()
+			updateUsage()
+			// updateSend()
 			introduceSensitivity()
 			c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
 			c.gui.Signal()
@@ -3697,7 +3699,8 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 				toBoxAddExplain()
 			}
 			toBoxUpdateCombo()
-			updateSend()
+			updateUsage()
+			// updateSend()
 			introduceSensitivity()
 			c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
 			c.gui.Signal()
@@ -3715,7 +3718,8 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 				addIdSet(&draft.toNormal,id)
 				removeIdSet(&draft.toIntroduce,id)
 			}
-			// c.gui.Signal()
+			updateUsage()
+			c.gui.Signal()
 			continue
 		}
 
