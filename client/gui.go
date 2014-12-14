@@ -1661,6 +1661,7 @@ NextEvent:
 			c.inboxUI.SetIndicator(msg.id, indicatorNone)
 			c.gui.Actions() <- UIState{uiStateInbox}
 			c.gui.Signal()
+			c.save()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
 			return c.composeUI(c.newDraftUI(nil,nil,msg))
