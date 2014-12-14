@@ -1041,7 +1041,7 @@ func (c *cliClient) showQueueState() {
 }
 
 func (c *cliClient) printDraftSize(draft *Draft) {
-	usageString, oversize := draft.usageString()
+	usageString, oversize := c.usageString(draft)
 	prefix := termPrefix
 	if oversize {
 		prefix = termErrPrefix

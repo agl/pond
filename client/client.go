@@ -608,7 +608,7 @@ func prettyNumber(n uint64) string {
 
 // usageString returns a description of the amount of space taken up by a body
 // with the given contents and a bool indicating overflow.
-func (draft *Draft) usageString() (string, bool) {
+func (c *client) usageString(draft *Draft) (string, bool) {
 	var replyToId *uint64
 	if draft.inReplyTo != 0 {
 		replyToId = proto.Uint64(1)
@@ -633,10 +633,19 @@ func (draft *Draft) usageString() (string, bool) {
 	}
 	l := uint64(len(serialized))
 
-	// We must overestimate the size of introductions
-	to := append(draft.toNormal, draft.toIntroduce...)
-	expectedContactNameSize := 30
-	l += uint64((len(to) - 1) * (len("pond-introduce-panda://") + 64 + expectedContactNameSize))
+	// We estimate the size by the larges introduction message size
+	if len(draft.toIntroduce) > 0 && len(draft.toIntroduce)+len(draft.toNormal) > 1 {
+		urlsIntroduce, urlsNormal := c.introducePandaMessages(
+			c.contactListFromIdSet(draft.toIntroduce),
+			c.contactListFromIdSet(draft.toNormal), false)
+		var m int = 0
+		for _, s := range append(urlsIntroduce, urlsNormal...) {
+			if len(s) > m {
+				m = len(s)
+			}
+		}
+		l += uint64(len(introducePandaMessageDesc) + m)
+	}
 
 	s := fmt.Sprintf("%s of %s bytes", prettyNumber(l), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
