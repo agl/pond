@@ -140,24 +140,23 @@ func (c *client) introducePandaMessages_group(cnts contactList) ([]string) {
 */
 
 
-
 type ProposedContact struct {
 	sharedSecret string
 	theirIdentityPublic [32]byte
 	name string
 	id uint64  // zero if new or failed
+	onGreet func(*Contact) ()
 }
 
-func (c *client) fixProposedContactName(pc ProposedContact,sender uint64) {
-	// We should consider using JaroWinkler or Levenshtein from 
+func (c *client) fixProposedContactName(pc *ProposedContact,sender uint64) {
+	// We should a fuzzy test for name similarity, maybe based on n-grams
+	// or maybe a fast fuzzy spelling suggestion algorithm 
+	//   https://github.com/sajari/fuzzy
+	// or even JaroWinkler or Levenshtein from 
 	// "github.com/antzucaro/matchr" here :
 	//   https://godoc.org/github.com/antzucaro/matchr#JaroWinkler
-	// Or maybe a fast fuzzy spelling suggestion algorithm 
-	//   https://github.com/sajari/fuzzy
-	// for _, contact := range c.contacts { }
-	// At least we now alphabatize the contacts listing however.
 	var s string
-	_,ok := c.contactByName(pc.name)
+	conflict0,ok := c.contactByName(pc.name)
 	if !ok { return }
 	for {
 		var buf [2]byte
@@ -166,16 +165,34 @@ func (c *client) fixProposedContactName(pc ProposedContact,sender uint64) {
 		_,ok := c.contactByName(pc.name + s)
 		if !ok { break }
 	}
-	c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure nothing nefarious happened.",
-		pc.name,s); 
+	c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure %s hasn't done anything nefarious here.",
+		pc.name,s,c.contacts[sender].name); 
 	pc.name += s
 
-	// if userlog {
-	// 	e := fmt.Sprintf("%s suggested the name %s for %s.  Verify that nothing nefarious happened and rename them if desired.", 
-	//		c.contacts[sender].name,pc.name,c.contacts[id1].name); 
-	//	c.logEvent(c.contacts[id1],e)
-	//	c.logEvent(c.contacts[sender],e)
-	// } // We need to be able to logEvent to the proposed contact here too.
+	e := fmt.Sprintf("%s suggested the name %s for %s.", 
+		c.contacts[sender].name,conflict0.name,pc.name);
+	if i := conflict0.introducedBy; 
+	   i != 0 && i != disableDarkWebOfTrust {
+		e += fmt.Sprintf(" Also %s was previously introduced by %s. Do you trust both %s and %s?",
+			conflict0.name,c.contacts[i].name,
+			c.contacts[sender].name,c.contacts[i].name)
+	} else {
+		e += fmt.Sprintf(" Do you trust %s?",c.contacts[i].name)
+	}
+
+	id0 := conflict0.id
+	pc.onGreet = func(cnt *Contact) {
+		c.logEvent(cnt,e)
+		logEvent := func(id uint64) {
+			if cnt,ok := c.contacts[id]; ok { 
+				c.logEvent(cnt,e) 
+			} else {
+				c.log.Printf("Failed logEvent : Contact involved in introduction was deleted?");
+			}
+		}
+		logEvent(sender)
+		logEvent(id0)
+	}
 }
 
 // Finds and parses all the pond-introduce-panda URLs in a message body.
@@ -220,7 +237,7 @@ func (c *client) parsePandaURLsText(sender uint64,body string) ([]ProposedContac
 		} else {
 			pc.name = n
 		}
-		c.fixProposedContactName(pc,sender)
+		c.fixProposedContactName(&pc,sender)
 
 		l = append(l,pc)
 	}
@@ -262,6 +279,7 @@ func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,introducedBy u
 		c.log.Printf("Introduced contact %s is not marked as introduced by %s because %s has keeping such records disabled.\n",
 			pc.name,c.contacts[introducedBy].name,c.contacts[introducedBy].name)
 	}
+	if pc.onGreet != nil { pc.onGreet(contact) }
 
 	stack := &panda.CardStack{
 		NumDecks: 1,
