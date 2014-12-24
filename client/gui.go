@@ -2049,8 +2049,10 @@ func (c *guiClient) identityUI() interface{} {
 }
 
 func allBytesZero(bs []byte) bool {
-	for _,b := range bs {
-		if b != 0 { return false }
+	for _, b := range bs {
+		if b != 0 {
+			return false
+		}
 	}
 	return true
 }
@@ -2068,14 +2070,14 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
 	}
-	if ! allBytesZero(contact.theirLastDHPublic[:]) {
+	if !allBytesZero(contact.theirLastDHPublic[:]) {
 		entries = append(entries,
 			nvEntry{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
-			nvEntry{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])} )
+			nvEntry{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])})
 	}
 	entries = append(entries,
 		nvEntry{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
-		nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)} )
+		nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)})
 
 	var pandaMessage string
 
