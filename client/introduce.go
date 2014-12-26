@@ -62,7 +62,7 @@ func (c *client) initSocialGraphRecords(contact *Contact) {
 }
 
 func (c *client) deleteSocialGraphRecords(id uint64) {
-	for id, contact := range c.contacts {
+	for _, contact := range c.contacts {
 		if contact.introducedBy == id {
 			contact.introducedBy = 0
 		}
