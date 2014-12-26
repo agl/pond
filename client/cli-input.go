@@ -48,6 +48,9 @@ var cliCommands = []cliCommand{
 	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", 0},
 	{"log", logCommand{}, "Show recent log entries", 0},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", 0},
+	{"introduce", introduceContactCommand{}, "Introduce a contact to multiple contacts", contextContact},
+	{"introgroup", introduceContactGroupCommand{}, "Introduce a group of contacts to one another", 0},
+	{"greet", greetContactCommand{}, "Accept an introduction of a proposed new contact", contextInbox},
 	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox", 0},
 	{"queue", showQueueStateCommand{}, "Show the queue", 0},
 	{"quit", quitCommand{}, "Exit Pond", 0},
@@ -90,6 +93,13 @@ type transactNowCommand struct{}
 
 type newContactCommand struct {
 	Name string
+}
+
+type introduceContactCommand struct {}
+type introduceContactGroupCommand struct {}
+
+type greetContactCommand struct {
+	Index string
 }
 
 type renameCommand struct {

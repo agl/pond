@@ -71,6 +71,10 @@ message Contact {
 	repeated Event events = 22;
 
 	optional bool is_pending = 15 [ default = false ];
+
+	optional fixed64 introduced_by = 23;
+	repeated fixed64 verified_by = 24;
+	repeated fixed64 introduced_to = 25;
 }
 
 message RatchetState {
@@ -130,12 +134,21 @@ message Outbox {
 message Draft {
 	required fixed64 id = 1;
 	required int64 created = 2;
-	optional fixed64 to = 3;
+	repeated fixed64 to_normal = 3;
+	repeated fixed64 to_introduce = 8;
 	required string body = 4;
 	optional fixed64 in_reply_to = 5;
 	repeated protos.Message.Attachment attachments = 6;
 	repeated protos.Message.Detachment detachments = 7;
 }
+
+// We propose storing old, alternative, and proposed user names 
+// message AltUserName {
+//	required fixed64 id = 1;
+//	required string name = 2;
+//	required int64 time = 3;
+//	required int reason = 5 
+// }
 
 message State {
 	required bytes identity = 1;

@@ -71,7 +71,7 @@ func (c *client) sendAck(msg *InboxMessage) {
 	}
 
 	id := c.randId()
-	err := c.send(to, &pond.Message{
+	message := &pond.Message{
 		Id:               proto.Uint64(id),
 		Time:             proto.Int64(time.Now().Unix()),
 		Body:             make([]byte, 0),
@@ -79,23 +79,28 @@ func (c *client) sendAck(msg *InboxMessage) {
 		MyNextDh:         myNextDH,
 		InReplyTo:        msg.message.Id,
 		SupportedVersion: proto.Int32(protoVersion),
-	})
-	if err != nil {
-		c.log.Errorf("Error sending message: %s", err)
 	}
+	if err := c.sendTest(message); err != nil {
+		c.log.Errorf("Error sending ACK message: %s", err)
+		return
+	}
+	c.send(to,message)
 }
 
-// send encrypts |message| and enqueues it for transmission.
-func (c *client) send(to *Contact, message *pond.Message) error {
+// Verify that no errors will occur when enqueuing user created messages
+func (c *client) sendTest(message *pond.Message) error {
 	messageBytes, err := proto.Marshal(message)
 	if err != nil {
 		return err
 	}
-
 	if len(messageBytes) > pond.MaxSerializedMessage {
 		return errors.New("message too large")
 	}
+	return nil
+}
 
+// send encrypts |message| and enqueues it for transmission.
+func (c *client) send(to *Contact, message *pond.Message) (*queuedMessage) {
 	out := &queuedMessage{
 		id:      *message.Id,
 		to:      to.id,
@@ -105,32 +110,37 @@ func (c *client) send(to *Contact, message *pond.Message) error {
 	}
 	c.enqueue(out)
 	c.outbox = append(c.outbox, out)
-
-	return nil
+	return out
 }
 
-func (c *client) sendDraft(draft *Draft) (uint64, time.Time, error) {
-	to := c.contacts[draft.to]
-
+func (c *client) sendDraftTo(draft *Draft, to *Contact) (*queuedMessage, error) {
 	// Zero length bodies are ACKs.
 	if len(draft.body) == 0 {
 		draft.body = " "
 	}
 
 	id := c.randId()
-	created := c.Now()
 	message := &pond.Message{
 		Id:               proto.Uint64(id),
-		Time:             proto.Int64(created.Unix()),
+		Time:             proto.Int64(c.Now().Unix()),
 		Body:             []byte(draft.body),
 		BodyEncoding:     pond.Message_RAW.Enum(),
 		Files:            draft.attachments,
 		DetachedFiles:    draft.detachments,
 		SupportedVersion: proto.Int32(protoVersion),
 	}
+	if err := c.sendTest(message); err != nil {
+		return nil, err
+	}
 
 	if r := draft.inReplyTo; r != 0 {
-		message.InReplyTo = proto.Uint64(r)
+		for _, msg := range c.inbox {
+			if msg.id == draft.inReplyTo {
+				r = msg.message.GetId()
+				message.InReplyTo = proto.Uint64(r)
+				break
+			}
+		}
 	}
 
 	if to.ratchet == nil {
@@ -139,8 +149,47 @@ func (c *client) sendDraft(draft *Draft) (uint64, time.Time, error) {
 		message.MyNextDh = nextDHPub[:]
 	}
 
-	err := c.send(to, message)
-	return id, created, err
+	return c.send(to, message), nil
+}
+
+func (c *client) sendDraft(draft *Draft) ([]*queuedMessage, error) {
+	var outs []*queuedMessage
+	var outs_bad []*queuedMessage
+	// var outs_err []error
+
+	body := draft.body
+	urlsIntroduce,urlsNormal := c.introducePandaMessages(
+			c.contactListFromIdSet(draft.toIntroduce),
+			c.contactListFromIdSet(draft.toNormal), true )
+	urls := append(urlsIntroduce,urlsNormal...)
+	for i, to := range append(draft.toIntroduce,draft.toNormal...) {
+		if len(draft.toIntroduce) > 0 {
+			draft.body = body + introducePandaMessageDesc + urls[i]
+		}
+		out, err := c.sendDraftTo(draft,c.contacts[to])
+		if err != nil {
+			if i == 0 {
+				return nil,err 
+			} else {
+				outs_bad = append(outs_bad,out)
+				// outs_err = append(outs_err,err)
+				continue
+			}
+		}
+		outs = append(outs,out)
+	}
+	draft.body = body
+
+	if len(outs_bad) == 0 {
+		return outs, nil
+	}
+	// We could theoretically just call sendTest first thing in sendDraft,
+	// meaning this should be unreachable, but panic gracefully here anyways.
+	for _,out := range outs_bad {
+		c.outboxToDraft(out)
+	}
+	c.save()
+	panic("Only partially enqueued multi-recipient message failed")
 }
 
 // tooLarge returns true if the given message is too large to serialise.

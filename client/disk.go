@@ -106,10 +106,26 @@ func (c *client) unmarshal(state *disk.State) error {
 			}
 		}
 
+		if cont.IntroducedBy != nil {
+			contact.introducedBy = *cont.IntroducedBy
+		}
+		if cont.VerifiedBy != nil && len(cont.VerifiedBy) > 0 {
+			contact.verifiedBy = cont.VerifiedBy
+		}
+		if cont.IntroducedTo != nil && len(cont.IntroducedTo) > 0 {
+			contact.introducedTo = cont.IntroducedTo
+		}
+
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
-			continue
 		}
+
+		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) && !contact.isPending {
+			return errors.New("client: contact missing identity public key")
+		}
+		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
+
+		if contact.isPending == true { continue }
 
 		theirGroup, ok := new(bbssig.Group).Unmarshal(cont.TheirGroup)
 		if !ok {
@@ -128,11 +144,6 @@ func (c *client) unmarshal(state *disk.State) error {
 			return errors.New("client: contact missing public key")
 		}
 		copy(contact.theirPub[:], cont.TheirPub)
-
-		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) {
-			return errors.New("client: contact missing identity public key")
-		}
-		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
 
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
@@ -237,9 +248,14 @@ func (c *client) unmarshal(state *disk.State) error {
 			created:     time.Unix(*m.Created, 0),
 		}
 		c.registerId(draft.id)
-		if m.To != nil {
-			draft.to = *m.To
+
+		if m.ToNormal != nil && len(m.ToNormal) > 0 {
+			draft.toNormal = m.ToNormal
 		}
+		if m.ToIntroduce != nil && len(m.ToIntroduce) > 0 {
+			draft.toIntroduce = m.ToIntroduce
+		}
+
 		if m.InReplyTo != nil {
 			draft.inReplyTo = *m.InReplyTo
 		}
@@ -267,7 +283,12 @@ func (c *client) marshal() []byte {
 			PandaKeyExchange: contact.pandaKeyExchange,
 			PandaError:       proto.String(contact.pandaResult),
 			RevokedUs:        proto.Bool(contact.revokedUs),
+			IntroducedBy:     proto.Uint64(contact.introducedBy),
+			IntroducedTo:     contact.introducedTo,
+			VerifiedBy:       contact.verifiedBy,
 		}
+
+		cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
 			cont.TheirGroup = contact.myGroupKey.Group.Marshal()
@@ -275,7 +296,6 @@ func (c *client) marshal() []byte {
 			cont.TheirPub = contact.theirPub[:]
 			cont.Generation = proto.Uint32(contact.generation)
 
-			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
 		}
@@ -366,10 +386,10 @@ func (c *client) marshal() []byte {
 			Attachments: draft.attachments,
 			Detachments: draft.detachments,
 			Created:     proto.Int64(draft.created.Unix()),
+			ToNormal:    draft.toNormal,
+			ToIntroduce: draft.toIntroduce,
 		}
-		if draft.to != 0 {
-			m.To = proto.Uint64(draft.to)
-		}
+
 		if draft.inReplyTo != 0 {
 			m.InReplyTo = proto.Uint64(draft.inReplyTo)
 		}
