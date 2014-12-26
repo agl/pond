@@ -82,9 +82,16 @@ func (c *client) deleteSocialGraphRecords(id uint64) {
 func (c *client) introducePandaMessages_pair(cnt1, cnt2 *Contact, real bool) (string, string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
 	s := func(cnt *Contact) string {
-		return fmt.Sprintf("pond-introduce-panda://%s/%s/%x/\n",
-			url.QueryEscape(cnt.name), panda_secret,
-			cnt.theirIdentityPublic) // no EncodeToString?
+		v := url.Values{
+			"pandaSecret": {panda_secret},
+			"identity":    {fmt.Sprintf("%x", cnt.theirIdentityPublic)},
+		}
+		u := url.URL{
+			Scheme:   "pond-introduce",
+			Opaque:   url.QueryEscape(cnt.name),
+			RawQuery: v.Encode(),
+		}
+		return u.String() + "#"
 	}
 	if real && cnt1.keepSocialGraphRecords() && cnt2.keepSocialGraphRecords() {
 		addIdSet(&cnt1.introducedTo, cnt2.id)
@@ -205,31 +212,57 @@ func (c *client) fixProposedContactName(pc *ProposedContact, sender uint64) {
 	}
 }
 
-// Finds and parses all the pond-introduce-panda URLs in a message body.
+func parseKnownOpaqueURI(s string) (opaque string, vs url.Values, err error) {
+	u, e := url.Parse(s)
+	opaque = u.Opaque
+	if e != nil {
+		err = e
+	} else {
+		vs, err = url.ParseQuery(u.RawQuery)
+	}
+	return
+}
+
+func singletonValues(values url.Values) bool {
+	for _, l := range values {
+		if len(l) > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// Finds and parses all the pond-introduce URIs in a message body.
 // Returns a list of ProposedContacts from which to create add contact buttons.
 // We allow contacts to be added even if they fail most checks here because
 // maybe they're the legit contact and the existing one is bad.
 func (c *client) parsePandaURLsText(sender uint64, body string) []ProposedContact {
 	var l []ProposedContact
-	re := regexp.MustCompile("(pond-introduce-panda)://([^/]+)/([^/]+)/([0-9A-Fa-f]{64})/")
-	ms := re.FindAllStringSubmatch(body, -1) // -1 means find all
-	const (
-		urlparse_protocol            = 1
-		urlparse_name                = 2
-		urlparse_sharedSecret        = 3
-		urlparse_theirIdentityPublic = 4
-	)
+	re := regexp.MustCompile("pond-introduce:([^& ?#]+)\\?([^& ?#]+)(&([^& ?#]+))*")
+	ms := re.FindAllString(body, -1) // -1 means find all
 	for _, m := range ms {
-		if !panda.IsAcceptableSecretString(m[urlparse_sharedSecret]) {
-			c.log.Printf("Unacceptably weak secret '%s' for %s.",
-				m[urlparse_sharedSecret], m[urlparse_name])
+		opaque, vs, err := parseKnownOpaqueURI(m)
+		if err != nil || !singletonValues(vs) {
+			c.log.Printf("Malformed pond-introduce: URI : %s", m)
+			continue
 		}
 
 		var pc ProposedContact
-		pc.sharedSecret = m[urlparse_sharedSecret]
+		pc.name, err = url.QueryUnescape(opaque)
+		if err != nil {
+			c.log.Printf("Malformed pond-introduce: URI : %s", m)
+			continue
+		}
 
-		if !hexDecodeSafe(pc.theirIdentityPublic[:], m[urlparse_theirIdentityPublic]) {
-			c.log.Printf("Bad public identity %s, skipping.", m[urlparse_theirIdentityPublic])
+		pc.sharedSecret = vs.Get("pandaSecret")
+		if !panda.IsAcceptableSecretString(pc.sharedSecret) {
+			c.log.Printf("Unacceptably weak secret '%s' for %s, continuing.",
+				pc.sharedSecret, pc.name)
+		}
+
+		identity := vs.Get("identity")
+		if !hexDecodeSafe(pc.theirIdentityPublic[:], identity) || len(identity) != 64 {
+			c.log.Printf("Bad public identity %s, skipping.", identity)
 			continue
 		}
 		existing, found := c.contactByIdentity(pc.theirIdentityPublic[:])
@@ -239,13 +272,11 @@ func (c *client) parsePandaURLsText(sender uint64, body string) []ProposedContac
 				addIdSet(&existing.verifiedBy, sender)
 			}
 		}
-
-		n, err := url.QueryUnescape(m[urlparse_name])
-		if err != nil {
-			c.log.Printf("Badly escaped name %s, fix using rename.", m[urlparse_name])
-		} else {
-			pc.name = n
+		if pc.name == "" {
+			c.log.Printf("Empty contact name, using identity %s.", identity)
+			pc.name = identity
 		}
+
 		if !found {
 			c.fixProposedContactName(&pc, sender)
 		}
