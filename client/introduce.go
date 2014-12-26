@@ -155,17 +155,17 @@ func (c *client) fixProposedContactName(pc *ProposedContact,sender uint64) {
 	// or even JaroWinkler or Levenshtein from 
 	// "github.com/antzucaro/matchr" here :
 	//   https://godoc.org/github.com/antzucaro/matchr#JaroWinkler
-	var s string
+	s := ""
 	conflict0,ok := c.contactByName(pc.name)
 	if !ok { return }
+	i := 0
 	for {
-		var buf [2]byte
-		c.randBytes(buf[:])
-		s = fmt.Sprintf("/%s",buf)
+		s = fmt.Sprintf("/%d?",i)
 		_,ok := c.contactByName(pc.name + s)
 		if !ok { break }
+		i++
 	}
-	c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure %s hasn't done anything nefarious here.",
+	c.log.Printf("Another contact is already named %s, appending '%s'.  Rename them, but make sure %s hasn't done anything nefarious here.",
 		pc.name,s,c.contacts[sender].name); 
 	pc.name += s
 
@@ -181,8 +181,8 @@ func (c *client) fixProposedContactName(pc *ProposedContact,sender uint64) {
 	}
 
 	id0 := conflict0.id
-	pc.onGreet = func(cnt *Contact) {
-		c.logEvent(cnt,e)
+	pc.onGreet = func(cnt1 *Contact) {
+		c.logEvent(cnt1,e)
 		logEvent := func(id uint64) {
 			if cnt,ok := c.contacts[id]; ok { 
 				c.logEvent(cnt,e) 
@@ -222,12 +222,11 @@ func (c *client) parsePandaURLsText(sender uint64,body string) ([]ProposedContac
 			c.log.Printf("Bad public identity %s, skipping.",m[urlparse_theirIdentityPublic]); 
 			continue
 		}
-		if c.contacts[sender].keepSocialGraphRecords() {
-			if contact,found := c.contactByIdentity(pc.theirIdentityPublic[:]); found {
-				pc.id = contact.id
-				if contact.introducedBy != sender && contact.keepSocialGraphRecords() {
-					addIdSet(&contact.verifiedBy,sender)
-				}
+		existing,found := c.contactByIdentity(pc.theirIdentityPublic[:])
+		if found && c.contacts[sender].keepSocialGraphRecords() {
+			pc.id = existing.id
+			if existing.introducedBy != sender && existing.keepSocialGraphRecords() {
+				addIdSet(&existing.verifiedBy,sender)
 			}
 		}
 
@@ -237,7 +236,7 @@ func (c *client) parsePandaURLsText(sender uint64,body string) ([]ProposedContac
 		} else {
 			pc.name = n
 		}
-		c.fixProposedContactName(&pc,sender)
+		if !found { c.fixProposedContactName(&pc,sender) }
 
 		l = append(l,pc)
 	}
