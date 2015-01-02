@@ -2,9 +2,10 @@ package bn256cgo
 
 import (
 	"bytes"
-	"code.google.com/p/go.crypto/bn256"
 	"math/big"
 	"testing"
+
+	"golang.org/x/crypto/bn256"
 )
 
 func TestPowers(t *testing.T) {

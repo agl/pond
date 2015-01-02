@@ -76,9 +76,6 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/ed25519/extra25519"
 	"github.com/agl/pond/bbssig"
@@ -86,6 +83,9 @@ import (
 	"github.com/agl/pond/client/ratchet"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 const (

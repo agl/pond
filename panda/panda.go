@@ -14,12 +14,12 @@ import (
 	"strings"
 	"sync"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/hkdf"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/go.crypto/scrypt"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/panda/rijndael"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/crypto/scrypt"
 
 	panda_proto "github.com/agl/pond/panda/proto"
 )

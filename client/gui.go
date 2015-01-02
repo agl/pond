@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
 )
 
 const haveGUI = true

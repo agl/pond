@@ -3,7 +3,6 @@ package panda
 import (
 	"bufio"
 	"bytes"
-	"code.google.com/p/go.net/proxy"
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
@@ -14,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 type HTTPMeetingPlace struct {

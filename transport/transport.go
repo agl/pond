@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // blockSize is the size of the blocks of data that we'll send and receive when

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/goprotobuf/proto"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
 
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/server/protos"

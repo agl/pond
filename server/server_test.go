@@ -17,14 +17,14 @@ import (
 	"testing"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/salsa20"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/salsa20"
 
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
+	"github.com/golang/protobuf/proto"
 )
 
 type TestServer struct {

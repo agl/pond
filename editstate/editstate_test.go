@@ -5,8 +5,8 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
+	"github.com/golang/protobuf/proto"
 )
 
 func TestSerializedDeserialize(t *testing.T) {

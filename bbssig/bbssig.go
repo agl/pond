@@ -28,7 +28,7 @@ import (
 	"io"
 	"math/big"
 
-	"code.google.com/p/go.crypto/bn256"
+	"golang.org/x/crypto/bn256"
 )
 
 // SignatureSize is the size, in bytes, of the signatures produced by this

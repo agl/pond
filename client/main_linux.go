@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"code.google.com/p/go.crypto/scrypt"
+	"golang.org/x/crypto/scrypt"
 )
 
 func main() {
