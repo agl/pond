@@ -1151,6 +1151,10 @@ func (c *client) removeQueuedMessage(index int) {
 	c.queue = newQueue
 }
 
+// If sending a message fails for any reason then we want to move the
+// message to the end of the queue so that we never clog the queue with
+// an unsendable message. However, we also don't want to reorder messages 
+// so all messages to the same contact are moved to the end of the queue.
 func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 	// c.queueMutex must be held before calling this function.
 
