@@ -920,9 +920,17 @@ func (c *client) transact() {
 		// started sending.
 		c.messageSentChan <- messageSendResult{}
 
+		connTrouble := func() {
+			if !isFetch {
+				c.queueMutex.Lock()
+				c.moveContactsMessagesToEndOfQueue(head.to)
+				c.queueMutex.Unlock()
+			}
+		}
 		conn, err := c.dialServer(server, useAnonymousIdentity)
 		if err != nil {
 			c.log.Printf("Failed to connect to %s: %s", server, err)
+			connTrouble()
 			continue
 		}
 		if lastWasSend && req == nil {
@@ -936,12 +944,14 @@ func (c *client) transact() {
 		}
 		if err := conn.WriteProto(req); err != nil {
 			c.log.Printf("Failed to send to %s: %s", server, err)
+			connTrouble()
 			continue
 		}
 
 		reply := new(pond.Reply)
 		if err := conn.ReadProto(reply); err != nil {
 			c.log.Printf("Failed to read from %s: %s", server, err)
+			connTrouble()
 			continue
 		}
 
@@ -967,13 +977,6 @@ func (c *client) transact() {
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
 			} else {
-				// If the send failed for any reason then we
-				// want to move the message to the end of the
-				// queue so that we never clog the queue with
-				// an unsendable message. However, we also
-				// don't want to reorder messages so all
-				// messages to the same contact are moved to
-				// the end of the queue.
 				c.moveContactsMessagesToEndOfQueue(head.to)
 				c.queueMutex.Unlock()
 
