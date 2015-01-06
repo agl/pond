@@ -920,32 +920,46 @@ func (c *client) transact() {
 		// started sending.
 		c.messageSentChan <- messageSendResult{}
 
-		conn, err := c.dialServer(server, useAnonymousIdentity)
-		if err != nil {
-			c.log.Printf("Failed to connect to %s: %s", server, err)
-			continue
-		}
-		if lastWasSend && req == nil {
-			resultChan := make(chan *pond.Request, 1)
-			c.signingRequestChan <- signingRequest{head, resultChan}
-			req = <-resultChan
-			if req == nil {
-				conn.Close()
-				continue
+		sendRecv := func() (*pond.Reply, bool) {
+			conn, err := c.dialServer(server, useAnonymousIdentity)
+			if err != nil {
+				c.log.Printf("Failed to connect to %s: %s", server, err)
+				return nil, false
 			}
-		}
-		if err := conn.WriteProto(req); err != nil {
-			c.log.Printf("Failed to send to %s: %s", server, err)
-			continue
+			defer conn.Close()
+
+			if lastWasSend && req == nil {
+				resultChan := make(chan *pond.Request, 1)
+				c.signingRequestChan <- signingRequest{head, resultChan}
+				req = <-resultChan
+				if req == nil {
+					return nil, false
+				}
+			}
+
+			if err := conn.WriteProto(req); err != nil {
+				c.log.Printf("Failed to send to %s: %s", server, err)
+				return nil, false
+			}
+
+			reply := new(pond.Reply)
+			if err := conn.ReadProto(reply); err != nil {
+				c.log.Printf("Failed to read from %s: %s", server, err)
+				return nil, false
+			}
+
+			return reply, true
 		}
 
-		reply := new(pond.Reply)
-		if err := conn.ReadProto(reply); err != nil {
-			c.log.Printf("Failed to read from %s: %s", server, err)
+		reply, ok := sendRecv()
+		if !ok {
+			if !isFetch {
+				c.queueMutex.Lock()
+				c.moveContactsMessagesToEndOfQueue(head.to)
+				c.queueMutex.Unlock()
+			}
 			continue
 		}
-
-		conn.Close()
 
 		if !isFetch {
 			c.queueMutex.Lock()
@@ -967,13 +981,6 @@ func (c *client) transact() {
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
 			} else {
-				// If the send failed for any reason then we
-				// want to move the message to the end of the
-				// queue so that we never clog the queue with
-				// an unsendable message. However, we also
-				// don't want to reorder messages so all
-				// messages to the same contact are moved to
-				// the end of the queue.
 				c.moveContactsMessagesToEndOfQueue(head.to)
 				c.queueMutex.Unlock()
 
