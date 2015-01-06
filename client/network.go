@@ -920,42 +920,46 @@ func (c *client) transact() {
 		// started sending.
 		c.messageSentChan <- messageSendResult{}
 
-		connTrouble := func() {
+		sendRecv := func() (*pond.Reply, bool) {
+			conn, err := c.dialServer(server, useAnonymousIdentity)
+			if err != nil {
+				c.log.Printf("Failed to connect to %s: %s", server, err)
+				return nil, false
+			}
+			defer conn.Close()
+
+			if lastWasSend && req == nil {
+				resultChan := make(chan *pond.Request, 1)
+				c.signingRequestChan <- signingRequest{head, resultChan}
+				req = <-resultChan
+				if req == nil {
+					return nil, false
+				}
+			}
+
+			if err := conn.WriteProto(req); err != nil {
+				c.log.Printf("Failed to send to %s: %s", server, err)
+				return nil, false
+			}
+
+			reply := new(pond.Reply)
+			if err := conn.ReadProto(reply); err != nil {
+				c.log.Printf("Failed to read from %s: %s", server, err)
+				return nil, false
+			}
+
+			return reply, true
+		}
+
+		reply, ok := sendRecv()
+		if !ok {
 			if !isFetch {
 				c.queueMutex.Lock()
 				c.moveContactsMessagesToEndOfQueue(head.to)
 				c.queueMutex.Unlock()
 			}
-		}
-		conn, err := c.dialServer(server, useAnonymousIdentity)
-		if err != nil {
-			c.log.Printf("Failed to connect to %s: %s", server, err)
-			connTrouble()
 			continue
 		}
-		if lastWasSend && req == nil {
-			resultChan := make(chan *pond.Request, 1)
-			c.signingRequestChan <- signingRequest{head, resultChan}
-			req = <-resultChan
-			if req == nil {
-				conn.Close()
-				continue
-			}
-		}
-		if err := conn.WriteProto(req); err != nil {
-			c.log.Printf("Failed to send to %s: %s", server, err)
-			connTrouble()
-			continue
-		}
-
-		reply := new(pond.Reply)
-		if err := conn.ReadProto(reply); err != nil {
-			c.log.Printf("Failed to read from %s: %s", server, err)
-			connTrouble()
-			continue
-		}
-
-		conn.Close()
 
 		if !isFetch {
 			c.queueMutex.Lock()
