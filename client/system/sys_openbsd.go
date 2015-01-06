@@ -13,7 +13,7 @@ import (
 )
 
 func processMountOutput(f func(line string) error) error {
-	contents, err := exec.Command("mount").CombinedOutput()
+	contents, err := exec.Command("/sbin/mount").CombinedOutput()
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func findSafeTempDir() {
 	suggested := os.TempDir()
 	preferred := []string{suggested}
 	var otherOptions []string
-	otherOptions = append(otherOptions, "/tmp", "/var/tmp")
+	otherOptions = append(otherOptions, "/tmp")
 	for _, d := range otherOptions {
 		if suggested != d {
 			preferred = append(preferred, d)
