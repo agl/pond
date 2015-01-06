@@ -28,7 +28,7 @@ func processMountOutput(f func(line string) error) error {
 			return err
 		}
 		if isPrefix {
-			return errors.New("file contains a line that it too long to process")
+			return errors.New("system: file contains a line that it too long to process")
 		}
 		if err = f(string(line)); err != nil {
 			return err
@@ -76,7 +76,7 @@ func findSafeTempDir() {
 	})
 
 	if err == nil && len(candidates) == 0 {
-		err = errors.New("no writable tmpfs directories found")
+		err = errors.New("system: no writable tmpfs directories found")
 	}
 
 	if err != nil {
