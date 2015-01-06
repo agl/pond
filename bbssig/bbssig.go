@@ -28,24 +28,24 @@ import (
 	"io"
 	"math/big"
 
-	"code.google.com/p/go.crypto/bn256"
+	"golang.org/x/crypto/bn256"
 )
 
 // SignatureSize is the size, in bytes, of the signatures produced by this
 // package. (3072 bits.)
-const SignatureSize = 12*32
+const SignatureSize = 12 * 32
 
 // Group represents a public key in the group signature scheme. Signatures by
 // the group members can be verified given the Group.
 type Group struct {
-	g1, h, u, v *bn256.G1
-	g2, w *bn256.G2
+	g1, h, u, v           *bn256.G1
+	g2, w                 *bn256.G2
 	ehw, ehg2, minusEg1g2 *bn256.GT
 }
 
 // Marshal serializes g to a slice of bytes, suitable for Unmarshal.
 func (g *Group) Marshal() []byte {
-	out := make([]byte, 0, 4*2*32 + 2*2*2*32)
+	out := make([]byte, 0, 4*2*32+2*2*2*32)
 	out = append(out, g.g1.Marshal()...)
 	out = append(out, g.h.Marshal()...)
 	out = append(out, g.u.Marshal()...)
@@ -60,28 +60,28 @@ func (g *Group) Marshal() []byte {
 // that aren't included in the serialisation, Unmarshal does significant
 // computation.
 func (g *Group) Unmarshal(b []byte) (*Group, bool) {
-	if len(b) != 4*2*32 + 2*2*2*32 {
+	if len(b) != 4*2*32+2*2*2*32 {
 		return nil, false
 	}
 	var ok bool
-	if g.g1, ok = new(bn256.G1).Unmarshal(b[0*2*32:1*2*32]); !ok {
+	if g.g1, ok = new(bn256.G1).Unmarshal(b[0*2*32 : 1*2*32]); !ok {
 		return nil, false
 	}
-	if g.h, ok = new(bn256.G1).Unmarshal(b[1*2*32:2*2*32]); !ok {
+	if g.h, ok = new(bn256.G1).Unmarshal(b[1*2*32 : 2*2*32]); !ok {
 		return nil, false
 	}
-	if g.u, ok = new(bn256.G1).Unmarshal(b[2*2*32:3*2*32]); !ok {
+	if g.u, ok = new(bn256.G1).Unmarshal(b[2*2*32 : 3*2*32]); !ok {
 		return nil, false
 	}
-	if g.v, ok = new(bn256.G1).Unmarshal(b[3*2*32:4*2*32]); !ok {
+	if g.v, ok = new(bn256.G1).Unmarshal(b[3*2*32 : 4*2*32]); !ok {
 		return nil, false
 	}
 
 	b = b[4*2*32:]
-	if g.g2, ok = new(bn256.G2).Unmarshal(b[0*2*2*32:1*2*2*32]); !ok {
+	if g.g2, ok = new(bn256.G2).Unmarshal(b[0*2*2*32 : 1*2*2*32]); !ok {
 		return nil, false
 	}
-	if g.w, ok = new(bn256.G2).Unmarshal(b[1*2*2*32:2*2*2*32]); !ok {
+	if g.w, ok = new(bn256.G2).Unmarshal(b[1*2*2*32 : 2*2*2*32]); !ok {
 		return nil, false
 	}
 
@@ -103,7 +103,7 @@ func (g *Group) precompute() {
 type PrivateKey struct {
 	*Group
 	xi1, xi2 *big.Int
-	gamma *big.Int
+	gamma    *big.Int
 }
 
 // Marshal serializes priv to a slice of bytes, suitable for Unmarshal.
@@ -123,9 +123,9 @@ func (priv *PrivateKey) Unmarshal(g *Group, b []byte) (*PrivateKey, bool) {
 	}
 
 	priv.Group = g
-	priv.xi1 = new(big.Int).SetBytes(b[0*32:1*32])
-	priv.xi2 = new(big.Int).SetBytes(b[1*32:2*32])
-	priv.gamma = new(big.Int).SetBytes(b[2*32:3*32])
+	priv.xi1 = new(big.Int).SetBytes(b[0*32 : 1*32])
+	priv.xi2 = new(big.Int).SetBytes(b[1*32 : 2*32])
+	priv.gamma = new(big.Int).SetBytes(b[2*32 : 3*32])
 
 	return priv, true
 }
@@ -162,7 +162,7 @@ func (mem *MemberKey) Unmarshal(g *Group, b []byte) (*MemberKey, bool) {
 
 	var ok bool
 	mem.Group = g
-	mem.x = new(big.Int).SetBytes(b[0*32:1*32])
+	mem.x = new(big.Int).SetBytes(b[0*32 : 1*32])
 	if mem.a, ok = new(bn256.G1).Unmarshal(b[1*32:]); !ok {
 		return nil, false
 	}
@@ -363,20 +363,20 @@ func (g *Group) Verify(digest []byte, hashFunc hash.Hash, sig []byte) bool {
 	if !ok {
 		return false
 	}
-	t2, ok := new(bn256.G1).Unmarshal(sig[2*32:4*32])
+	t2, ok := new(bn256.G1).Unmarshal(sig[2*32 : 4*32])
 	if !ok {
 		return false
 	}
-	t3, ok := new(bn256.G1).Unmarshal(sig[4*32:6*32])
+	t3, ok := new(bn256.G1).Unmarshal(sig[4*32 : 6*32])
 	if !ok {
 		return false
 	}
-	c := new(big.Int).SetBytes(sig[6*32:7*32])
-	salpha := new(big.Int).SetBytes(sig[7*32:8*32])
-	sbeta := new(big.Int).SetBytes(sig[8*32:9*32])
-	sx := new(big.Int).SetBytes(sig[9*32:10*32])
-	sdelta1 := new(big.Int).SetBytes(sig[10*32:11*32])
-	sdelta2 := new(big.Int).SetBytes(sig[11*32:12*32])
+	c := new(big.Int).SetBytes(sig[6*32 : 7*32])
+	salpha := new(big.Int).SetBytes(sig[7*32 : 8*32])
+	sbeta := new(big.Int).SetBytes(sig[8*32 : 9*32])
+	sx := new(big.Int).SetBytes(sig[9*32 : 10*32])
+	sdelta1 := new(big.Int).SetBytes(sig[10*32 : 11*32])
+	sdelta2 := new(big.Int).SetBytes(sig[11*32 : 12*32])
 
 	r1 := new(bn256.G1).ScalarMult(g.u, salpha)
 	tmp := new(big.Int).Neg(c)
@@ -448,11 +448,11 @@ func (priv *PrivateKey) Open(sig []byte) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	t2, ok := new(bn256.G1).Unmarshal(sig[2*32:4*32])
+	t2, ok := new(bn256.G1).Unmarshal(sig[2*32 : 4*32])
 	if !ok {
 		return nil, false
 	}
-	t3, ok := new(bn256.G1).Unmarshal(sig[4*32:6*32])
+	t3, ok := new(bn256.G1).Unmarshal(sig[4*32 : 6*32])
 	if !ok {
 		return nil, false
 	}
@@ -470,8 +470,8 @@ func (priv *PrivateKey) Open(sig []byte) ([]byte, bool) {
 // be applied to update a member private key and also to a group to create a
 // new group that does not include the revoked member.
 type Revocation struct {
-	x *big.Int
-	a *bn256.G1
+	x     *big.Int
+	a     *bn256.G1
 	aStar *bn256.G2
 }
 
@@ -504,8 +504,8 @@ func (r *Revocation) Unmarshal(b []byte) (*Revocation, bool) {
 	if !ok {
 		return nil, false
 	}
-	r.x = new(big.Int).SetBytes(b[2*32:3*32])
-	r.aStar, ok = new(bn256.G2).Unmarshal(b[3*32:7*32])
+	r.x = new(big.Int).SetBytes(b[2*32 : 3*32])
+	r.aStar, ok = new(bn256.G2).Unmarshal(b[3*32 : 7*32])
 	if !ok {
 		return nil, false
 	}

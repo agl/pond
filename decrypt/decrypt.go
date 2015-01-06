@@ -11,9 +11,9 @@ import (
 	"io/ioutil"
 	"os"
 
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 func main() {

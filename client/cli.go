@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"code.google.com/p/go.crypto/ssh/terminal"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/client/system"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const haveCLI = true

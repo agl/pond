@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"code.google.com/p/goprotobuf/proto"
 	panda "github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
 )
 
 // clientLogToStderr controls whether the TestClients will log to stderr during

@@ -4,11 +4,11 @@ import (
 	"errors"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
 )
 
 // erasureRotationTime is the amount of time that we'll use a single erasure

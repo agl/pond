@@ -1,6 +1,6 @@
 package protos
 
-import "code.google.com/p/go.crypto/nacl/secretbox"
+import "golang.org/x/crypto/nacl/secretbox"
 
 // TransportSize is the number of bytes that all payloads are padded to before
 // sending on the network.

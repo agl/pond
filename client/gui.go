@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
 )
 
 const haveGUI = true
@@ -2048,6 +2048,15 @@ func (c *guiClient) identityUI() interface{} {
 	panic("unreachable")
 }
 
+func allBytesZero(bs []byte) bool {
+	for _, b := range bs {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *guiClient) showContact(id uint64) interface{} {
 	contact := c.contacts[id]
 	if contact.isPending && len(contact.pandaKeyExchange) == 0 && len(contact.pandaResult) == 0 {
@@ -2060,11 +2069,15 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		{"SERVER", contact.theirServer},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
-		{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
-		{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
-		{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
-		{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
 	}
+	if !allBytesZero(contact.theirLastDHPublic[:]) {
+		entries = append(entries,
+			nvEntry{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+			nvEntry{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])})
+	}
+	entries = append(entries,
+		nvEntry{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+		nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)})
 
 	var pandaMessage string
 

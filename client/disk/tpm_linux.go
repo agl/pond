@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/pond/client/tpm"
+	"github.com/golang/protobuf/proto"
 )
 
 func init() {
@@ -221,5 +221,5 @@ func (t *TPM) Destroy(key *[kdfKeyLen]byte) error {
 	}
 
 	nvram.Index = t.index
-	return nvram.Destroy();
+	return nvram.Destroy()
 }

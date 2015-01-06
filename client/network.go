@@ -18,14 +18,14 @@ import (
 	"strings"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/box"
-	"code.google.com/p/go.net/proxy"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/pond/bbssig"
 	pond "github.com/agl/pond/protos"
 	"github.com/agl/pond/transport"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/net/proxy"
 )
 
 const (
