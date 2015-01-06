@@ -1661,9 +1661,7 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
 		return
 	}
-	c.Printf("Compose... getting SafeTempDir..\n")
 	tempDir, err := system.SafeTempDir()
-	c.Printf("Got tempdir %s\n", tempDir)
 	if err != nil {
 		c.Printf("%s Failed to get safe temp directory: %s\n", termErrPrefix, err)
 		return
