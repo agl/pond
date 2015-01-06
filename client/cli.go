@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/agl/pond/client/disk"
-	"github.com/agl/pond/client/system"
+	"github.com/nevun/pond/client/system"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
 	"github.com/golang/protobuf/proto"
@@ -1661,8 +1661,9 @@ func (c *cliClient) compose(to *Contact, draft *Draft, inReplyTo *InboxMessage) 
 		c.Printf("%s Cannot send message to pending contact\n", termErrPrefix)
 		return
 	}
-
+	c.Printf("Compose... getting SafeTempDir..\n")
 	tempDir, err := system.SafeTempDir()
+	c.Printf("Got tempdir %s\n", tempDir)
 	if err != nil {
 		c.Printf("%s Failed to get safe temp directory: %s\n", termErrPrefix, err)
 		return
