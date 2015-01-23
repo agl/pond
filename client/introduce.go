@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net/url"
-	"regexp"
 	"sort"
+	// "net/url"
+	// "regexp"
 
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
@@ -240,6 +240,7 @@ func (c *client) checkProposedContact(pc *ProposedContact, sender uint64) {
 	}
 }
 
+/*
 func parseKnownOpaqueURI(s string) (opaque string, vs url.Values, err error) {
 	u, e := url.Parse(s)
 	opaque = u.Opaque
@@ -296,6 +297,7 @@ func (c *client) parsePandaURLs(sender uint64, body string) []ProposedContact {
 	}
 	return l
 }
+*/
 
 // Builds list of ProposedContacts from which to create greet contact buttons.
 // We allow contacts to be added even if they fail most checks here because
@@ -324,8 +326,8 @@ func (c *client) observeIntroductions(msg *InboxMessage) []ProposedContact {
 	}
 	// We sort mostly just to keep the tests deterministic
 	sort.Sort(ProposedContacts(l))
-
-	return append(l, c.parsePandaURLs(msg.from, string(msg.message.Body))...)
+	return l
+	// return append(l, c.parsePandaURLs(msg.from, string(msg.message.Body))...)
 }
 
 // Add a ProposedContact using PANDA once by building panda.SharedSecret and
