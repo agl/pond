@@ -140,6 +140,7 @@ message Draft {
 	optional fixed64 in_reply_to = 5;
 	repeated protos.Message.Attachment attachments = 6;
 	repeated protos.Message.Detachment detachments = 7;
+	// repeated protos.Message.Introduction = 8;
 }
 
 // We propose storing old, alternative, and proposed user names 

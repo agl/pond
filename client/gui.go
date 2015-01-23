@@ -1329,7 +1329,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		attachmentPrefix         = "attachment-"
 	)
 
-	pcs := c.parsePandaURLs(msg)
+	pcs := c.observeIntroductions(msg)
 	if len(pcs) > 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
 
@@ -1610,8 +1610,14 @@ NextEvent:
 				panic("invalid greet command")
 			}
 			contact := c.beginProposedPandaKeyExchange(pcs[i], msg.from)
-			c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
-			c.contactsUI.Select(contact.id)
+			if contact != nil {
+				c.contactsUI.Add(contact.id, contact.name, "pending", indicatorNone)
+				c.contactsUI.Select(contact.id)
+			} else {
+				fmt.Printf(" FUCK!\n")
+				// Internal error so go to log or set its indicator
+				return c.logUI()
+			}
 			c.gui.Actions() <- Sensitive{name: click.name, sensitive: false}
 			c.gui.Actions() <- SetButtonText{name: click.name, text: "Pending"}
 			c.gui.Signal()

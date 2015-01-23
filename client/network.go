@@ -113,7 +113,7 @@ func (c *client) send(to *Contact, message *pond.Message) *queuedMessage {
 	return out
 }
 
-func (c *client) sendDraftTo(draft *Draft, to *Contact) (*queuedMessage, error) {
+func (c *client) sendDraftTo(draft *Draft, to *Contact, intros Introductions) (*queuedMessage, error) {
 	// Zero length bodies are ACKs.
 	if len(draft.body) == 0 {
 		draft.body = " "
@@ -129,6 +129,8 @@ func (c *client) sendDraftTo(draft *Draft, to *Contact) (*queuedMessage, error) 
 		DetachedFiles:    draft.detachments,
 		SupportedVersion: proto.Int32(protoVersion),
 	}
+	message.Introductions = intros
+
 	if err := c.sendTest(message); err != nil {
 		return nil, err
 	}
@@ -157,16 +159,16 @@ func (c *client) sendDraft(draft *Draft) ([]*queuedMessage, error) {
 	var outs_bad []*queuedMessage
 	// var outs_err []error
 
-	body := draft.body
-	urlsIntroduce, urlsNormal := c.introducePandaMessages(
+	// body := draft.body
+	introsIntroduce, introsNormal := c.introducePandaMessages(
 		c.contactListFromIdSet(draft.toIntroduce),
 		c.contactListFromIdSet(draft.toNormal), true)
-	urls := append(urlsIntroduce, urlsNormal...)
+	intros := append(introsIntroduce, introsNormal...)
 	for i, to := range append(draft.toIntroduce, draft.toNormal...) {
-		if len(draft.toIntroduce) > 0 {
-			draft.body = body + introducePandaMessageDesc + urls[i]
-		}
-		out, err := c.sendDraftTo(draft, c.contacts[to])
+		// if len(draft.toIntroduce) > 0 {
+		//	draft.body = body + introducePandaMessageDesc + urls[i]
+		// }
+		out, err := c.sendDraftTo(draft, c.contacts[to], intros[i])
 		if err != nil {
 			if i == 0 {
 				return nil, err
@@ -178,7 +180,7 @@ func (c *client) sendDraft(draft *Draft) ([]*queuedMessage, error) {
 		}
 		outs = append(outs, out)
 	}
-	draft.body = body
+	// draft.body = body
 
 	if len(outs_bad) == 0 {
 		return outs, nil

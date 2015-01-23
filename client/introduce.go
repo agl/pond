@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 
 	"github.com/agl/pond/panda"
+	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -47,6 +50,13 @@ func (c *client) contactListFromIdSet(set []uint64) (ci contactList) {
 	return
 }
 
+func contactListToIdSet(cl contactList) (set []uint64) {
+	for _, cnt := range cl {
+		addIdSet(&set, cnt.id)
+	}
+	return
+}
+
 func (contact *Contact) keepSocialGraphRecords() bool {
 	return contact.introducedBy != disableDarkWebOfTrust
 }
@@ -79,80 +89,66 @@ func (c *client) deleteSocialGraphRecords(id uint64) {
 	}
 }
 
-func (c *client) introducePandaMessages_pair(cnt1, cnt2 *Contact, real bool) (string, string) {
+// We could make this into a tagged union of a []pond.Message_Introduction
+// and a uri string if we want to support older pond clients
+type Introductions []*pond.Message_Introduction
+
+func (c *client) introducePandaMessages_pair(cnt1, cnt2 *Contact, real bool) (Introductions, Introductions) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
-	s := func(cnt *Contact) string {
-		v := url.Values{
-			"pandaSecret": {panda_secret},
-			"identity":    {fmt.Sprintf("%x", cnt.theirIdentityPublic)},
+	intro := func(cnt *Contact) Introductions {
+		i := &pond.Message_Introduction{
+			Name:        proto.String(cnt.name),
+			Identity:    cnt.theirIdentityPublic[:],
+			PandaSecret: proto.String(panda_secret),
 		}
-		u := url.URL{
-			Scheme:   "pond-introduce",
-			Opaque:   url.QueryEscape(cnt.name),
-			RawQuery: v.Encode(),
-		}
-		return u.String() + "#"
+		return Introductions{i}
+		/*
+			if new protocol version {
+				... above code ...
+			} else old protocol version {
+				v := url.Values{
+					"pandaSecret": {panda_secret},
+					"identity":    {fmt.Sprintf("%x", cnt.theirIdentityPublic)},
+				}
+				u := url.URL{
+					Scheme:   "pond-introduce",
+					Opaque:   url.QueryEscape(cnt.name),
+					RawQuery: v.Encode(),
+				}
+				i.uri = u.String() + "#"
+			}
+		*/
 	}
 	if real && cnt1.keepSocialGraphRecords() && cnt2.keepSocialGraphRecords() {
 		addIdSet(&cnt1.introducedTo, cnt2.id)
 		addIdSet(&cnt2.introducedTo, cnt1.id)
 	}
-	return s(cnt2), s(cnt1)
+	return intro(cnt2), intro(cnt1)
 }
 
-func (c *client) introducePandaMessages(shown, hidden contactList, real bool) ([]string, []string) {
+func (c *client) introducePandaMessages(shown, hidden contactList, real bool) ([]Introductions, []Introductions) {
 	n := len(shown) + len(hidden)
-	var urls []string = make([]string, n)
+	var intros []Introductions = make([]Introductions, n)
 	cnts := append(shown, hidden...)
 	for i := 0; i < len(shown); i++ {
 		for j := i + 1; j < n; j++ {
 			ui, uj := c.introducePandaMessages_pair(cnts[i], cnts[j], real)
-			urls[i] += ui
-			urls[j] += uj
+			intros[i] = append(intros[i], ui...)
+			intros[j] = append(intros[j], uj...)
 		}
 	}
-	return urls[0:len(shown)], urls[len(shown):]
+	return intros[0:len(shown)], intros[len(shown):]
 }
 
-func (c *client) introducePandaMessages_onemany(cnts contactList, real bool) []string {
+func (c *client) introducePandaMessages_onemany(cnts contactList, real bool) []Introductions {
 	urls1, urls2 := c.introducePandaMessages(contactList{cnts[0]}, cnts[1:], real)
 	return append(urls1, urls2...)
 }
 
-/*
-func (c *client) introducePandaMessages_onemany(cnts contactList) ([]string) {
-	var urls []string = make([]string,len(cnts))
-	cnt1 := cnts[0]
-	for i, cnt2 := range cnts[1:] {
-		// if i==0 { continue }
-		u1,u2 := c.introducePandaMessages_pair(cnt1,cnt2)
-		urls[0] += u1
-		urls[i] = u2
-	}
-	return urls
-}
-*/
-
-func (c *client) introducePandaMessages_group(cnts contactList, real bool) []string {
+func (c *client) introducePandaMessages_group(cnts contactList, real bool) []Introductions {
 	urls, _ := c.introducePandaMessages(cnts, nil, real)
 	return urls
 }
-
-/*
-func (c *client) introducePandaMessages_group(cnts contactList) ([]string) {
-	n := len(cnts)
-	var urls []string = make([]string,len(cnts))
-	// for i := 0; i < n; i++ { urls[i] = "" }
-	for i := 0; i < n; i++ {
-		for j := i+1; j < n; j++ {
-			ui,uj := c.introducePandaMessages_pair(cnts[i],cnts[j])
-			urls[i] += ui
-			urls[j] += uj
-		}
-	}
-	return urls
-}
-*/
 
 type ProposedContact struct {
 	sharedSecret        string
@@ -160,6 +156,20 @@ type ProposedContact struct {
 	name                string
 	id                  uint64 // zero if new or failed
 	onGreet             func(*Contact)
+}
+
+type ProposedContacts []ProposedContact
+
+func (s ProposedContacts) Len() int {
+	return len(s)
+}
+
+func (s ProposedContacts) Less(i, j int) bool {
+	return s[i].name < s[j].name
+}
+
+func (s ProposedContacts) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
 }
 
 func (c *client) fixProposedContactName(pc *ProposedContact, sender uint64) {
@@ -212,6 +222,24 @@ func (c *client) fixProposedContactName(pc *ProposedContact, sender uint64) {
 	}
 }
 
+func (c *client) checkProposedContact(pc *ProposedContact, sender uint64) {
+	existing, found := c.contactByIdentity(pc.theirIdentityPublic[:])
+	if found && c.contacts[sender].keepSocialGraphRecords() {
+		pc.id = existing.id
+		if existing.introducedBy != sender && existing.keepSocialGraphRecords() {
+			addIdSet(&existing.verifiedBy, sender)
+		}
+	}
+	if pc.name == "" {
+		pc.name = fmt.Sprintf("%x", pc.theirIdentityPublic)
+		c.log.Printf("Empty contact name, using identity %s.", pc.name)
+	}
+
+	if !found {
+		c.fixProposedContactName(pc, sender)
+	}
+}
+
 func parseKnownOpaqueURI(s string) (opaque string, vs url.Values, err error) {
 	u, e := url.Parse(s)
 	opaque = u.Opaque
@@ -233,10 +261,7 @@ func singletonValues(values url.Values) bool {
 }
 
 // Finds and parses all the pond-introduce URIs in a message body.
-// Returns a list of ProposedContacts from which to create add contact buttons.
-// We allow contacts to be added even if they fail most checks here because
-// maybe they're the legit contact and the existing one is bad.
-func (c *client) parsePandaURLsText(sender uint64, body string) []ProposedContact {
+func (c *client) parsePandaURLs(sender uint64, body string) []ProposedContact {
 	var l []ProposedContact
 	re := regexp.MustCompile("pond-introduce:([^& ?#]+)\\?([^& ?#]+)(&([^& ?#]+))*")
 	ms := re.FindAllString(body, -1) // -1 means find all
@@ -265,34 +290,42 @@ func (c *client) parsePandaURLsText(sender uint64, body string) []ProposedContac
 			c.log.Printf("Bad public identity %s, skipping.", identity)
 			continue
 		}
-		existing, found := c.contactByIdentity(pc.theirIdentityPublic[:])
-		if found && c.contacts[sender].keepSocialGraphRecords() {
-			pc.id = existing.id
-			if existing.introducedBy != sender && existing.keepSocialGraphRecords() {
-				addIdSet(&existing.verifiedBy, sender)
-			}
-		}
-		if pc.name == "" {
-			c.log.Printf("Empty contact name, using identity %s.", identity)
-			pc.name = identity
-		}
 
-		if !found {
-			c.fixProposedContactName(&pc, sender)
-		}
-
+		c.checkProposedContact(&pc, sender)
 		l = append(l, pc)
 	}
 	return l
 }
 
-func (c *client) parsePandaURLs(msg *InboxMessage) []ProposedContact {
-	var body string
+// Builds list of ProposedContacts from which to create greet contact buttons.
+// We allow contacts to be added even if they fail most checks here because
+// maybe they're the legit contact and the existing one is bad.
+func (c *client) observeIntroductions(msg *InboxMessage) []ProposedContact {
+	var l []ProposedContact
 	// msg.message could be nil if we're in a half paired message situation
-	if msg.message != nil {
-		body = string(msg.message.Body)
+	if msg.message == nil {
+		return l
 	}
-	return c.parsePandaURLsText(msg.from, body)
+
+	for _, intro := range msg.message.Introductions {
+		pc := ProposedContact{
+			sharedSecret: *intro.PandaSecret,
+			name:         *intro.Name,
+		}
+
+		if len(intro.Identity) != 32 {
+			c.log.Printf("Bad public identity %x, skipping.", intro.Identity)
+			continue
+		}
+		copy(pc.theirIdentityPublic[:], intro.Identity)
+
+		c.checkProposedContact(&pc, msg.from)
+		l = append(l, pc)
+	}
+	// We sort mostly just to keep the tests deterministic
+	sort.Sort(ProposedContacts(l))
+
+	return append(l, c.parsePandaURLs(msg.from, string(msg.message.Body))...)
 }
 
 // Add a ProposedContact using PANDA once by building panda.SharedSecret and

@@ -1625,38 +1625,23 @@ Handle:
 		if len(cl) == 0 {
 			return
 		}
-		cl = append(contactList{contact}, cl...)
 
 		// Build from notes eventually
-		prebody0 := "To: " + cl[1].name
-		for _, to := range cl[2:] {
-			prebody0 += ", " + to.name
+		prebody := "To: " + contact.name
+		for _, to := range cl {
+			prebody += ", " + to.name
 		}
-		prebody0 += "\n\n"
-		body0, ok := c.inputTextBlock(prebody0, true)
-		if !ok {
-			c.Printf("Not OK, what now?")
-		}
-		bodyn, ok := c.inputTextBlock("To: "+cl[0].name+"\n\n", true)
+		prebody += "\n\n"
+		body, ok := c.inputTextBlock(prebody, true)
 		if !ok {
 			c.Printf("Not OK, what now?")
 		}
 
-		// c.introduceContact_onemany(contact,cl)
-		urls := c.introducePandaMessages_onemany(cl, true)
-		for i := range cl {
-			draft := c.newDraft([]uint64{cl[i].id}, nil, nil)
-			draft.cliId = c.newCliId()
-			if i == 0 {
-				draft.body = body0
-			} else {
-				draft.body = bodyn
-			}
-			draft.body += introducePandaMessageDesc + urls[i]
-			c.sendDraft(draft)
-			c.Printf("%s Sending introduction message %s%s%s to %s\n", termInfoPrefix,
-				termCliIdStart, draft.cliId.String(), termReset, cl[i].name)
-		}
+		draft := c.newDraft([]uint64{contact.id}, contactListToIdSet(cl), nil)
+		draft.body = body
+		c.sendDraft(draft)
+		c.Printf("%s Sending introduction message %s%s%s for %s to %d other contacts.\n", termInfoPrefix,
+			termCliIdStart, draft.cliId.String(), termReset, contact.name, len(cl))
 		c.save()
 
 	case introduceContactGroupCommand:
@@ -1666,8 +1651,8 @@ Handle:
 			return
 		}
 
-		prebody := "To: " + cl[1].name
-		for _, to := range cl[2:] {
+		prebody := "To: " + cl[0].name
+		for _, to := range cl[1:] {
 			prebody += ", " + to.name
 		}
 		prebody += "\n\n"
@@ -1676,15 +1661,11 @@ Handle:
 			c.Printf("Not OK, what now?")
 		}
 
-		urls := c.introducePandaMessages_group(cl, true)
-		for i := range cl {
-			draft := c.newDraft([]uint64{cl[i].id}, nil, nil)
-			draft.cliId = c.newCliId()
-			draft.body = body + introducePandaMessageDesc + urls[i]
-			c.sendDraft(draft)
-			c.Printf("%s Sending introduction message %s%s%s to %s\n", termInfoPrefix,
-				termCliIdStart, draft.cliId.String(), termReset, cl[i].name)
-		}
+		draft := c.newDraft(nil, contactListToIdSet(cl), nil)
+		draft.body = body
+		c.sendDraft(draft)
+		c.Printf("%s Sending group introduction message %s%s%s to %d contacts.\n", termInfoPrefix,
+			termCliIdStart, draft.cliId.String(), termReset, len(cl))
 		c.save()
 
 	case greetContactCommand:
@@ -1694,7 +1675,7 @@ Handle:
 			return
 		}
 
-		pcs := c.parsePandaURLs(msg)
+		pcs := c.observeIntroductions(msg)
 		for i, pc := range pcs {
 			if cmd.Index == "*" || cmd.Index == pc.name ||
 				cmd.Index == fmt.Sprintf("%d", i) {
@@ -1899,7 +1880,7 @@ func (c *cliClient) showInbox(msg *InboxMessage) {
 	c.term.Write([]byte(terminalEscape(string(msgText), true /* line breaks ok */)))
 	c.Printf("\n")
 
-	pcs := c.parsePandaURLs(msg)
+	pcs := c.observeIntroductions(msg)
 	if len(pcs) > 0 {
 		c.Printf("%s Introduced contacts.  Add with greet command.\n", termPrefix)
 	}
