@@ -451,7 +451,7 @@ type Contact struct {
 	supportedVersion int32
 	// revoked is true if this contact has been revoked.
 	revoked bool
-	// revokedUs is true if this contact has recoved us.
+	// revokedUs is true if this contact has revoked us.
 	revokedUs bool
 	// pandaKeyExchange contains the serialised PANDA state if a key
 	// exchange is ongoing.
