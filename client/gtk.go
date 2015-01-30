@@ -1,4 +1,4 @@
-// +build !nogui
+// +build !nogui,!nogtk
 
 package main
 
