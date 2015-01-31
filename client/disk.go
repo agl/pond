@@ -109,8 +109,8 @@ func (c *client) unmarshal(state *disk.State) error {
 		if cont.IntroducedBy != nil {
 			contact.introducedBy = *cont.IntroducedBy
 		}
-		if cont.VerifiedBy != nil && len(cont.VerifiedBy) > 0 {
-			contact.verifiedBy = cont.VerifiedBy
+		if cont.ReintroducedBy != nil && len(cont.ReintroducedBy) > 0 {
+			contact.reintroducedBy = cont.ReintroducedBy
 		}
 		if cont.IntroducedTo != nil && len(cont.IntroducedTo) > 0 {
 			contact.introducedTo = cont.IntroducedTo
@@ -287,7 +287,7 @@ func (c *client) marshal() []byte {
 			RevokedUs:        proto.Bool(contact.revokedUs),
 			IntroducedBy:     proto.Uint64(contact.introducedBy),
 			IntroducedTo:     contact.introducedTo,
-			VerifiedBy:       contact.verifiedBy,
+			ReintroducedBy:   contact.reintroducedBy,
 		}
 
 		cont.TheirIdentityPublic = contact.theirIdentityPublic[:]

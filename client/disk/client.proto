@@ -73,7 +73,7 @@ message Contact {
 	optional bool is_pending = 15 [ default = false ];
 
 	optional fixed64 introduced_by = 23;
-	repeated fixed64 verified_by = 24;
+	repeated fixed64 reintroduced_by = 24;
 	repeated fixed64 introduced_to = 25;
 }
 

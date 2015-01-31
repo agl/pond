@@ -84,7 +84,7 @@ func (c *client) deleteSocialGraphRecords(id uint64) {
 		if contact.introducedBy == id {
 			contact.introducedBy = 0
 		}
-		removeIdSet(&contact.verifiedBy, id)
+		removeIdSet(&contact.reintroducedBy, id)
 		removeIdSet(&contact.introducedTo, id)
 	}
 }
@@ -227,7 +227,7 @@ func (c *client) checkProposedContact(pc *ProposedContact, sender uint64) {
 	if found && c.contacts[sender].keepSocialGraphRecords() {
 		pc.id = existing.id
 		if existing.introducedBy != sender && existing.keepSocialGraphRecords() {
-			addIdSet(&existing.verifiedBy, sender)
+			addIdSet(&existing.reintroducedBy, sender)
 		}
 	}
 	if pc.name == "" {

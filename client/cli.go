@@ -2103,9 +2103,9 @@ func (c *cliClient) showContact(contact *Contact) {
 			cliRow{cols: []string{"Introduced By", name}},
 		)
 	}
-	if len(contact.verifiedBy) > 0 {
+	if len(contact.reintroducedBy) > 0 {
 		table.rows = append(table.rows,
-			cliRow{cols: []string{"Verified By", terminalEscape(c.listContactsAndUnknowns(contact.verifiedBy), false)}},
+			cliRow{cols: []string{"Reintroduced By", terminalEscape(c.listContactsAndUnknowns(contact.reintroducedBy), false)}},
 		)
 	}
 	if len(contact.introducedTo) > 0 {

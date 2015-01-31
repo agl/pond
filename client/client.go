@@ -497,7 +497,7 @@ type Contact struct {
 	ratchet *ratchet.Ratchet
 
 	introducedBy uint64
-	verifiedBy   []uint64
+	reintroducedBy []uint64
 	introducedTo []uint64
 
 	cliId cliId

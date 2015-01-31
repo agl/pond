@@ -165,7 +165,7 @@ type Contact struct {
 	Events              []*Contact_Event       `protobuf:"bytes,22,rep,name=events" json:"events,omitempty"`
 	IsPending           *bool                  `protobuf:"varint,15,opt,name=is_pending,def=0" json:"is_pending,omitempty"`
 	IntroducedBy        *uint64                `protobuf:"fixed64,23,opt,name=introduced_by" json:"introduced_by,omitempty"`
-	VerifiedBy          []uint64               `protobuf:"fixed64,24,rep,name=verified_by" json:"verified_by,omitempty"`
+	ReintroducedBy          []uint64               `protobuf:"fixed64,24,rep,name=reintroduced_by" json:"reintroduced_by,omitempty"`
 	IntroducedTo        []uint64               `protobuf:"fixed64,25,rep,name=introduced_to" json:"introduced_to,omitempty"`
 	XXX_unrecognized    []byte                 `json:"-"`
 }
@@ -337,9 +337,9 @@ func (m *Contact) GetIntroducedBy() uint64 {
 	return 0
 }
 
-func (m *Contact) GetVerifiedBy() []uint64 {
+func (m *Contact) GetReintroducedBy() []uint64 {
 	if m != nil {
-		return m.VerifiedBy
+		return m.ReintroducedBy
 	}
 	return nil
 }

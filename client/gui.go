@@ -2182,8 +2182,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		}
 		entries = append(entries, nvEntry{"INTRODUCED BY", name})
 	}
-	if len(contact.verifiedBy) > 0 {
-		entries = append(entries, nvEntry{"VERIFIED BY", c.listContactsAndUnknowns(contact.verifiedBy)})
+	if len(contact.reintroducedBy) > 0 {
+		entries = append(entries, nvEntry{"REINTRODUCED BY", c.listContactsAndUnknowns(contact.reintroducedBy)})
 	}
 	if len(contact.introducedTo) > 0 {
 		entries = append(entries, nvEntry{"INTRODUCED TO", c.listContactsAndUnknowns(contact.introducedTo)})
@@ -2344,7 +2344,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			if !click.checks["disableSocialGraph"] {
 				c.deleteSocialGraphRecords(id)
 				contact.introducedBy = disableDarkWebOfTrust
-				contact.verifiedBy = nil
+				contact.reintroducedBy = nil
 				contact.introducedTo = nil
 			} else if contact.introducedBy == disableDarkWebOfTrust {
 				contact.introducedBy = 0
