@@ -1332,23 +1332,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 	pcs := c.observeIntroductions(msg)
 	if len(pcs) > 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
-
 		for i, pc := range pcs {
-			var greet string
-			if pc.id == 0 {
-				greet = "Greet"
-			} else {
-				cnt := c.contacts[pc.id]
-				if cnt.isPending {
-					greet = "Pending"
-				} else {
-					greet = "Exists"
-					if pc.name != cnt.name {
-						greet += " as " + cnt.name
-					}
-				}
-				// Should say Verified if the contact existed previously
-			}
+			greet := c.ProposedContactGreeting(pc, "Greet", "Exists", "Pending")
 			grid.rows = append(grid.rows, []GridE{
 				{1, 1, Label{
 					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart},

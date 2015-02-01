@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	// "net/url"
@@ -154,7 +155,7 @@ type ProposedContact struct {
 	sharedSecret        string
 	theirIdentityPublic [32]byte
 	name                string
-	id                  uint64 // zero if new or failed
+	ids                 []uint64 // zero if new or failed
 	onGreet             func(*Contact)
 }
 
@@ -207,6 +208,9 @@ func (c *client) fixProposedContactName(pc *ProposedContact, sender uint64) {
 		e += fmt.Sprintf(" Do you trust %s?", c.contacts[i].name)
 	}
 
+	if len(pc.ids) == 0 {
+		return
+	}
 	id0 := conflict0.id
 	pc.onGreet = func(cnt1 *Contact) {
 		c.logEvent(cnt1, e)
@@ -223,21 +227,46 @@ func (c *client) fixProposedContactName(pc *ProposedContact, sender uint64) {
 }
 
 func (c *client) checkProposedContact(pc *ProposedContact, sender uint64) {
-	existing, found := c.contactByIdentity(pc.theirIdentityPublic[:])
-	if found && c.contacts[sender].keepSocialGraphRecords() {
-		pc.id = existing.id
-		if existing.introducedBy != sender && existing.keepSocialGraphRecords() {
-			addIdSet(&existing.reintroducedBy, sender)
+	if c.contacts[sender].keepSocialGraphRecords() {
+		for _, cnt := range c.contacts {
+			if bytes.Equal(cnt.theirIdentityPublic[:], pc.theirIdentityPublic[:]) && !cnt.revokedUs {
+				addIdSet(&pc.ids, cnt.id)
+				if cnt.introducedBy != sender && cnt.keepSocialGraphRecords() {
+					addIdSet(&cnt.reintroducedBy, sender)
+				}
+			}
 		}
 	}
+
 	if pc.name == "" {
 		pc.name = fmt.Sprintf("%x", pc.theirIdentityPublic)
 		c.log.Printf("Empty contact name, using identity %s.", pc.name)
 	}
 
-	if !found {
-		c.fixProposedContactName(pc, sender)
+	c.fixProposedContactName(pc, sender)
+}
+
+func (c *client) ProposedContactGreeting(pc ProposedContact, gstr, estr, pstr string) string {
+	if len(pc.ids) == 0 {
+		return gstr
 	}
+	firstNotPending := func() (uint64, bool) {
+		for _, id := range pc.ids {
+			if !c.contacts[id].isPending {
+				return id, true
+			}
+		}
+		return pc.ids[0], false
+	}
+	id, exists := firstNotPending()
+	greet := map[bool]string{true: estr, false: pstr}[exists]
+	n := c.contacts[id].name
+	if pc.name != n {
+		greet += " as " + n
+	}
+	return greet
+	// Should say Verified if the contact existed previously
+	// Maybe should mention if revoked
 }
 
 /*
@@ -337,9 +366,9 @@ func (c *client) beginProposedPandaKeyExchange(pc ProposedContact, introducedBy 
 		c.log.Printf("Unacceptably weak secret '%s'.", pc.sharedSecret)
 		return nil
 	}
-	if pc.id != 0 {
+	if len(pc.ids) != 0 {
 		c.log.Printf("Attempted to add introduced contact %s, who is your existing contact %s, this is an internal error.\n", termPrefix,
-			pc.name, c.contacts[pc.id].name)
+			pc.name, c.contacts[pc.ids[0]].name)
 		return nil
 	}
 

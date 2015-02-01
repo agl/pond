@@ -1679,8 +1679,8 @@ Handle:
 		for i, pc := range pcs {
 			if cmd.Index == "*" || cmd.Index == pc.name ||
 				cmd.Index == fmt.Sprintf("%d", i) {
-				if pc.id != 0 {
-					c.Printf("%s Introduced contact %s is your existing contact %s\n", termPrefix, pc.name, c.contacts[pc.id].name)
+				if len(pc.ids) != 0 {
+					c.Printf("%s Introduced contact %s is your existing contact %s\n", termPrefix, pc.name, c.listContactsAndUnknowns(pc.ids))
 					return
 				}
 				c.Printf("%s Begining PANDA key exchange with %s\n", termPrefix, pc.name)
@@ -1885,19 +1885,11 @@ func (c *cliClient) showInbox(msg *InboxMessage) {
 		c.Printf("%s Introduced contacts.  Add with greet command.\n", termPrefix)
 	}
 	for i, pc := range pcs {
-		s := ""
-		if pc.id != 0 {
-			s0 := "exists"
-			s1 := ""
-			if c.contacts[pc.id].isPending {
-				s0 = "pending"
-			}
-			if c.contacts[pc.id].name != pc.name {
-				s1 += "as " + c.contacts[pc.id].name
-			}
-			s = fmt.Sprintf("(%s%s)", s0, s1)
+		greet := c.ProposedContactGreeting(pc, "", "exists", "pending")
+		if len(greet) > 0 {
+			greet = fmt.Sprintf(" (%s)", greet)
 		}
-		c.Printf("%d. %s %s\n", i, pc.name, s)
+		c.Printf("%d. %s %s\n", i, pc.name, greet)
 	}
 }
 

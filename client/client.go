@@ -496,9 +496,9 @@ type Contact struct {
 	// New ratchet support.
 	ratchet *ratchet.Ratchet
 
-	introducedBy uint64
+	introducedBy   uint64
 	reintroducedBy []uint64
-	introducedTo []uint64
+	introducedTo   []uint64
 
 	cliId cliId
 }
@@ -1125,15 +1125,6 @@ func (c *client) newKeyExchange(contact *Contact) {
 func (c *client) contactByName(name string) (*Contact, bool) {
 	for _, contact := range c.contacts {
 		if contact.name == name {
-			return contact, true
-		}
-	}
-	return nil, false
-}
-
-func (c *client) contactByIdentity(theirIdentityPublic []byte) (*Contact, bool) {
-	for _, contact := range c.contacts {
-		if bytes.Equal(contact.theirIdentityPublic[:], theirIdentityPublic) {
 			return contact, true
 		}
 	}
