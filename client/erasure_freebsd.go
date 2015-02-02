@@ -8,3 +8,7 @@ func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) erro
 	// No NVRAM support on FreeBSD yet.
 	return stateFile.Create(pw)
 }
+
+func (c *client) hasErasure() bool {
+	return false
+}
