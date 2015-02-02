@@ -58,3 +58,7 @@ ConfigureLoop:
 	stateFile.Erasure = nil
 	return stateFile.Create(pw)
 }
+
+func (c *cliClient) hasErasure() bool {
+	return true
+}

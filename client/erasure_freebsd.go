@@ -9,4 +9,6 @@ func (c *client) createErasureStorage(pw string, stateFile *disk.StateFile) erro
 	return stateFile.Create(pw)
 }
 
-func (c *client) hasErasure() bool { return false }
+func (c *client) hasErasure() bool {
+	return false
+}

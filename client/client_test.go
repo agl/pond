@@ -403,7 +403,6 @@ func TestAccountCreation(t *testing.T) {
 	}
 
 	if client.hasErasure() {
-
 		client.gui.WaitForSignal()
 		if id := client.gui.currentStateID; id != uiStateErasureStorage {
 			t.Fatalf("client in UI state %d when it was expected to be setting up erasure storage", id)

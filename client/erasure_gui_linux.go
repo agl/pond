@@ -115,3 +115,7 @@ NextEvent:
 
 	panic("unreachable")
 }
+
+func (c *guiClient) hasErasure() bool {
+	return true
+}
