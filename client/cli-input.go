@@ -54,7 +54,7 @@ var cliCommands = []cliCommand{
 	{"remove", removeCommand{}, "Remove an attachment or detachment from a draft message", contextDraft},
 	{"rename", renameCommand{}, "Rename an existing contact", contextContact},
 	{"reply", replyCommand{}, "Reply to the current message", contextInbox},
-	{"retain", retainCommand{}, "Retain the current message", contextInbox},
+	{"retain", retainCommand{}, "Retain the current message", contextInbox | contextOutbox},
 	{"dont-retain", dontRetainCommand{}, "Do not retain the current message", contextInbox},
 	{"save", saveCommand{}, "Save a numbered attachment to disk", contextInbox},
 	{"save-key", saveKeyCommand{}, "Save the key to a detachment to disk", contextInbox},

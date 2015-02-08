@@ -173,7 +173,7 @@ RestartInboxIteration:
 RestartOutboxIteration:
 	for {
 		for _, msg := range c.outbox {
-			if msg.id != currentMsgId && now.Sub(msg.created) > messageLifetime {
+			if msg.id != currentMsgId && !msg.retained && now.Sub(msg.created) > messageLifetime {
 				if msg.revocation || len(msg.message.Body) > 0 {
 					c.outboxUI.Remove(msg.id)
 				}
@@ -1726,6 +1726,15 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{
+				{1, 1, CheckButton{
+					widgetBase: widgetBase{
+						name: "retain",
+					},
+					checked: msg.retained,
+					text:    "Retain",
+				}},
+			},
 		},
 	}
 
@@ -1749,7 +1758,12 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			return event
 		}
 
-		if click, ok := event.(Click); ok && click.name == "abort" {
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		switch {
+		case click.name == "abort":
 			c.queueMutex.Lock()
 			indexOfMessage := c.indexOfQueuedMessage(msg)
 			if indexOfMessage == -1 || msg.sending {
@@ -1775,9 +1789,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.drafts[draft.id] = draft
 			c.save()
 			return c.composeUI(draft, nil)
-		}
-
-		if click, ok := event.(Click); ok && click.name == "delete" {
+		case click.name == "delete":
 			c.deleteOutboxMsg(msg.id)
 			// Also find and delete any empty acks for this message.
 			for _, inboxMsg := range c.inbox {
@@ -1794,6 +1806,15 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
 			return nil
+		case click.name == "retain":
+			msg.retained = click.checks["retain"]
+			// if !msg.retained {
+			//	msg.exposureTime = c.Now()
+			// }
+			c.save()
+			// no c.updateInboxBackgroundColor(msg) so only needed for testing
+			c.gui.Actions() <- UIState{uiStateOutbox}
+			c.gui.Signal()
 		}
 
 		if !haveSentTime && !msg.sent.IsZero() {

@@ -188,10 +188,11 @@ func (c *client) unmarshal(state *disk.State) error {
 
 	for _, m := range state.Outbox {
 		msg := &queuedMessage{
-			id:      *m.Id,
-			to:      *m.To,
-			server:  *m.Server,
-			created: time.Unix(*m.Created, 0),
+			id:       *m.Id,
+			to:       *m.To,
+			server:   *m.Server,
+			created:  time.Unix(*m.Created, 0),
+			retained: m.GetRetained(),
 		}
 		c.registerId(msg.id)
 		if len(m.Message) > 0 {
@@ -328,7 +329,7 @@ func (c *client) marshal() []byte {
 
 	var outbox []*disk.Outbox
 	for _, msg := range c.outbox {
-		if time.Since(msg.created) > messageLifetime {
+		if time.Since(msg.created) > messageLifetime && !msg.retained {
 			continue
 		}
 		m := &disk.Outbox{
@@ -337,6 +338,7 @@ func (c *client) marshal() []byte {
 			Server:     proto.String(msg.server),
 			Created:    proto.Int64(msg.created.Unix()),
 			Revocation: proto.Bool(msg.revocation),
+			Retained:   proto.Bool(msg.retained),
 		}
 		if msg.message != nil {
 			if m.Message, err = proto.Marshal(msg.message); err != nil {

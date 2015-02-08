@@ -125,6 +125,7 @@ message Outbox {
 	optional bytes request = 7;
 	optional int64 acked = 8;
 	optional bool revocation = 9;
+	optional bool retained = 10 [ default = false ];
 };
 
 message Draft {

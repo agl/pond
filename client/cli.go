@@ -1611,24 +1611,30 @@ Handle:
 		}
 
 	case retainCommand:
-		msg, ok := c.currentObj.(*InboxMessage)
-		if !ok {
-			c.Printf("%s Select inbox message first\n", termWarnPrefix)
+		if msg, ok := c.currentObj.(*InboxMessage); ok {
+			msg.retained = true
+		} else if msg, ok := c.currentObj.(*queuedMessage); ok {
+			msg.retained = true
+		} else {
+			c.Printf("%s Select inbox or outbox message first\n", termWarnPrefix)
 			return
 		}
-		msg.retained = true
 		c.save()
 
 	case dontRetainCommand:
-		msg, ok := c.currentObj.(*InboxMessage)
-		if !ok {
-			c.Printf("%s Select inbox message first\n", termWarnPrefix)
+		if msg, ok := c.currentObj.(*InboxMessage); ok {
+			msg.retained = false
+			msg.exposureTime = c.Now()
+			// TODO: the CLI needs to expire messages when open as the GUI
+			// does. See guiClient.processTimer.
+		} else if msg, ok := c.currentObj.(*queuedMessage); ok {
+			msg.retained = false
+			// We might want an exposureTime for outbox messages
+			// msg.exposureTime = c.Now()
+		} else {
+			c.Printf("%s Select inbox or outbox message first\n", termWarnPrefix)
 			return
 		}
-		msg.retained = false
-		msg.exposureTime = c.Now()
-		// TODO: the CLI needs to expire messages when open as the GUI
-		// does. See guiClient.processTimer.
 		c.save()
 
 	default:
@@ -1775,6 +1781,7 @@ func (c *cliClient) showOutbox(msg *queuedMessage) {
 			cliRow{cols: []string{"Sent", sentTime}},
 			cliRow{cols: []string{"Acknowledged", formatTime(msg.acked)}},
 			cliRow{cols: []string{"Erase", eraseTime}},
+			cliRow{cols: []string{"Retain", fmt.Sprintf("%t", msg.retained)}},
 		},
 	}
 	table.WriteTo(c.term)
