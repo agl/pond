@@ -26,22 +26,6 @@ title: Pond
 
 <p>&nbsp;</p>
 
-<h4>Installation</h4>
-
-<p>One can either build from source or use the prebuilt binaries. For building from source, see the section below.</p>
-
-<p>The following binaries are all 64-bit and are distributed in signed, OpenPGP form. You can obtain my key with <tt>gpg --recv-key C92172384F387DBAED4D420165EB9636F02C5704</tt> or from <a href="https://www.imperialviolet.org/key.asc">https://www.imperialviolet.org/key.asc</a>.</p>
-
-<table>
-  <tr><th>Distribution</th><th>Binary</th><th>Notes<th></tr>
-
-  <tr><td>Ubuntu 13.10</td><td><a href="binary/ubuntu/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell3-3-0</tt></td></tr>
-  <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell-3-0</tt></td></tr>
-  <tr><td>Fedora 19</td><td><a href="binary/fedora/pond.gpg">pond.gpg</a></td><td><tt>sudo yum install trousers gtkspell3</tt></td></tr>
-  <tr><td>OS X 10.9</td><td><a href="binary/osx/Pond.tar.gpg">Pond.tar.gpg</a></td><td>WARNING: no support for erasure storage yet</td></tr>
-  <tr><td>Tails 1.1</td><td><a href="binary/tails11/pond.gpg">pond.gpg</a></td><td>No TPM because it goes against the spirit of Tails. Will store state file in <tt>~/Persistent</tt> if found.</td></tr>
-</table>
-
 <h4>Building</h4>
 
 <p>These are very simple build instructions that will get Pond running from source. You should read the commands before running them because, if nothing else, it'll put your GOPATH in <tt>~/gopkg</tt>, which may not be where you want.</p>
