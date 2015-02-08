@@ -495,10 +495,12 @@ func (c *guiClient) mainUI() {
 													widgetBase: widgetBase{width: 100, name: "newcontact"},
 													text:       "Add",
 												},
-												Button{
-													widgetBase: widgetBase{width: 100, name: "introduce"},
-													text:       "Introduce",
-												},
+												/*
+													Button{
+														widgetBase: widgetBase{width: 100, name: "introduce"},
+														text:       "Introduce",
+													},
+												*/
 											},
 										},
 									},
@@ -3388,6 +3390,27 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 
 	c.gui.Actions() <- SetChild{name: "right", child: ui}
 
+	introductionMode := 0
+	if len(draft.toIntroduce) > 0 {
+		introductionMode = 1
+		if len(draft.toNormal) > 0 {
+			introductionMode = 2
+		}
+	}
+	introductionModeStrings := []string{
+		"Blind carbon-copy all",
+		"Reveal & introduce all",
+		"Complex introducion",
+	}
+	introductionModeParse := func(ims string) int {
+		for i, s := range introductionModeStrings {
+			if s == ims {
+				return i
+			}
+		}
+		panic("unreachable")
+	}
+
 	toBoxName := func(s string, i uint64) string {
 		return fmt.Sprintf("to-box-%s-%x", s, i)
 	}
@@ -3403,20 +3426,33 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			return
 		}
 		toBoxAddExplainId = id
-		c.gui.Actions() <- Append{
-			name: toBoxName("entry", id),
-			children: []Widget{
-				Button{
-					widgetBase: widgetBase{
-						name:       "explain-introductions",
-						font:       "Liberation Sans 8",
-						foreground: colorBlue,
-						padding:    10,
-						width:      1,
+		if introductionMode == 2 {
+			c.gui.Actions() <- Append{
+				name: toBoxName("entry", id),
+				children: []Widget{
+					Button{
+						widgetBase: widgetBase{
+							name:       "explain-introductions",
+							font:       "Liberation Sans 8",
+							foreground: colorBlue,
+							padding:    10,
+							width:      1,
+						},
+						text: "?",
 					},
-					text: "i",
 				},
-			},
+			}
+		} else {
+			c.gui.Actions() <- Append{
+				name: toBoxName("entry", id),
+				children: []Widget{
+					Combo{
+						widgetBase:  widgetBase{name: "introduction-mode"},
+						labels:      introductionModeStrings,
+						preSelected: introductionModeStrings[introductionMode],
+					},
+				},
+			}
 		}
 	}
 	toBoxAddEntry := func(id uint64, introduce bool) {
@@ -3427,29 +3463,33 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			addIdSet(&draft.toNormal, id)
 			removeIdSet(&draft.toIntroduce, id)
 		}
+		children := []Widget{
+			Entry{
+				widgetBase: widgetBase{insensitive: true},
+				text:       c.contacts[id].name,
+			},
+			Button{
+				widgetBase: widgetBase{name: toBoxName("remove", id), font: "Liberation Sans 8"},
+				image:      indicatorRemove,
+			},
+		}
+		if introductionMode == 2 {
+			children = append(children,
+				CheckButton{
+					widgetBase: widgetBase{
+						name:    toBoxName("introduce", id),
+						padding: 10,
+					},
+					checked: introduce,
+					text:    "Introduce",
+				})
+		}
 		c.gui.Actions() <- Append{
 			name: "to-box",
 			children: []Widget{
 				HBox{
 					widgetBase: widgetBase{name: toBoxName("entry", id)},
-					children: []Widget{
-						Entry{
-							widgetBase: widgetBase{insensitive: true},
-							text:       c.contacts[id].name,
-						},
-						Button{
-							widgetBase: widgetBase{name: toBoxName("remove", id), font: "Liberation Sans 8"},
-							image:      indicatorRemove,
-						},
-						CheckButton{
-							widgetBase: widgetBase{
-								name:    toBoxName("introduce", id),
-								padding: 10,
-							},
-							checked: introduce,
-							text:    "Introduce",
-						},
-					},
+					children:   children,
 				},
 			},
 		}
@@ -3713,7 +3753,12 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			if !ok {
 				panic("unreachable")
 			}
-			introduce := len(draft.toIntroduce) > 0 && len(draft.toNormal) == 0
+			introduce := false
+			if introductionMode == 1 {
+				introduce = true
+			} else if introductionMode == 2 {
+				introduce = len(draft.toIntroduce) > 0 && len(draft.toNormal) == 0
+			}
 			toBoxAddEntry(contact.id, introduce)
 			toBoxUpdateCombo()
 			updateUsage()
@@ -3741,6 +3786,35 @@ func (c *guiClient) composeUI(draft *Draft) interface{} {
 			introduceSensitivity()
 			c.draftsUI.SetLine(draft.id, c.sideDraftRecipients(draft))
 			c.gui.Signal()
+			continue
+		}
+		if click.name == "introduction-mode" {
+			im := introductionModeParse(click.combos["introduction-mode"])
+			if introductionMode == im {
+				continue
+			}
+			introductionMode = im
+			if im == 2 {
+				// We could empty and repopulate the "to-box" but
+				// toBoxUpdateCombo() won't do it directly.
+				draft.body = click.textViews["body"]
+				c.save()
+				return c.introduceUI(draft)
+			} else {
+				// draft.{toNormal,toIntroduce} are disjoint
+				toAll := append(draft.toNormal, draft.toIntroduce...)
+				if im == 0 {
+					draft.toNormal = toAll
+					draft.toIntroduce = nil
+				} else if im == 1 {
+					draft.toNormal = nil
+					draft.toIntroduce = toAll
+				}
+				updateUsage()
+				// updateSend()
+			}
+			c.gui.Signal()
+			c.save()
 			continue
 		}
 		const toIntroducePrefix = "to-box-introduce-"
