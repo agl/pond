@@ -184,6 +184,16 @@ alias pond="$GOPATH/bin/client"
 <pre>export GOPATH=/home/pond/go
 export PATH=$PATH:$GOPATH/bin</pre>
 
+<h5>Building</h5>
+
+<p>Build the pond client as instructed above using the <tt>pond</tt> user just created.
+Then copy and paste the following commands to build and install the Pond server:</p>
+
+<pre>
+% cd $GOPATH/bin
+% go build github.com/agl/pond/server/
+</pre>
+
 <h5>Create pond server identity</h5>
 
 <p>Note that the pond server logs to stdout.</p>
