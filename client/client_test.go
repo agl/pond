@@ -2071,85 +2071,98 @@ func TestRetainMessage(t *testing.T) {
 		t.Fatalf("Bad initial number of messages in listUI: %d", n)
 	}
 
-	msg := client2.inbox[0]
-	if msg.retained {
-		t.Fatalf("Retained flag is initially set")
+	retainedCheck := func(b bool, s string) {
+		msg1 := client1.outbox[0]
+		msg2 := client2.inbox[0]
+		if msg2.retained != b || msg1.retained != b {
+			t.Fatalf(s)
+		}
 	}
+	retainedCheck(false, "Retained flag is initially set")
 
-	client2.gui.events <- Click{
-		name: client2.inboxUI.entries[0].boxName,
+	retainedClick := func(client *TestClient, st int, l *listUI, b bool) {
+		client.gui.events <- Click{
+			name: l.entries[0].boxName,
+		}
+		client.AdvanceTo(st)
+		client.gui.events <- Click{
+			name:   "retain",
+			checks: map[string]bool{"retain": b},
+		}
+		client.AdvanceTo(st)
 	}
-	client2.AdvanceTo(uiStateInbox)
-	client2.gui.events <- Click{
-		name:   "retain",
-		checks: map[string]bool{"retain": true},
-	}
-	client2.AdvanceTo(uiStateInbox)
+	retainedClick(client1, uiStateOutbox, client1.outboxUI, true)
+	retainedClick(client2, uiStateInbox, client2.inboxUI, true)
 
-	if !msg.retained {
-		t.Fatalf("Retained flag not set")
-	}
+	retainedCheck(true, "Retained flag not set")
+
+	client1.Reload()
+	client1.AdvanceTo(uiStateMain)
 
 	client2.Reload()
 	client2.AdvanceTo(uiStateMain)
 
-	msg = client2.inbox[0]
-	if !msg.retained {
-		t.Fatalf("Retained flag lost")
-	}
+	retainedCheck(true, "Retained flag lost")
 
 	baseTime := time.Now()
-	client2.nowFunc = func() time.Time {
-		return baseTime.Add(messageLifetime + 10*time.Second)
+	bumpTime := func(client *TestClient, t time.Duration) {
+		client.nowFunc = func() time.Time {
+			return baseTime.Add(t)
+		}
+		client.testTimerChan <- baseTime
+		client.AdvanceTo(uiStateTimerComplete)
 	}
-
-	client2.testTimerChan <- baseTime
-	client2.AdvanceTo(uiStateTimerComplete)
-
+	bumpTime(client1, messageLifetime+10*time.Second)
+	if n := len(client1.outbox); n != 1 {
+		t.Fatalf("Message was deleted while retain flag set")
+	}
+	bumpTime(client2, messageLifetime+10*time.Second)
 	if n := len(client2.inbox); n != 1 {
 		t.Fatalf("Message was deleted while retain flag set")
 	}
 
-	client2.gui.events <- Click{
-		name: client2.inboxUI.entries[0].boxName,
-	}
-	client2.AdvanceTo(uiStateInbox)
-	client2.gui.events <- Click{
-		name:   "retain",
-		checks: map[string]bool{"retain": false},
-	}
-	client2.AdvanceTo(uiStateInbox)
+	retainedClick(client1, uiStateOutbox, client1.outboxUI, false)
+	retainedClick(client2, uiStateInbox, client2.inboxUI, false)
 
-	if msg.retained {
-		t.Fatalf("Retain flag not cleared")
+	retainedCheck(false, "Retained flag not cleared")
+
+	client1.testTimerChan <- baseTime
+	client1.AdvanceTo(uiStateTimerComplete)
+	if n := len(client1.outbox); n != 1 {
+		t.Fatalf("Message was deleted while in grace period")
 	}
 
 	client2.testTimerChan <- baseTime
 	client2.AdvanceTo(uiStateTimerComplete)
-
 	if n := len(client2.inbox); n != 1 {
 		t.Fatalf("Message was deleted while in grace period")
 	}
 
-	client2.nowFunc = func() time.Time {
-		return baseTime.Add(messageLifetime + messageGraceTime + 20*time.Second)
+	bumpTime(client1, messageLifetime+messageGraceTime+20*time.Second)
+	if n := len(client1.outbox); n != 1 {
+		t.Fatalf("Message deleted while selected")
 	}
-
-	client2.testTimerChan <- baseTime
-	client2.AdvanceTo(uiStateTimerComplete)
-
+	bumpTime(client2, messageLifetime+messageGraceTime+20*time.Second)
 	if n := len(client2.inbox); n != 1 {
 		t.Fatalf("Message deleted while selected")
 	}
 
-	client2.gui.events <- Click{
-		name: "compose",
+	elsewhere := func(client *TestClient) {
+		client.gui.events <- Click{
+			name: "compose",
+		}
+		client.AdvanceTo(uiStateCompose)
+
+		client.testTimerChan <- baseTime
+		client.AdvanceTo(uiStateTimerComplete)
 	}
-	client2.AdvanceTo(uiStateCompose)
 
-	client2.testTimerChan <- baseTime
-	client2.AdvanceTo(uiStateTimerComplete)
+	elsewhere(client1)
+	elsewhere(client2)
 
+	if n := len(client1.outbox); n != 0 {
+		t.Fatalf("Message not deleted")
+	}
 	if n := len(client2.inbox); n != 0 {
 		t.Fatalf("Message not deleted")
 	}
