@@ -1629,8 +1629,7 @@ Handle:
 			// does. See guiClient.processTimer.
 		} else if msg, ok := c.currentObj.(*queuedMessage); ok {
 			msg.retained = false
-			// We might want an exposureTime for outbox messages
-			// msg.exposureTime = c.Now()
+			msg.exposureTime = c.Now()
 		} else {
 			c.Printf("%s Select inbox or outbox message first\n", termWarnPrefix)
 			return

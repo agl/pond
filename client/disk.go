@@ -188,11 +188,12 @@ func (c *client) unmarshal(state *disk.State) error {
 
 	for _, m := range state.Outbox {
 		msg := &queuedMessage{
-			id:       *m.Id,
-			to:       *m.To,
-			server:   *m.Server,
-			created:  time.Unix(*m.Created, 0),
-			retained: m.GetRetained(),
+			id:           *m.Id,
+			to:           *m.To,
+			server:       *m.Server,
+			created:      time.Unix(*m.Created, 0),
+			retained:     m.GetRetained(),
+			exposureTime: now,
 		}
 		c.registerId(msg.id)
 		if len(m.Message) > 0 {

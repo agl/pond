@@ -173,7 +173,7 @@ RestartInboxIteration:
 RestartOutboxIteration:
 	for {
 		for _, msg := range c.outbox {
-			if msg.id != currentMsgId && !msg.retained && now.Sub(msg.created) > messageLifetime {
+			if msg.id != currentMsgId && !msg.retained && now.Sub(msg.created) > messageLifetime && now.Sub(msg.exposureTime) > messageGraceTime {
 				if msg.revocation || len(msg.message.Body) > 0 {
 					c.outboxUI.Remove(msg.id)
 				}
@@ -1808,9 +1808,9 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			return nil
 		case click.name == "retain":
 			msg.retained = click.checks["retain"]
-			// if !msg.retained {
-			//	msg.exposureTime = c.Now()
-			// }
+			if !msg.retained {
+				msg.exposureTime = c.Now()
+			}
 			c.save()
 			// no c.updateInboxBackgroundColor(msg) so only needed for testing
 			c.gui.Actions() <- UIState{uiStateOutbox}
