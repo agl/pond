@@ -43,6 +43,7 @@ var cliCommands = []cliCommand{
 	{"download", downloadCommand{}, "Download a numbered detachment to disk", contextInbox},
 	{"drafts", showDraftsSummaryCommand{}, "Show drafts", 0},
 	{"edit", editCommand{}, "Edit the draft message", contextDraft},
+	{"entomb", entombCommand{}, "Entomb a statefile", 0},
 	{"help", helpCommand{}, "List known commands", 0},
 	{"identity", showIdentityCommand{}, "Show identity", 0},
 	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", 0},
@@ -72,6 +73,7 @@ type closeCommand struct{}
 type composeCommand struct{}
 type deleteCommand struct{}
 type editCommand struct{}
+type entombCommand struct{}
 type logCommand struct{}
 type quitCommand struct{}
 type replyCommand struct{}

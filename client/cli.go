@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"strconv"
 	"sync"
 	"syscall"
@@ -411,6 +413,55 @@ func (c *cliClient) createAccountUI(stateFile *disk.StateFile, pw string) (bool,
 	defaultServer := msgDefaultServer
 	if c.dev {
 		defaultServer = msgDefaultDevServer
+	}
+
+	PromptLoop:
+	for {
+		c.term.SetPrompt("Import an entombed statefile? (y/n)> ")
+		line, err := c.term.ReadLine()
+		if err != nil {
+			return false, err
+		}
+		switch line {
+		case "n", "no", "No":
+			break PromptLoop
+		case "y", "yes", "Yes":
+			var f *os.File
+			var tombPath string
+			var tombKey string
+
+			c.term.SetPrompt("Path to entombed statefile> ")
+			tombPath, err = c.term.ReadLine()
+			if err != nil {
+			        panic(err)
+			}
+			if tombPath[:2] == "~/" {
+				usr, _ := user.Current()
+				dir := usr.HomeDir
+				tombPath = strings.Replace(tombPath, "~", dir, 1)
+			}
+
+			f, err := os.OpenFile(tombPath, os.O_RDONLY, 0)
+			if err != nil {
+				c.Printf("Unable to open %s - Please try again.\n", tombPath)
+				continue;
+			}
+			f.Close()
+
+			c.term.SetPrompt("Key for entombed statefile> ")
+			tombKey, err = c.term.ReadLine()
+
+			if err := c.importTombFile(stateFile, tombKey, tombPath); err == nil {
+				err = c.loadState(stateFile, pw)
+			}
+			if err != nil {
+				c.Printf("Unable to import %s \n", tombPath)
+				continue
+			}
+
+			c.lastErasureStorageTime = time.Now()
+			return true, nil
+		}
 	}
 
 	c.Printf("%s %s\n", termInfoPrefix, msgCreateAccount)
@@ -1232,6 +1283,53 @@ Handle:
 		case c.fetchNowChan <- nil:
 		default:
 		}
+
+	case entombCommand:
+		var f *os.File
+		var err error
+		var tombPath string
+			
+		// Get the tombfile
+		for {
+			c.term.SetPrompt("Path to output statefile> ")
+			tombPath, err = c.term.ReadLine()
+			if err != nil {
+				panic(err)
+			}
+			if tombPath[:2] == "~/" {
+				usr, _ := user.Current()
+				dir := usr.HomeDir
+				tombPath = strings.Replace(tombPath, "~", dir, 1)
+			}
+
+			f, err = os.OpenFile(tombPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0400)
+			if err == nil {
+				break
+			}
+			c.Printf("Unable to write to %s - Please try again.\n", tombPath)
+		}
+
+		//Log thingie..
+		var logText string
+		log := func(msg string, args ...interface{}) {
+			logText += fmt.Sprintf(msg, args...)
+		}
+
+		//Do the thing
+		_, ok := c.entomb(tombPath, f, log)
+		if ok {
+			log("\nThe process has completed successfully.\n")
+		} else {
+			log("\nThe process failed! Your statefile is still intact. Please restart when ready.")
+		}
+
+		//Show the message
+		c.Printf("%s\n", logText)
+
+		c.ShutdownAndSuspend()
+		c.Printf("Goodbye!\n")
+		shouldQuit = true
+		return
 
 	case closeCommand:
 		c.setCurrentObject(nil)
