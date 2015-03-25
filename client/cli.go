@@ -2078,12 +2078,16 @@ func (c *cliClient) showContact(contact *Contact) {
 		rows: []cliRow{
 			cliRow{cols: []string{"Name", terminalEscape(contact.name, false)}},
 			cliRow{cols: []string{"Server", terminalEscape(contact.theirServer, false)}},
-			cliRow{cols: []string{"Generation", fmt.Sprintf("%d", contact.generation)}},
 			cliRow{cols: []string{"Public key", fmt.Sprintf("%x", contact.theirPub[:])}},
 			cliRow{cols: []string{"Identity key", fmt.Sprintf("%x", contact.theirIdentityPublic[:])}},
-			cliRow{cols: []string{"Client version", fmt.Sprintf("%d", contact.supportedVersion)}},
+			cliRow{cols: []string{"Generation", fmt.Sprintf("%d", contact.generation)}},
 		},
 	}
+
+	if contact.supportedVersion > 0 {
+		table.rows = append(table.rows,
+			cliRow{cols: []string{"Client version", fmt.Sprintf("%d", contact.supportedVersion)}} )
+	} // contact.supportedVersion == 0 means never recieved any messages
 
 	if contact.introducedBy != 0 {
 		cnt, ok := c.contacts[contact.introducedBy]

@@ -2131,15 +2131,17 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		{"SERVER", contact.theirServer},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+		{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
 	}
 	if !allBytesZero(contact.theirLastDHPublic[:]) {
 		entries = append(entries,
 			nvEntry{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
 			nvEntry{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])})
 	}
-	entries = append(entries,
-		nvEntry{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
-		nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)})
+	if contact.supportedVersion > 0 {
+		entries = append(entries,
+			nvEntry{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)})
+	} // contact.supportedVersion == 0 means never recieved any messages
 	rowName := 0
 
 	var pandaMessage string
