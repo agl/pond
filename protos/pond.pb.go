@@ -768,8 +768,10 @@ type KeyExchange struct {
 	// A bbssig.PrivateKey to authorise message delivery.
 	GroupKey []byte `protobuf:"bytes,6,req,name=group_key" json:"group_key,omitempty"`
 	// The generation number of |group|.
-	Generation       *uint32 `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+	Generation *uint32 `protobuf:"varint,7,req,name=generation" json:"generation,omitempty"`
+	// Protocol version number.  Absence means V1.
+	SupportedVersion *int32 `protobuf:"varint,9,opt,name=supported_version" json:"supported_version,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
 }
 
 func (m *KeyExchange) Reset()         { *m = KeyExchange{} }
@@ -828,6 +830,13 @@ func (m *KeyExchange) GetGroupKey() []byte {
 func (m *KeyExchange) GetGeneration() uint32 {
 	if m != nil && m.Generation != nil {
 		return *m.Generation
+	}
+	return 0
+}
+
+func (m *KeyExchange) GetSupportedVersion() int32 {
+	if m != nil && m.SupportedVersion != nil {
+		return *m.SupportedVersion
 	}
 	return 0
 }
