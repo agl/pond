@@ -1898,8 +1898,8 @@ func (c *guiClient) identityUI() interface{} {
 	entries := nameValuesLHS([]nvEntry{
 		{"SERVER", c.server},
 		{"FINGERPRINT", fmt.Sprintf("%x", c.fingerprint())},
-		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", c.pub[:])},
+		{"IDENTITY KEY", fmt.Sprintf("%x", c.identityPublic[:])},
 		{"STATE FILE", c.stateFilename},
 		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
 	})
@@ -2069,8 +2069,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		{"NAME", ""},
 		{"SERVER", contact.theirServer},
 		{"FINGERPRINT", fmt.Sprintf("%x", contact.fingerprint())},
-		{"PUBLIC IDENTITY KEY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+		{"IDENTITY KEY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 	}
 	if !allBytesZero(contact.theirLastDHPublic[:]) {
 		entries = append(entries,
