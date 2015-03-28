@@ -77,6 +77,7 @@ import (
 	"time"
 
 	"github.com/agl/ed25519"
+	"github.com/agl/ed25519/extra25519"
 	"github.com/agl/pond/bbssig"
 	"github.com/agl/pond/client/disk"
 	"github.com/agl/pond/client/ratchet"
@@ -1057,10 +1058,18 @@ func (c *client) registerId(id uint64) {
 func (c *client) newRatchet(contact *Contact) *ratchet.Ratchet {
 	// contact.ratchetVersion(disableV2Ratchet) == 2
 	r := ratchet.New(c.rand)
-	r.MyIdentityPrivate = &c.identity
 	r.MySigningPublic = &c.pub
-	r.TheirIdentityPublic = &contact.theirIdentityPublic
 	r.TheirSigningPublic = &contact.theirPub
+	switch contact.ratchetVersion(c.disableV2Ratchet) {
+	case 1:
+		r.MyIdentityPrivate = &c.identity
+		r.TheirIdentityPublic = &contact.theirIdentityPublic
+	case 2:
+		r.MyIdentityPrivate = new([32]byte)
+		extra25519.PrivateKeyToCurve25519(r.MyIdentityPrivate, &c.priv)
+		r.TheirIdentityPublic = new([32]byte)
+		extra25519.PublicKeyToCurve25519(r.TheirIdentityPublic, &contact.theirPub)
+	}
 	return r
 }
 
