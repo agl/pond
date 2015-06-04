@@ -1,0 +1,88 @@
+\begin{frame}
+	\frametitle{Pond}
+
+	\begin{itemize}
+	\setlength\itemsep{1em}
+	\item	Forward-secure asynchronous messaging (not email!)
+	\item	Communicate with authorized users (no spam!)
+		\begin{itemize}
+		\item	authorization done using PANDA key exchange
+		\end{itemize}
+	\item	Attempt to resist network traffic observation
+		\begin{itemize}
+		\item	connections made at random intervals\\
+			(dummy or real send/fetch)
+		\item	messages padded to a fixed length
+		\end{itemize}
+	\item	More details see \\
+		{\color{blue}{\url{https://pond.imperialviolet.org/}}}
+	\end{itemize}
+
+\end{frame}
+
+\begin{frame}
+	\frametitle{How Pond Works}
+
+	\begin{itemize}
+%	\item	Pond consists of users and servers
+%	\vspace{2mm}
+	\item	Servers
+		\begin{itemize}
+		\item	work as a ``cut-out''
+			\begin{itemize}
+			\item	never make connections
+			\item	no one controls servers
+			\end{itemize}
+		\item	provide availability
+			\begin{itemize}
+			\item	users need not to be online simultaneously
+			\end{itemize}
+		\end{itemize}
+
+	\pause
+	\item	Users:
+		\begin{itemize}
+		\item	have 3 types of connection
+			\begin{itemize}
+			\item	key exchange: PANDA server (over Tor)
+			\item	send/receive message: Tor server
+			\item	large file transfer: Tor server
+			\end{itemize}
+		\item	communicate only with servers
+			\begin{itemize}
+			\item	own server to receive messages or upload files
+			\item	recipient's server to send messages
+			\item	sender's server to download files
+			\end{itemize}
+		\item	make connections periodically
+			\begin{itemize}
+			\item	time between each connection is exponentially distributed
+			\end{itemize}
+		\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Messages}
+
+	\begin{itemize}
+	\setlength\itemsep{0.5em}
+	\item	Stored on server until they are fetched
+	\item	Auto-erased from users' side after a fixed amount of time (currently 1 week)
+	\item	Padded to a fixed size
+	\item	Attachment also allowed
+		\begin{itemize}
+		\item	small: included in a message
+		\item	large: sent many small pieces or uploaded to server
+		\end{itemize}
+	\item	Encouraged to be acknowledged
+		\begin{itemize}
+		\item	reply to a message
+		\item	send an acknowledgment
+		\end{itemize}
+	\item	Server does not learn who the sender is
+	\end{itemize}
+\end{frame}
+
+
+

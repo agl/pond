@@ -1,0 +1,46 @@
+\begin{frame}
+	\frametitle{BBS Group Signature}
+
+	\begin{itemize}
+	\setlength\itemsep{1em}
+	\item	Messages signed by a member in a group
+		\begin{itemize}
+		\item	Group$_i$: people authorized to send to $i$
+		\end{itemize}
+	\item	Server cannot learn which member of the group signed
+	\item	Revocation:
+		\begin{itemize}
+		\item	all previous signatures become invalid
+		\item	each member has to update their private keys
+		\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{BBS Group Signature: computational cost}
+
+	\begin{itemize}
+	\setlength\itemsep{1em}
+	\item	Precomputation:
+		\begin{itemize}
+		\item	3 pairings (cached by both signers and verifiers)
+		\item	1 pairing\phantom{s}  (cached by signers)
+		\end{itemize}
+	\item	Sign:
+		\begin{itemize}
+		\item	8 (multi-) exponentiations ($7$ in $G_1$, $1$ in $G_T$)
+		\item	0 pairing
+		\end{itemize}
+	\item	Verify:
+		\begin{itemize}
+		\item	6 multi-exponentiations ($4$ in $G_1$, $1$ in $G_2$, $1$ in $G_T$)
+		\item	1 pairing
+		\end{itemize}
+	\end{itemize}
+
+	Note: pairing $e: G_1 \times G_2 \rightarrow G_T$\\
+	\vspace{1em}
+	\pause
+	Comment: This is not (yet) how Pond is implemented.
+
+\end{frame}

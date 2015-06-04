@@ -1,0 +1,23 @@
+\begin{frame}
+	\frametitle{Crypto Components}
+
+	\begin{itemize}
+	\setlength\itemsep{0.5em}
+	\item	TOR
+	\item	TLS (for PANDA key exchange)
+	\item	Curve25519, Ed25519, Salsa20, Poly1305,\\ HMAC-SHA256, Rijndael (with 256-bit block)
+	\item	BBS: group signature
+	\item	DH ratchet: encryption \\
+		{\footnotesize\color{blue}{\url{https://github.com/trevp/axolotl/wiki}}}
+		{\footnotesize\color{blue}{\url{https://github.com/agl/pond/blob/master/client/ratchet/}}}
+		\begin{itemize}
+		\item	forward secure through symmetric-key updating
+		\item	future secure through DH ratchet key updating
+		\end{itemize}
+	\item	All assumed to be good
+	\item	Implemented in GO by Adam Langley
+	\end{itemize}
+\end{frame}
+
+
+
