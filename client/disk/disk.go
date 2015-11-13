@@ -419,7 +419,7 @@ func (sf *StateFile) StartWriter(states chan NewState, done chan struct{}) {
 		if sf.lockFd != nil {
 			// Duplicate the new file descriptor over the old one.
 			// This will unlock the old inode.
-			if err := syscall.Dup2(newFd, *sf.lockFd); err != nil {
+			if err := syscall.Dup3(newFd, *sf.lockFd, 0); err != nil {
 				panic(err)
 			}
 			syscall.Close(newFd)
