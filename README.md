@@ -1,11 +1,7 @@
 Pond
 ====
 
-(Or, how to better organise a discreet relationship with the Director of the CIA.)
-
-At this point, I welcome technical feedback on the design and comments from the sort of (often non-technical) folks who need this sort of thing about whether it actually meets their needs.
-
-For details, see [the main website](https://pond.imperialviolet.org).
+*Pond is in stasis*, and has been for several years. I hope that some of the ideas prove useful in the future, but people should use something [better polished and reviewed](https://whispersystems.org). I've no plans to shutdown down the default server, but **new users should look elsewhere**.
 
 The code here is broken down as follows:
 
