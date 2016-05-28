@@ -226,6 +226,8 @@ message KeyExchange {
 	required bytes group_key = 6;
 	// The generation number of |group|.
 	required uint32 generation = 7;
+	// Protocol version number.  Absence means V1.
+	optional int32 supported_version = 9;
 }
 
 // A SignedKeyExchange is a message that's sent between clients and exposed in

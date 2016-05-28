@@ -1897,8 +1897,9 @@ func nameValuesLHS(entries []nvEntry) Grid {
 func (c *guiClient) identityUI() interface{} {
 	entries := nameValuesLHS([]nvEntry{
 		{"SERVER", c.server},
-		{"PUBLIC IDENTITY", fmt.Sprintf("%x", c.identityPublic[:])},
+		{"FINGERPRINT", fmt.Sprintf("%x", c.fingerprint())},
 		{"PUBLIC KEY", fmt.Sprintf("%x", c.pub[:])},
+		{"IDENTITY KEY", fmt.Sprintf("%x", c.identityPublic[:])},
 		{"STATE FILE", c.stateFilename},
 		{"GROUP GENERATION", fmt.Sprintf("%d", c.generation)},
 	})
@@ -2067,8 +2068,9 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	entries := []nvEntry{
 		{"NAME", ""},
 		{"SERVER", contact.theirServer},
-		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+		{"FINGERPRINT", fmt.Sprintf("%x", contact.fingerprint())},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+		{"IDENTITY KEY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 	}
 	if !allBytesZero(contact.theirLastDHPublic[:]) {
 		entries = append(entries,

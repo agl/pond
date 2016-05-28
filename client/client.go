@@ -477,6 +477,17 @@ type Contact struct {
 	cliId cliId
 }
 
+func (contact *Contact) fingerprint() []byte {
+	if contact.isPending {
+		return []byte{}
+	}
+	return fingerprint(contact.theirPub[:])
+}
+
+func (c *client) fingerprint() []byte {
+	return fingerprint(c.pub[:])
+}
+
 // Event represents a log entry. This does not apply to the global log, which
 // is quite chatty, but rather to significant events related to a given
 // contact. These events are surfaced in the UI and recorded in the statefile.
@@ -802,11 +813,8 @@ func (c *client) loadUI() error {
 		copy(c.priv[:], priv[:])
 		copy(c.pub[:], pub[:])
 
-		if c.disableV2Ratchet {
-			c.randBytes(c.identity[:])
-		} else {
-			extra25519.PrivateKeyToCurve25519(&c.identity, priv)
-		}
+		// Avoid tying identity to pub to keep pub from being a selector
+		c.randBytes(c.identity[:])
 		curve25519.ScalarBaseMult(&c.identityPublic, &c.identity)
 
 		c.groupPriv, err = bbssig.GenerateGroup(rand.Reader)
@@ -907,6 +915,17 @@ func (contact *Contact) indicator() Indicator {
 	return indicatorNone
 }
 
+func (contact *Contact) ratchetVersion(disableV2Ratchet bool) int32 {
+	if disableV2Ratchet || contact.supportedVersion < 1 {
+		return 1
+	}
+	if protoVersion <= contact.supportedVersion {
+		return protoVersion
+	} else {
+		return contact.supportedVersion
+	}
+}
+
 func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOldClient, disableV2Ratchet bool) error {
 	var kxs pond.SignedKeyExchange
 	if err := proto.Unmarshal(kxsBytes, &kxs); err != nil {
@@ -951,6 +970,11 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOld
 	}
 	copy(contact.theirIdentityPublic[:], kx.IdentityPublic)
 
+	// Contact might be using the v2 ratchet if kx.SupportedVersion exists
+	if kx.SupportedVersion != nil {
+		contact.supportedVersion = *kx.SupportedVersion
+	}
+
 	if simulateOldClient {
 		kx.Dh1 = nil
 	}
@@ -966,12 +990,9 @@ func (contact *Contact) processKeyExchange(kxsBytes []byte, testing, simulateOld
 		copy(contact.theirCurrentDHPublic[:], kx.Dh)
 		contact.ratchet = nil
 	} else {
-		// If the identity and ed25519 public keys are the same (modulo
-		// isomorphism) then the contact is using the v2 ratchet.
-		var ed25519Public, curve25519Public [32]byte
-		copy(ed25519Public[:], kx.PublicKey)
-		extra25519.PublicKeyToCurve25519(&curve25519Public, &ed25519Public)
-		v2 := !disableV2Ratchet && bytes.Equal(curve25519Public[:], kx.IdentityPublic[:])
+		// Just leave contact.supportedVersion=0 if not specified, but maybe
+		// worth setting supportedVersion=1 if we've thought about it more.
+		v2 := (contact.ratchetVersion(disableV2Ratchet) == 2)
 		if err := contact.ratchet.CompleteKeyExchange(&kx, v2); err != nil {
 			return err
 		}
@@ -1035,11 +1056,20 @@ func (c *client) registerId(id uint64) {
 }
 
 func (c *client) newRatchet(contact *Contact) *ratchet.Ratchet {
+	// contact.ratchetVersion(disableV2Ratchet) == 2
 	r := ratchet.New(c.rand)
-	r.MyIdentityPrivate = &c.identity
 	r.MySigningPublic = &c.pub
-	r.TheirIdentityPublic = &contact.theirIdentityPublic
 	r.TheirSigningPublic = &contact.theirPub
+	switch contact.ratchetVersion(c.disableV2Ratchet) {
+	case 1:
+		r.MyIdentityPrivate = &c.identity
+		r.TheirIdentityPublic = &contact.theirIdentityPublic
+	case 2:
+		r.MyIdentityPrivate = new([32]byte)
+		extra25519.PrivateKeyToCurve25519(r.MyIdentityPrivate, &c.priv)
+		r.TheirIdentityPublic = new([32]byte)
+		extra25519.PublicKeyToCurve25519(r.TheirIdentityPublic, &contact.theirPub)
+	}
 	return r
 }
 

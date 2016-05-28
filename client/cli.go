@@ -808,10 +808,11 @@ func (c *cliClient) showIdentity() {
 		heading:      "Identity",
 		rows: []cliRow{
 			cliRow{cols: []string{"Server", terminalEscape(c.server, false)}},
-			cliRow{cols: []string{"Public identity", fmt.Sprintf("%x", c.identityPublic[:])}},
+			cliRow{cols: []string{"Fingerprint", fmt.Sprintf("%d", c.fingerprint())}},
 			cliRow{cols: []string{"Public key", fmt.Sprintf("%x", c.pub[:])}},
+			cliRow{cols: []string{"Identity key", fmt.Sprintf("%x", c.identityPublic[:])}},
+			cliRow{cols: []string{"Generation", fmt.Sprintf("%d", c.generation)}},
 			cliRow{cols: []string{"State file", terminalEscape(c.stateFilename, false)}},
-			cliRow{cols: []string{"Group generation", fmt.Sprintf("%d", c.generation)}},
 		},
 	}
 	table.WriteTo(c.term)
@@ -1870,9 +1871,10 @@ func (c *cliClient) showContact(contact *Contact) {
 		rows: []cliRow{
 			cliRow{cols: []string{"Name", terminalEscape(contact.name, false)}},
 			cliRow{cols: []string{"Server", terminalEscape(contact.theirServer, false)}},
-			cliRow{cols: []string{"Generation", fmt.Sprintf("%d", contact.generation)}},
-			cliRow{cols: []string{"Public key", fmt.Sprintf("%x", contact.theirPub[:])}},
+			cliRow{cols: []string{"Fingerprint", fmt.Sprintf("%d", contact.fingerprint())}},
 			cliRow{cols: []string{"Identity key", fmt.Sprintf("%x", contact.theirIdentityPublic[:])}},
+			cliRow{cols: []string{"Public key", fmt.Sprintf("%x", contact.theirPub[:])}},
+			cliRow{cols: []string{"Generation", fmt.Sprintf("%d", contact.generation)}},
 			cliRow{cols: []string{"Client version", fmt.Sprintf("%d", contact.supportedVersion)}},
 		},
 	}
