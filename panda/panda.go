@@ -24,6 +24,8 @@ import (
 	panda_proto "github.com/agl/pond/panda/proto"
 )
 
+//go:generate protoc --proto_path=$GOPATH/src:. --gogo_out=. proto/core.proto
+
 const (
 	generatedSecretStringPrefix = "r!"
 	// generatedSecretStringPrefix2 is used to indicate that scrypt should

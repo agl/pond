@@ -2,6 +2,8 @@ package protos
 
 import "golang.org/x/crypto/nacl/secretbox"
 
+//go:generate protoc --proto_path=$GOPATH/src:. --gogo_out=. pond.proto
+
 // TransportSize is the number of bytes that all payloads are padded to before
 // sending on the network.
 const TransportSize = 16384 - 2 - secretbox.Overhead

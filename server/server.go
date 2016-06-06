@@ -24,6 +24,8 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+//go:generate protoc --proto_path=$GOPATH/src:. --gogo_out=. protos/server.proto
+
 const (
 	// maxQueue is the maximum number of messages that we'll queue for any
 	// given user.

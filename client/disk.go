@@ -11,6 +11,14 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+//go:generate protoc --proto_path=$GOPATH/src:. --gogo_out=. disk/client.proto
+
+// We use gogoprotobuf from https://code.google.com/p/gogoprotobuf/ because
+// Francesc @Campoy indicated that even Google uses it over goprotobuf.
+// See 29d5f5d16f523b0a113e786143fc4dacc8affa97 for goprotobuf scripts like :
+// protoc --proto_path=$GOPATH/src:. --go_out=. disk/client.proto
+// perl -p -i~ -e 's/(import protos \"github.com\/agl\/pond\/protos)\/pond.pb\"/$1\"/' disk/client.pb.go
+
 // erasureRotationTime is the amount of time that we'll use a single erasure
 // storage value before rotating.
 const erasureRotationTime = 24 * time.Hour
