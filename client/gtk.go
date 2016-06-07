@@ -580,6 +580,9 @@ func (ui *GTKUI) handle(action interface{}) {
 	case Sensitive:
 		widget := gtk.GtkWidget{ui.getWidget(action.name).ToNative()}
 		widget.SetSensitive(action.sensitive)
+	case SetChecked:
+		widget := gtk.GtkToggleButton{gtk.GtkButton{gtk.GtkBin{gtk.GtkContainer{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}}}}
+		widget.SetActive(action.checked)
 	case StartSpinner:
 		widget := gtk.GtkSpinner{gtk.GtkWidget{ui.getWidget(action.name).ToNative()}}
 		widget.Start()

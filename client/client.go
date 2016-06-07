@@ -356,6 +356,28 @@ NextChar:
 	return
 }
 
+func (c *client) cliIdToContact(id cliId) *Contact {
+	for _, contact := range c.contacts {
+		if contact.cliId == id {
+			return contact
+		}
+	}
+	return nil
+}
+
+func hexDecodeSafe(dst []byte, src string) bool {
+	l := len(dst) // amazingly this actually works if you call using [:]
+	if hex.DecodedLen(len(src)) != l {
+		return false
+	}
+	s := []byte(src)
+	n, err := hex.Decode(dst, s)
+	if err != nil || n != l {
+		return false
+	}
+	return true
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -474,6 +496,10 @@ type Contact struct {
 	// New ratchet support.
 	ratchet *ratchet.Ratchet
 
+	introducedBy   uint64
+	reintroducedBy []uint64
+	introducedTo   []uint64
+
 	cliId cliId
 }
 
@@ -544,7 +570,8 @@ type pendingDetachment struct {
 type Draft struct {
 	id          uint64
 	created     time.Time
-	to          uint64
+	toNormal    []uint64
+	toIntroduce []uint64
 	body        string
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
@@ -581,7 +608,7 @@ func prettyNumber(n uint64) string {
 
 // usageString returns a description of the amount of space taken up by a body
 // with the given contents and a bool indicating overflow.
-func (draft *Draft) usageString() (string, bool) {
+func (c *client) usageString(draft *Draft) (string, bool) {
 	var replyToId *uint64
 	if draft.inReplyTo != 0 {
 		replyToId = proto.Uint64(1)
@@ -604,8 +631,23 @@ func (draft *Draft) usageString() (string, bool) {
 	if err != nil {
 		panic("error while serialising candidate Message: " + err.Error())
 	}
+	l := uint64(len(serialized))
 
-	s := fmt.Sprintf("%s of %s bytes", prettyNumber(uint64(len(serialized))), prettyNumber(pond.MaxSerializedMessage))
+	// We estimate the size by the larges introduction message size
+	if len(draft.toIntroduce) > 0 && len(draft.toIntroduce)+len(draft.toNormal) > 1 {
+		urlsIntroduce, urlsNormal := c.introducePandaMessages(
+			c.contactListFromIdSet(draft.toIntroduce),
+			c.contactListFromIdSet(draft.toNormal), false)
+		var m int = 0
+		for _, s := range append(urlsIntroduce, urlsNormal...) {
+			if len(s) > m {
+				m = len(s)
+			}
+		}
+		l += uint64(len(introducePandaMessageDesc) + m)
+	}
+
+	s := fmt.Sprintf("%s of %s bytes", prettyNumber(l), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
@@ -653,7 +695,7 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	draft := &Draft{
 		id:          msg.id,
 		created:     msg.created,
-		to:          msg.to,
+		toNormal:    []uint64{msg.to},
 		body:        string(msg.message.Body),
 		attachments: msg.message.Files,
 		detachments: msg.message.DetachedFiles,
@@ -1086,7 +1128,6 @@ func (c *client) contactByName(name string) (*Contact, bool) {
 			return contact, true
 		}
 	}
-
 	return nil, false
 }
 
@@ -1189,10 +1230,10 @@ func (c *client) deleteContact(contact *Contact) {
 	c.inbox = newInbox
 
 	for _, draft := range c.drafts {
-		if draft.to == contact.id {
-			draft.to = 0
-		}
+		removeIdSet(&draft.toNormal, contact.id)
+		removeIdSet(&draft.toIntroduce, contact.id)
 	}
+	c.deleteSocialGraphRecords(contact.id)
 
 	c.queueMutex.Lock()
 	var newQueue []*queuedMessage
@@ -1288,6 +1329,31 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, 
 		err:    err,
 		result: result,
 	}
+}
+
+// Launches a runPANDA goroutine based upon a panda.SharedSecret and a
+// preliminary contact struct.
+func (c *client) beginPandaKeyExchange(contact *Contact, secret panda.SharedSecret) {
+	if _, ok := c.contactByName(contact.name); ok {
+		c.log.Printf("A contact by the name %s already exists, this is an internal error.", contact.name)
+		return
+	}
+
+	mp := c.newMeetingPlace()
+
+	c.contacts[contact.id] = contact
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 }
 
 // processPANDAUpdate runs on the main client goroutine and handles messages

@@ -676,8 +676,12 @@ func composeMessage(client *TestClient, to string, message string) {
 	client.AdvanceTo(uiStateCompose)
 
 	client.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": to},
+	}
+
+	client.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": to},
 		textViews: map[string]string{"body": message},
 	}
 
@@ -1208,8 +1212,12 @@ func testDetached(t *testing.T, upload bool) {
 	}
 
 	client1.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": "client2"},
+	}
+
+	client1.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": "client2"},
 		textViews: map[string]string{"body": "foo"},
 	}
 
@@ -1632,25 +1640,21 @@ func TestPANDA(t *testing.T) {
 	}()
 	wg.Wait()
 
-	var client2FromClient1 *Contact
-	for _, contact := range client1.contacts {
-		client2FromClient1 = contact
-		break
-	}
+	verifyGenerationSymetric(t, client1, client2, "client1", "client2")
+}
 
-	var client1FromClient2 *Contact
-	for _, contact := range client2.contacts {
-		client1FromClient2 = contact
-		break
+func verifyGeneration(t *testing.T, client1, client2 *TestClient, client2petname string) {
+	client2FromClient1, ok := client1.contactByName(client2petname)
+	if !ok {
+		panic("name not found")
 	}
-
 	if g := client2FromClient1.generation; g != client2.generation {
-		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
+		t.Errorf("Generation mismatch %d vs %d", g, client2.generation)
 	}
-
-	if g := client1FromClient2.generation; g != client1.generation {
-		t.Errorf("Generation mismatch %d vs %d", g, client1.generation)
-	}
+}
+func verifyGenerationSymetric(t *testing.T, client1, client2 *TestClient, client1petname, client2petname string) {
+	verifyGeneration(t, client1, client2, client2petname)
+	verifyGeneration(t, client2, client1, client1petname)
 }
 
 func TestReadingOldStateFiles(t *testing.T) {
@@ -1730,8 +1734,12 @@ func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 	}
 
 	client2.gui.events <- Click{
+		name:   "to-box-add",
+		combos: map[string]string{"to-box-add": "client1"},
+	}
+
+	client2.gui.events <- Click{
 		name:      "send",
-		combos:    map[string]string{"to": "client1"},
 		textViews: map[string]string{"body": "reply message"},
 	}
 	client2.AdvanceTo(uiStateOutbox)
@@ -1741,10 +1749,15 @@ func testReplyACKs(t *testing.T, reloadDraft bool, abortSend bool) {
 		client2.AdvanceTo(uiStateCompose)
 
 		client2.gui.events <- Click{
+			name:   "to-box-add",
+			combos: map[string]string{"to-box-add": "client1"},
+		}
+
+		client2.gui.events <- Click{
 			name:      "send",
-			combos:    map[string]string{"to": "client1"},
 			textViews: map[string]string{"body": "reply message"},
 		}
+
 		client2.AdvanceTo(uiStateOutbox)
 	}
 
@@ -1828,7 +1841,7 @@ func TestSendToPendingContact(t *testing.T) {
 	client.gui.events <- Click{name: "compose"}
 	client.AdvanceTo(uiStateCompose)
 
-	if contacts, ok := client.gui.combos["to"]; !ok || len(contacts) > 0 {
+	if contacts, _ := client.gui.combos["to-box-add"]; len(contacts) > 0 {
 		t.Error("can send message to pending contact")
 	}
 }
@@ -2437,4 +2450,129 @@ func TestContactNameChange(t *testing.T) {
 	if contact, _ := client1.contactByName(newName); contact == nil {
 		t.Errorf("name not updated in client after reload")
 	}
+}
+
+func toBoxName(s string, i uint64) string {
+	return fmt.Sprintf("to-box-%s-%x", s, i)
+}
+func composeMessageStart(client *TestClient) {
+	client.gui.events <- Click{name: "compose"}
+	client.AdvanceTo(uiStateCompose)
+}
+func composeMessageAdd(client *TestClient, toBoth ...string) {
+	for _, to := range toBoth {
+		client.gui.events <- Click{
+			name:   "to-box-add",
+			combos: map[string]string{"to-box-add": to},
+		}
+	}
+}
+func composeMessageIntroduce(client *TestClient, toIntroduce ...string) {
+	for _, to := range toIntroduce {
+		contact, ok := client.contactByName(to)
+		if !ok {
+			panic("name not found")
+		}
+		n := toBoxName("introduce", contact.id)
+		client.gui.events <- Click{
+			name:   n,
+			checks: map[string]bool{n: true},
+		}
+	}
+}
+func composeMessageSendMany(client *TestClient, message string) {
+	client.gui.events <- Click{
+		name:      "send",
+		textViews: map[string]string{"body": message},
+	}
+	// Should be uiStateOutbox once the outbox supports multiple recipients
+	client.AdvanceTo(uiStateMain)
+}
+
+func TestIntroductions(t *testing.T) {
+	if parallel {
+		t.Parallel()
+	}
+
+	server, err := NewTestServer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	clientName := func(i int) string { return fmt.Sprintf("client %d", i) }
+
+	mp := panda.NewSimpleMeetingPlace()
+	newMeetingPlace := func() panda.MeetingPlace {
+		return mp
+	}
+
+	clients := []*TestClient{}
+	for i := 0; i < 4; i++ {
+		client, err := NewTestClient(t, clientName(i), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.newMeetingPlace = newMeetingPlace
+		clients = append(clients, client)
+	}
+	defer func() {
+		for i := 0; i < 4; i++ {
+			clients[i].Close()
+		}
+	}()
+
+	for i := 1; i < 4; i++ {
+		proceedToPairedWithNames(t, clients[0], clients[i],
+			"client 0", clientName(i), server)
+	}
+
+	composeMessageStart(clients[0])
+	composeMessageAdd(clients[0], "client 1", "client 2", "client 3")
+	composeMessageIntroduce(clients[0], "client 1")
+	composeMessageSendMany(clients[0], "test message")
+
+	for i := 1; i < 4; i++ {
+		transmitMessage(clients[0], false)
+	}
+
+	for _, client := range clients[1:] {
+		from, _ := fetchMessage(client)
+		if from != "client 0" {
+			t.Fatalf("message from %s, expected client 0", from)
+		}
+	}
+
+	var wg sync.WaitGroup
+	doGreet := func(client *TestClient, greet uint) {
+		client.gui.events <- Click{
+			name: client.inboxUI.entries[0].boxName,
+		}
+		client.AdvanceTo(uiStateInbox)
+		client.gui.events <- Click{
+			name: fmt.Sprintf("greet-%d", greet),
+		}
+		go func() {
+			client.AdvanceTo(uiStatePANDAComplete)
+			wg.Done()
+		}()
+	}
+
+	wg.Add(2)
+	doGreet(clients[1], 0)
+	// clients[1].ReloadWithMeetingPlace(mp)
+	doGreet(clients[2], 0)
+	wg.Wait()
+
+	verifyGenerationSymetric(t, clients[1], clients[2], "client 1", "client 2")
+
+	wg.Add(2)
+	doGreet(clients[1], 1)
+	// clients[1].ReloadWithMeetingPlace(mp)
+	doGreet(clients[3], 0)
+	wg.Wait()
+
+	verifyGenerationSymetric(t, clients[1], clients[3], "client 1", "client 3")
+
+	// verifyUnpaired(clients[2],clients[3])
 }

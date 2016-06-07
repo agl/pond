@@ -280,4 +280,14 @@ message Message {
 	// supported_version allows a client to advertise the maximum supported
 	// version that it speaks.
 	optional int32 supported_version = 9;
+
+	message Introduction {
+		// optional fixed64 id = 1;
+		optional string name = 2;
+		optional bytes identity = 3;
+		optional string panda_secret = 4;
+		// Switch to HMAC should let us use a "manual" style key exchange
+		// optional kxsBytes
+	}
+	repeated Introduction introductions = 11;
 }
