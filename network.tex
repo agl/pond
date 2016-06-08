@@ -1,0 +1,62 @@
+\begin{frame}
+	\frametitle{Network Diagram\only<12>{: receive}\only<13>{: send}}
+
+$$
+\xymatrix @!0 @C=0.7in @R=0.4in{
+{}\save[]+<-1cm,0cm>*+[F]\txt<4pc>{\uncover<1->{Use Tor at all time}} \restore
+	&
+		&{}\save[]+<-0cm,0.2cm>*\txt<5.8pc>{
+		\uncover<6-7,10-11>{{\small{PANDA}} Server over Tor}}
+		\only<6-7>{\ar@{-}@/_1.5pc/[ddll] \ar@{-}@/^1.5pc/[ddrr]}
+		\only<10-11>{\ar@{-}@/_1.6pc/[ddll] \ar@{-}[dd]}
+		\restore
+\\
+	&{}\save[]+<0cm,0.4cm>*\txt{
+	\uncover<3->{\small{${\color{blue}G_{1\phantom{,}pub}}$}} \uncover<9->{\small{$,{\color{blue}G_{2\phantom{,}pub}}$}} \\
+	\uncover<1->{Server1}} \restore
+	\only<2-12>{\ar@{-}[dl]} \only<9-12>{\ar@{-}[dr]} \only<13->{\ar@{--}[dl]} \only<13->{\ar@{--}[dr]} \only<13->{\ar@{--}[drrr]}
+		&
+			&
+				&{}\save[]+<0cm,0.4cm>*\txt{
+				\uncover<5->{\small{${\color{blue}G_{3\phantom{,}pub}}$}} \\
+				\uncover<4->{Server2}}
+				\restore
+				\only<4-12>{\ar@{-}[d]} \only<13->{\ar@{--}[dllll]}
+\\
+{}\save[]+<0cm,-0.9cm>*\txt{
+\uncover<1->{User1} \\
+\uncover<3->{\small{${\color{red}G_{1\phantom{,}sk[1]}}$}} \uncover<7->{\small{$,{\color{red}G_{3\phantom{,}sk[1]}}$}} \uncover<11->{\small{$,{\color{red}G_{2\phantom{,}sk[1]}}$}}\\
+\uncover<3->{\small{${\color{PineGreen}S_{1\phantom{,}pub}}$}} \uncover<7->{\small{$,{\color{PineGreen}S_{2\phantom{,}pub}}$}} \\
+\uncover<7->{\small{${\color{magenta}U_{3\phantom{,}serv}}$}} \uncover<11->{\small{$,{\color{magenta}U_{2\phantom{,}serv}}$}}
+} \restore
+	&
+		&{}\save[]+<0cm,-0.9cm>*\txt{
+		\uncover<8->{User2} \\
+		\uncover<9->{\small{${\color{red}G_{2\phantom{,}sk[2]}}$}} \uncover<11->{\small{$,{\color{red}G_{1\phantom{,}sk[2]}}$}} \\
+		\uncover<9->{\small{${\color{PineGreen}S_{1\phantom{,}pub}}$}} \\
+		\uncover<11->{\small{${\color{magenta}U_{1\phantom{,}serv}}$}}
+		} \restore
+			&
+				&{}\save[]+<0cm,-0.9cm>*\txt{
+				\uncover<4->{User3} \\
+				\uncover<5->{\small{${\color{red}G_{3\phantom{,}sk[3]}}$}} \uncover<7->{\small{$,{\color{red}G_{1\phantom{,}sk[3]}}$}} \\
+				\uncover<5->{\small{${\color{PineGreen}S_{2\phantom{,}pub}}$}} \uncover<7->{\small{$,{\color{PineGreen}S_{1\phantom{,}pub}}$}} \\
+				\uncover<7->{\small{${\color{magenta}U_{1\phantom{,}serv}}$}}
+				} \restore
+\\
+}
+$$
+
+\vspace{0.5cm}
+
+\footnotesize{
+\begin{align*}
+{\color{blue}G_{i\phantom{,}pub}}	&: \text{Group } i \text{ public key}\\
+{\color{red}G_{i\phantom{,}sk[j]}}	&: \text{Group } i \text{ secret key of member } j\\
+{\color{PineGreen}S_{i\phantom{,}pub}}	&: \text{Server } i \text{ public key}\\
+{\color{magenta}U_{i\phantom{,}serv}}	&: \text{User } i \text{ home server}\\
+\end{align*}
+}
+
+
+\end{frame}

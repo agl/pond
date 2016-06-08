@@ -1,0 +1,128 @@
+\begin{frame}
+	\frametitle{DH Ratchet: keys}
+
+	\begin{itemize}
+	\item	consists of sender and receiver version
+	\item	generated using HMAC-SHA256 from DH key
+	\vspace{5mm}
+	\pause
+	\item	DH-ratchet key: {\color{blue}$(A_i,B_j)$}
+		\begin{itemize}
+		\item	generated unrelatedly from previous key
+		\end{itemize}
+	\item	chain key: {\color{PineGreen}$CK_{(A_i,B_j)}$}
+		\begin{itemize}
+		\item	derived from DH-ratchet key
+		\item	used for forward-secrecy updating
+		\end{itemize}
+	\item	message key: {\color{red}$MK_{(A_i,B_j)}$}
+		\begin{itemize}
+		\item	derived from chain key
+		\item	newly generated per message
+		\end{itemize}
+	\pause
+	\item	header key, next header key
+		\begin{itemize}
+		\item	used to encrypt DH-ratchet key sent to receiver
+		\end{itemize}
+	\end{itemize}
+	
+	
+\end{frame}
+
+
+
+\begin{frame}
+	\frametitle{DH Ratchet: flow}
+
+%\small
+\footnotesize
+$$
+\xymatrix @!0 @C=0.5in @R=0.26in{
+	&{}\save[]+<0cm,0.5cm>*\txt{
+	Alice\\
+	{\color{blue}$(A_0,B_0)$}
+	}
+	\only<2->{\ar[d]}
+	\restore
+		&&&
+					&{}\save[]+<0cm,0.5cm>*\txt{
+					Bob\\
+					{\color{blue}$(A_0,B_0)$}
+					}
+					\only<6->{\ar[d]}
+					\restore
+\\
+	&\uncover<2->{\color{blue}(A_1,B_0)}
+	\only<3->{\ar[dl]}
+	\only<13->{\ar[ddd]}
+		&&&
+					&\uncover<6->{\color{blue}(A_1,B_0)}
+					\only<7->{\ar[dr]}
+					\only<9->{\ar[ddd]}
+\\
+\uncover<3->{\color{PineGreen}CK_{(A_1,B_0)}}
+\only<4->{\ar[d]}
+	&&&&&
+						&\uncover<7->{\color{PineGreen}CK_{(A_1,B_0)}}
+						\only<8->{\ar[d]}
+\\
+\uncover<4->{{\color{red}MK_{(A_1,B_0)}}_{,0}}
+\only<5-7>{\ar@{-->}[rrrrrr]}
+\only<8->{\ar@{->}[rrrrrr]}
+	&&&&&
+						&\uncover<8->{{\color{red}MK_{(A_1,B_0)}}_{,0}}
+\\
+	&\uncover<13->{\color{blue}(A_1,B_1)}
+	\only<14->{\ar[dr]}
+	\only<16->{\ar[ddd]}
+		&&&
+					&\uncover<9->{\color{blue}(A_1,B_1)}
+					\only<10->{\ar[dl]}
+					\only<20->{\ar[ddd]}
+\\
+	&
+		&\uncover<14->{\color{PineGreen}CK_{(A_1,B_1)}}
+		\only<15->{\ar[d]}
+			&
+				&\uncover<10->{\color{PineGreen}CK_{(A_1,B_1)}}
+				\only<11->{\ar[d]}
+\\
+	&
+		&\uncover<15->{{\color{red}MK_{(A_1,B_1)}}_{,0}}
+			&
+				&\uncover<11->{{\color{red}MK_{(A_1,B_1)}}_{,0}}
+				\only<12-14>{\ar@{-->}[ll]}
+				\only<15->{\ar@{->}[ll]}
+\\
+	&\uncover<16->{\color{blue}(A_2,B_1)}
+	\only<17->{\ar[dl]}
+		&&&
+					&\uncover<20->{\color{blue}(A_2,B_1)}
+					\only<21->{\ar[dr]}
+\\
+\uncover<17->{\color{PineGreen}CK_{(A_2,B_1)}}
+\only<18->{\ar[d]}
+	&&&&&
+						&\uncover<21->{\color{PineGreen}CK_{(A_2,B_1)}}
+						\only<22->{\ar[d]}
+\\
+\uncover<18->{{\color{red}MK_{(A_2,B_1)}}_{,0}}
+\only<19-21>{\ar@{-->}[rrrrrr]}
+\only<22->{\ar@{->}[rrrrrr]}
+\only<23->{\ar[d]}
+	&&&&&
+						&\uncover<22->{{\color{red}MK_{(A_2,B_1)}}_{,0}}
+						\only<25->{\ar[d]}
+\\
+\uncover<23->{{\color{red}MK_{(A_2,B_1)}}_{,1}}
+\only<24>{\ar@{-->}[rrrrrr]}
+\only<25->{\ar@{->}[rrrrrr]}
+	&&&&&
+						&\uncover<25->{{\color{red}MK_{(A_2,B_1)}}_{,1}}
+}
+$$
+
+
+\end{frame}
+
