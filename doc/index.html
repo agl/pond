@@ -76,22 +76,17 @@ pond-build</pre>
 
 <p>From time to time you can re-run the <tt>pond-build</tt> command to update to the latest version.</p>
 
-<h5>Fedora 19</h5>
+<h5>Fedora 22</h5>
 
-<p>Fedora's <tt>golang</tt> package appears to be completely broken, so this installs Go from source.</p>
-
-<pre>sudo yum install gtk3-devel gtkspell3-devel gcc trousers-devel git mercurial tor
-sudo systemctl start tor
-cd
-git clone https://github.com/golang/go
-cd go/src
-./all.bash
-cd
-export PATH=$PATH:$HOME/go/bin
-mkdir gopkg
-export GOPATH=$HOME/gopkg
+<pre>sudo dnf install gtk3-devel trousers-devel gtkspell3-devel git mercurial tor golang
+sudo systemctl enable tor.service
+sudo systemctl start tor.service
+echo 'export GOPATH="$HOME/gopkg/"' >> ~/.bashrc
+echo 'alias pond="$GOPATH/bin/client"' >> ~/.bashrc
+. ~/.bashrc
+mkdir -p "$GOPATH"
 go get github.com/agl/pond/client
-$GOPATH/bin/client</pre>
+pond</pre>
 
 <h5>Arch</h5>
 <pre>
