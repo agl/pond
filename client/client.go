@@ -628,6 +628,17 @@ type queuedMessage struct {
 	// identity this message for the duration of the session. It's not
 	// saved to disk.
 	cliId cliId
+	// retained is true if the user has chosen to retain this message -
+	// i.e. to opt it out of the usual, time-based, auto-deletion.
+	retained bool
+	// exposureTime contains the time when the message was last "exposed".
+	// This is used to allow a small period of time for the user to mark a
+	// message as retained (messageGraceTime). For example, if a message is
+	// loaded at startup and has expired then it's a candidate for
+	// deletion, but the exposureTime will be the startup time, which
+	// ensures that we leave it a few minutes before deletion. Setting
+	// retained to false also resets the exposureTime.
+	exposureTime time.Time
 }
 
 func (qm *queuedMessage) indicator(contact *Contact) Indicator {
