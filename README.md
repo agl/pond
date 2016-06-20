@@ -11,6 +11,6 @@ The code here is broken down as follows:
  - `doc` contains the https://pond.imperialviolet.org site in Jekyll format.
  - `editstate` contains a debugging utility for manipulating state files.
  - `panda` contains a library for performing shared-key exchanges. It's used by `client/` to implement that functionality.
- - `protos` contains the protocol buffer files for client to server communication.
+ - `protos` contains the protocol buffer files for client-server communication.
  - `server` contains the Pond server.
- - `transport` contains code to implement the, low-level, client to server transport protocol.
+ - `transport` contains code to implement the low-level client-server transport protocol.
